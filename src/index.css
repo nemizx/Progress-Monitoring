@@ -1,0 +1,118 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Primary palette: Navy Blue, Steel Grey, White, Black */
+    --background: 0 0% 100%; /* White */
+    --foreground: 0 0% 0%; /* Black */
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 0%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 0%;
+    --primary: 210 70% 18%; /* Navy Blue */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 12% 55%; /* Steel Grey */
+    --secondary-foreground: 0 0% 0%;
+    --muted: 210 12% 92%;
+    --muted-foreground: 210 12% 35%;
+    --accent: 210 70% 18%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 210 12% 80%;
+    --input: 210 12% 80%;
+    --ring: 210 70% 18%;
+    --chart-1: 210 70% 18%;
+    --chart-2: 210 12% 55%;
+    --chart-3: 160 60% 45%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+    --radius: 0.625rem;
+    --font-heading: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    --font-display: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+    --sidebar-background: 210 70% 18%; /* Navy */
+    --sidebar-foreground: 0 0% 100%; /* White */
+    --sidebar-primary: 210 12% 55%; /* Steel Grey */
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 70% 14%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 210 12% 22%;
+    --sidebar-ring: 210 70% 18%;
+    --success: 160 60% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 0%;
+  }
+
+  /* Dark theme: Steel Grey -> Navy Blue ; White -> Black */
+  .dark {
+    --background: 0 0% 0%; /* Black */
+    --foreground: 0 0% 100%; /* White */
+    --card: 0 0% 0%;
+    --card-foreground: 0 0% 100%;
+    --popover: 0 0% 0%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 210 70% 18%; /* Navy stays Navy */
+    --primary-foreground: 0 0% 100%;
+    /* Where light used Steel Grey, dark will use Navy Blue */
+    --secondary: 210 70% 18%; /* Navy */
+    --secondary-foreground: 0 0% 100%;
+    --muted: 210 70% 12%;
+    --muted-foreground: 0 0% 100%;
+    --accent: 210 70% 18%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 62% 40%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 210 12% 14%;
+    --input: 210 12% 14%;
+    --ring: 210 70% 18%;
+    --chart-1: 210 70% 18%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 210 70% 18%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+    --sidebar-background: 0 0% 0%; /* Black sidebar in dark */
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 210 70% 18%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 70% 12%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 210 12% 10%;
+    --sidebar-ring: 210 70% 18%;
+    --success: 160 60% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-body;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
