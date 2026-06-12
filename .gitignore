@@ -29,3 +29,9 @@ dist-ssr
 
 .env
 .vite
+
+# Server-specific ignores
+server/node_modules
+server/uploads
+server/.env
+

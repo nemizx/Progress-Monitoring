@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: planedge_db
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_DB: progress_monitoring
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d progress_monitoring"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./server
+    container_name: planedge_backend
+    ports:
+      - '3000:3000'
+    environment:
+      PORT: 3000
+      JWT_SECRET: supersecretplanedgekey123!
+      NODE_ENV: development
+      PGHOST: db
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: password
+      PGDATABASE: progress_monitoring
+      DATABASE_URL: postgres://postgres:password@db:5432/progress_monitoring
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+      - backend_uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "npm run db:setup && npm run dev"
+
+  frontend:
+    build: .
+    container_name: planedge_frontend
+    ports:
+      - '5173:5173'
+    environment:
+      - VITE_BACKEND_URL=http://backend:3000
+      - CHOKIDAR_USEPOLLING=true
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/server
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  backend_uploads:

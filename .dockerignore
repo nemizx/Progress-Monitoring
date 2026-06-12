@@ -1,0 +1,6 @@
+node_modules
+dist
+.git
+.gitignore
+server/node_modules
+server/uploads
