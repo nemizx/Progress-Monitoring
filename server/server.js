@@ -565,11 +565,13 @@ app.put('/api/entities/:entity/:id', authenticateToken, async (req, res) => {
     }
 
     // Dynamic update query builder
+    const hasUpdatedDate = ['users', 'projects'].includes(tableName);
     const setClauses = keys.map((k, i) => `"${k}" = $${i + 2}`).join(', ');
+    const updateClause = hasUpdatedDate ? `${setClauses}, updated_date = CURRENT_TIMESTAMP` : setClauses;
     const values = [id, ...keys.map(k => formatValue(data[k]))];
 
     const result = await db.query(
-      `UPDATE ${tableName} SET ${setClauses}, updated_date = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *`,
+      `UPDATE ${tableName} SET ${updateClause} WHERE id = $1 RETURNING *`,
       values
     );
 
