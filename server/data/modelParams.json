@@ -1,0 +1,55 @@
+{
+  "baseDurations": {
+    "mobilization": 10,
+    "substructure": 22,
+    "superstructure": 16,
+    "envelope": 18,
+    "fitOut": 15,
+    "commissioning": 10,
+    "handover": 7
+  },
+  "multipliers": {
+    "perFloor": 0.03,
+    "perSubproject": 0.06,
+    "siteAccess": {
+      "Easy site access": 1,
+      "Restricted site access": 1.2,
+      "Urban infill / constrained site": 1.15,
+      "N/A": 1
+    },
+    "deliveryStrategy": {
+      "Fast-track delivery": 1.18,
+      "Standard delivery": 1,
+      "Phased delivery": 1.12,
+      "Design & build": 1.08,
+      "N/A": 1
+    },
+    "finishQuality": {
+      "Standard quality": 1,
+      "High-end finishes": 1.15,
+      "Budget economy finishes": 0.95,
+      "N/A": 1
+    },
+    "includeMEP": {
+      "Yes — full MEP": 1.3,
+      "Yes — basic MEP": 1.1,
+      "No": 0.75,
+      "N/A": 1
+    },
+    "handoverType": {
+      "Full commissioning + testing": 1.2,
+      "Standard handover": 1,
+      "Phased handover": 1.12,
+      "No formal handover": 0.9,
+      "N/A": 1
+    }
+  },
+  "trainedCounts": {
+    "total": 0,
+    "floorSum": 0,
+    "subprojectSum": 0,
+    "siteAccess": {},
+    "deliveryStrategy": {},
+    "finishQuality": {}
+  }
+}
