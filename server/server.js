@@ -63,7 +63,10 @@ const tableMap = {
   'Notification': 'notifications',
   'ScheduleTask': 'schedule_tasks',
   'SchedulingRule': 'scheduling_rules',
-  'User': 'users'
+  'User': 'users',
+  'SubProject': 'sub_projects',
+  'ProjectFlat': 'project_flats',
+  'MepBoq': 'mep_boqs'
 };
 
 // --- Helpers for formatting values and DB operations ---
@@ -543,6 +546,17 @@ app.put('/api/entities/:entity/:id', authenticateToken, async (req, res) => {
   }
 
   try {
+    if (entity === 'ProgressEntry') {
+      const existingRes = await db.query('SELECT status, quantity_done FROM progress_entries WHERE id = $1', [id]);
+      if (existingRes.rows.length > 0 && existingRes.rows[0].status === 'approved') {
+        const existing = existingRes.rows[0];
+        const newQty = parseFloat(data.quantity_done);
+        if (newQty < parseFloat(existing.quantity_done)) {
+          return res.status(400).json({ error: 'Cost Control Lock: Approved progress quantity/cost cannot be decreased.' });
+        }
+      }
+    }
+
     // Separate id and strip metadata keys if present
     const keys = Object.keys(data).filter(k => k !== 'id' && k !== 'created_date' && k !== 'created_by_id' && !k.startsWith('_'));
     
@@ -624,6 +638,13 @@ app.delete('/api/entities/:entity/:id', authenticateToken, async (req, res) => {
   }
 
   try {
+    if (entity === 'ProgressEntry') {
+      const existingRes = await db.query('SELECT status FROM progress_entries WHERE id = $1', [id]);
+      if (existingRes.rows.length > 0 && existingRes.rows[0].status === 'approved') {
+        return res.status(400).json({ error: 'Cost Control Lock: Completed/approved work progress cannot be deleted.' });
+      }
+    }
+
     const result = await db.query(`DELETE FROM ${tableName} WHERE id = $1 RETURNING *`, [id]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: `${entity} not found with id: ${id}` });

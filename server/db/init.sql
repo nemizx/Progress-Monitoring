@@ -12,6 +12,9 @@ DROP TABLE IF EXISTS schedule_activities CASCADE;
 DROP TABLE IF EXISTS wbs_items CASCADE;
 DROP TABLE IF EXISTS schedule_tasks CASCADE;
 DROP TABLE IF EXISTS scheduling_rules CASCADE;
+DROP TABLE IF EXISTS project_flats CASCADE;
+DROP TABLE IF EXISTS sub_projects CASCADE;
+DROP TABLE IF EXISTS mep_boqs CASCADE;
 DROP TABLE IF EXISTS projects CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 
@@ -88,7 +91,8 @@ CREATE TABLE schedule_activities (
     assigned_crew VARCHAR(255),
     resources_needed TEXT,
     labor_count INTEGER DEFAULT 0,
-    order_index INTEGER DEFAULT 0
+    order_index INTEGER DEFAULT 0,
+    budget_item_id VARCHAR(50)
 );
 
 -- 5. Budget Items Table
@@ -109,7 +113,9 @@ CREATE TABLE budget_items (
     actual_cost NUMERIC(15, 2) DEFAULT 0,
     forecast_cost NUMERIC(15, 2) DEFAULT 0,
     revision_notes TEXT,
-    revision_number INTEGER DEFAULT 0
+    revision_number INTEGER DEFAULT 0,
+    sub_project VARCHAR(100),
+    rate_per_sqft NUMERIC(12, 2) DEFAULT 0
 );
 
 -- 6. Milestones Table
@@ -274,6 +280,45 @@ CREATE TABLE scheduling_rules (
     created_by VARCHAR(255)
 );
 
+-- 16. Sub-Projects Table
+CREATE TABLE sub_projects (
+    id VARCHAR(50) PRIMARY KEY,
+    project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    built_up_area NUMERIC(15, 2) DEFAULT 0,
+    floors_count INTEGER DEFAULT 1,
+    flats_per_floor INTEGER DEFAULT 0,
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 17. Project Flats Table
+CREATE TABLE project_flats (
+    id VARCHAR(50) PRIMARY KEY,
+    project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+    sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+    floor_number INTEGER NOT NULL,
+    flat_number VARCHAR(50) NOT NULL,
+    area_sqft NUMERIC(12, 2) DEFAULT 0,
+    cost_estimate NUMERIC(15, 2) DEFAULT 0,
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 18. MEP BOQ Table
+CREATE TABLE mep_boqs (
+    id VARCHAR(50) PRIMARY KEY,
+    project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+    budget_head_code VARCHAR(50) NOT NULL,
+    activity_name VARCHAR(255) NOT NULL,
+    scope_type VARCHAR(50) NOT NULL DEFAULT 'flat',
+    unit VARCHAR(50) DEFAULT 'Nos',
+    rate_per_unit NUMERIC(15, 2) DEFAULT 0,
+    quantity_per_scope NUMERIC(12, 2) DEFAULT 1,
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- --- SEED DATA SEEDING ---
 
 -- Seed Users
@@ -329,31 +374,37 @@ INSERT INTO schedule_activities (id, project_id, wbs_item_id, activity_id, name,
 ('act_em_handover', 'prj_emerald', 'wbs_em_sub', 'A1160', 'Client Inspection & Handover', 'Joint site walkthrough with client, snag list resolution, and key handover.', 'handover', '2026-07-26', '2026-08-01', NULL, NULL, 7, 0, 0.00, 'not_started', '["A1150"]', '[]', 'FS', true, true, 'Ganga Project Management', 'O&M manuals, snag lists', 0, 16);
 
 -- Seed Budget Items
+-- The 21 new Budget heads
 INSERT INTO budget_items (id, project_id, wbs_item_id, code, title, level, parent_id, quantity, cost_per_unit, unit, original_budget, revised_budget, committed_cost, actual_cost, forecast_cost, revision_notes, revision_number) VALUES
-('bud_1', 'prj_emerald', NULL, '01-PRE', 'Preliminaries & Site Setup', 1, NULL, NULL, NULL, NULL, 2000000.00, 2000000.00, 1500000.00, 1200000.00, 2000000.00, 'Initial baseline budget.', 0),
-('bud_2', 'prj_emerald', NULL, '02-EXC', 'Excavation & Earthworks', 1, NULL, NULL, NULL, NULL, 3000000.00, 3000000.00, 2800000.00, 2800000.00, 3000000.00, 'Initial baseline budget.', 0),
-('bud_3', 'prj_emerald', NULL, '03-SUB', 'Substructure & Foundation', 1, NULL, NULL, NULL, NULL, 25000000.00, 25000000.00, 24000000.00, 23500000.00, 25000000.00, 'Initial baseline budget.', 0),
-('bud_4', 'prj_emerald', NULL, '04-SUP', 'Superstructure RCC Frame', 1, NULL, NULL, NULL, NULL, 50000000.00, 50000000.00, 45000000.00, 42000000.00, 50000000.00, 'Initial baseline budget.', 0),
-('bud_5', 'prj_emerald', NULL, '05-MAS', 'Masonry & Partition Walls', 1, NULL, NULL, NULL, NULL, 8000000.00, 8000000.00, 0.00, 0.00, 8000000.00, 'Initial baseline budget.', 0),
-('bud_6', 'prj_emerald', NULL, '06-WPF', 'Waterproofing & Insulation', 1, NULL, NULL, NULL, NULL, 4000000.00, 4000000.00, 0.00, 0.00, 4000000.00, 'Initial baseline budget.', 0),
-('bud_7', 'prj_emerald', NULL, '07-PLT', 'Internal Plastering', 1, NULL, NULL, NULL, NULL, 5000000.00, 5000000.00, 0.00, 0.00, 5000000.00, 'Initial baseline budget.', 0),
-('bud_8', 'prj_emerald', NULL, '08-FLR', 'Tiling & Flooring', 1, NULL, NULL, NULL, NULL, 9000000.00, 9000000.00, 0.00, 0.00, 9000000.00, 'Initial baseline budget.', 0),
-('bud_9', 'prj_emerald', NULL, '09-DW', 'Doors, Windows & Glazing', 1, NULL, NULL, NULL, NULL, 15000000.00, 15000000.00, 0.00, 0.00, 15000000.00, 'Initial baseline budget.', 0),
-('bud_10', 'prj_emerald', NULL, '10-ELE', 'Electrical Systems', 1, NULL, NULL, NULL, NULL, 12000000.00, 12000000.00, 0.00, 0.00, 12000000.00, 'Initial baseline budget.', 0),
-('bud_11', 'prj_emerald', NULL, '11-PLU', 'Plumbing & Sanitary', 1, NULL, NULL, NULL, NULL, 8000000.00, 8000000.00, 0.00, 0.00, 8000000.00, 'Initial baseline budget.', 0),
-('bud_12', 'prj_emerald', NULL, '12-MEC', 'HVAC & Ventilation', 1, NULL, NULL, NULL, NULL, 13000000.00, 13000000.00, 0.00, 0.00, 13000000.00, 'Initial baseline budget.', 0),
-('bud_13', 'prj_emerald', NULL, '13-FF', 'Fire Fighting & Alarms', 1, NULL, NULL, NULL, NULL, 6000000.00, 6000000.00, 0.00, 0.00, 6000000.00, 'Initial baseline budget.', 0),
-('bud_14', 'prj_emerald', NULL, '14-PNT', 'Wall Painting & Finishes', 1, NULL, NULL, NULL, NULL, 4000000.00, 4000000.00, 0.00, 0.00, 4000000.00, 'Initial baseline budget.', 0),
-('bud_15', 'prj_emerald', NULL, '15-LND', 'Roadworks & Landscaping', 1, NULL, NULL, NULL, NULL, 7000000.00, 7000000.00, 0.00, 0.00, 7000000.00, 'Initial baseline budget.', 0),
-('bud_16', 'prj_emerald', NULL, '16-MIS', 'Contingencies & Miscellaneous', 1, NULL, NULL, NULL, NULL, 5000000.00, 5000000.00, 0.00, 0.00, 5000000.00, 'Initial baseline budget.', 0),
+('bud_1', 'prj_emerald', NULL, '01-EAR', 'Earth Work', 1, NULL, NULL, NULL, NULL, 3000000.00, 3000000.00, 2800000.00, 2800000.00, 3000000.00, 'Initial L1 budget.', 0),
+('bud_2', 'prj_emerald', NULL, '02-RCC', 'RCC Work', 1, NULL, NULL, NULL, NULL, 50000000.00, 50000000.00, 45000000.00, 42000000.00, 50000000.00, 'Initial L1 budget.', 0),
+('bud_3', 'prj_emerald', NULL, '03-MAS', 'Masonry, Plaster Work', 1, NULL, NULL, NULL, NULL, 8000000.00, 8000000.00, 0.00, 0.00, 8000000.00, 'Initial L1 budget.', 0),
+('bud_4', 'prj_emerald', NULL, '04-WPF', 'Waterproofing Work', 1, NULL, NULL, NULL, NULL, 4000000.00, 4000000.00, 0.00, 0.00, 4000000.00, 'Initial L1 budget.', 0),
+('bud_5', 'prj_emerald', NULL, '05-DOO', 'Doors & Wooden Works', 1, NULL, NULL, NULL, NULL, 7000000.00, 7000000.00, 0.00, 0.00, 7000000.00, 'Initial L1 budget.', 0),
+('bud_6', 'prj_emerald', NULL, '06-WIN', 'Windows & Sliding Doors', 1, NULL, NULL, NULL, NULL, 8000000.00, 8000000.00, 0.00, 0.00, 8000000.00, 'Initial L1 budget.', 0),
+('bud_7', 'prj_emerald', NULL, '07-FLR', 'Flooring and Tiling works', 1, NULL, NULL, NULL, NULL, 9000000.00, 9000000.00, 0.00, 0.00, 9000000.00, 'Initial L1 budget.', 0),
+('bud_8', 'prj_emerald', NULL, '08-MSS', 'MS & SS  Works- Grills & Railings', 1, NULL, NULL, NULL, NULL, 3000000.00, 3000000.00, 0.00, 0.00, 3000000.00, 'Initial L1 budget.', 0),
+('bud_9', 'prj_emerald', NULL, '09-PNT', 'Painting & Polishing Works', 1, NULL, NULL, NULL, NULL, 4000000.00, 4000000.00, 0.00, 0.00, 4000000.00, 'Initial L1 budget.', 0),
+('bud_10', 'prj_emerald', NULL, '10-PLU', 'Plumbing, Drainage Work', 1, NULL, NULL, NULL, NULL, 8000000.00, 8000000.00, 0.00, 0.00, 8000000.00, 'Initial L1 budget.', 0),
+('bud_11', 'prj_emerald', NULL, '11-ELE', 'Electrical Work', 1, NULL, NULL, NULL, NULL, 12000000.00, 12000000.00, 0.00, 0.00, 12000000.00, 'Initial L1 budget.', 0),
+('bud_12', 'prj_emerald', NULL, '12-LFT', 'Lift Work', 1, NULL, NULL, NULL, NULL, 5000000.00, 5000000.00, 0.00, 0.00, 5000000.00, 'Initial L1 budget.', 0),
+('bud_13', 'prj_emerald', NULL, '13-FF', 'Buildings Fire Fighting Work', 1, NULL, NULL, NULL, NULL, 6000000.00, 6000000.00, 0.00, 0.00, 6000000.00, 'Initial L1 budget.', 0),
+('bud_14', 'prj_emerald', NULL, '14-EGF', 'Elevation, Glazing, Facade Work', 1, NULL, NULL, NULL, NULL, 1000000.00, 1000000.00, 0.00, 0.00, 1000000.00, 'Initial L1 budget.', 0),
+('bud_15', 'prj_emerald', NULL, '15-BAM', 'Bldg Amenities', 1, NULL, NULL, NULL, NULL, 4000000.00, 4000000.00, 0.00, 0.00, 4000000.00, 'Initial L1 budget.', 0),
+('bud_16', 'prj_emerald', NULL, '16-MIS', 'Misc, Dep. Labour, Cleaning', 1, NULL, NULL, NULL, NULL, 2000000.00, 2000000.00, 0.00, 0.00, 2000000.00, 'Initial L1 budget.', 0),
+('bud_17', 'prj_emerald', NULL, '17-CIN', 'Civil Infrastructure', 1, NULL, NULL, NULL, NULL, 10000000.00, 10000000.00, 0.00, 0.00, 10000000.00, 'Initial L1 budget.', 0),
+('bud_18', 'prj_emerald', NULL, '18-SCI', 'Services Civil Infrastructure', 1, NULL, NULL, NULL, NULL, 8000000.00, 8000000.00, 0.00, 0.00, 8000000.00, 'Initial L1 budget.', 0),
+('bud_19', 'prj_emerald', NULL, '19-PLS', 'Plumbing Services', 1, NULL, NULL, NULL, NULL, 5000000.00, 5000000.00, 0.00, 0.00, 5000000.00, 'Initial L1 budget.', 0),
+('bud_20', 'prj_emerald', NULL, '20-ELS', 'Electrical Services', 1, NULL, NULL, NULL, NULL, 6000000.00, 6000000.00, 0.00, 0.00, 6000000.00, 'Initial L1 budget.', 0),
+('bud_21', 'prj_emerald', NULL, '21-PAM', 'Project Amenities', 1, NULL, NULL, NULL, NULL, 8000000.00, 8000000.00, 0.00, 0.00, 8000000.00, 'Initial L1 budget.', 0),
 
 -- Child items
-('bud_em_exc', 'prj_emerald', 'wbs_em_exc', '03-SUB-01', 'Basement Excavation & Earthworks', 2, 'bud_3', 5000.00, 3000.00, 'm3', 15000000.00, 15000000.00, 14800000.00, 14800000.00, 15000000.00, 'Excavation child item.', 0),
-('bud_em_con', 'prj_emerald', 'wbs_em_con', '03-SUB-02', 'Foundation Footing Concrete', 2, 'bud_3', 2000.00, 5000.00, 'm3', 10000000.00, 10000000.00, 9700000.00, 9700000.00, 10000000.00, 'Concrete child item.', 0),
-('bud_em_frm', 'prj_emerald', 'wbs_em_frm1', '04-SUP-01', 'Columns and Floor Slab Structure', 2, 'bud_4', 10000.00, 3100.00, 'm3', 31000000.00, 31000000.00, 28000000.00, 26000000.00, 30500000.00, 'Frame structure child.', 0),
-('bud_em_mas', 'prj_emerald', 'wbs_em_frm2', '04-SUP-02', 'Blockwork Masonry Partition Walls', 2, 'bud_4', 8400.00, 2500.00, 'sqm', 21000000.00, 21000000.00, 13000000.00, 12000000.00, 21000000.00, 'Masonry child.', 0),
-('bud_em_ele', 'prj_emerald', 'wbs_em_ele', '10-ELE-01', 'PVC Conduit Laying & Wiring', 2, 'bud_10', 10000.00, 120.00, 'meters', 1200000.00, 1200000.00, 0.00, 0.00, 1200000.00, 'Electrical child', 0),
-('bud_em_dw1', 'prj_emerald', 'wbs_em_fac', '09-DW-01', 'Double Glazed Exterior Facade', 2, 'bud_9', 500.00, 10000.00, 'panels', 5000000.00, 5000000.00, 0.00, 0.00, 5000000.00, 'Facade glazing', 0);
+('bud_em_exc', 'prj_emerald', 'wbs_em_exc', '01-EAR-01', 'Basement Excavation & Earthworks', 2, 'bud_1', 5000.00, 3000.00, 'm3', 15000000.00, 15000000.00, 14800000.00, 14800000.00, 15000000.00, 'Excavation child item.', 0),
+('bud_em_con', 'prj_emerald', 'wbs_em_con', '02-RCC-01', 'Foundation Footing Concrete', 2, 'bud_2', 2000.00, 5000.00, 'm3', 10000000.00, 10000000.00, 9700000.00, 9700000.00, 10000000.00, 'Concrete child item.', 0),
+('bud_em_frm', 'prj_emerald', 'wbs_em_frm1', '02-RCC-02', 'Columns and Floor Slab Structure', 2, 'bud_2', 10000.00, 3100.00, 'm3', 31000000.00, 31000000.00, 28000000.00, 26000000.00, 30500000.00, 'Frame structure child.', 0),
+('bud_em_mas', 'prj_emerald', 'wbs_em_frm2', '03-MAS-01', 'Blockwork Masonry Partition Walls', 2, 'bud_3', 8400.00, 2500.00, 'sqm', 21000000.00, 21000000.00, 13000000.00, 12000000.00, 21000000.00, 'Masonry child.', 0),
+('bud_em_ele', 'prj_emerald', 'wbs_em_ele', '11-ELE-01', 'PVC Conduit Laying & Wiring', 2, 'bud_11', 10000.00, 120.00, 'meters', 1200000.00, 1200000.00, 0.00, 0.00, 1200000.00, 'Electrical child', 0),
+('bud_em_dw1', 'prj_emerald', 'wbs_em_fac', '06-WIN-01', 'Double Glazed Exterior Facade', 2, 'bud_6', 500.00, 10000.00, 'panels', 5000000.00, 5000000.00, 0.00, 0.00, 5000000.00, 'Facade glazing', 0);
 
 -- Seed Milestones
 INSERT INTO milestones (id, project_id, title, description, phase, status, planned_start, planned_end, actual_start, actual_end, progress, dependencies, assigned_to, priority) VALUES

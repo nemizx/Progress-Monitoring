@@ -21,6 +21,7 @@ import Reports from '@/pages/Reports';
 import Analytics from '@/pages/Reports';
 // reuse Reports as placeholder for Analytics for now
 import BudgetCost from '@/pages/BudgetCost';
+import CostControls from '@/pages/CostControls';
 import ChangeComms from '@/pages/ChangeComms';
 import Notifications from '@/pages/Notifications';
 import AdminPanel from '@/pages/AdminPanel';
@@ -63,7 +64,7 @@ const AuthenticatedApp = () => {
           <Route path="/reports" element={<Reports />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/budget" element={<BudgetCost />} />
-          <Route path="/cost" element={<BudgetCost />} />
+          <Route path="/cost" element={<CostControls />} />
           <Route path="/collaboration" element={<ChangeComms />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/admin" element={<AdminPanel />} />

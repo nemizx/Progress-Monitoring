@@ -8,22 +8,27 @@ import { Badge } from '@/components/ui/badge';
 import { Upload, CheckCircle2, AlertTriangle, FileSpreadsheet, Loader2 } from 'lucide-react';
 
 const CONSTANT_BUDGET_HEADS = [
-  { code: '01-PRE', title: 'Preliminaries & Site Setup', original_budget: 200000 },
-  { code: '02-EXC', title: 'Excavation & Earthworks', original_budget: 300000 },
-  { code: '03-SUB', title: 'Substructure & Foundation', original_budget: 2500000 },
-  { code: '04-SUP', title: 'Superstructure RCC Frame', original_budget: 5000000 },
-  { code: '05-MAS', title: 'Masonry & Partition Walls', original_budget: 800000 },
-  { code: '06-WPF', title: 'Waterproofing & Insulation', original_budget: 400000 },
-  { code: '07-PLT', title: 'Internal Plastering', original_budget: 500000 },
-  { code: '08-FLR', title: 'Tiling & Flooring', original_budget: 900000 },
-  { code: '09-DW',  title: 'Doors, Windows & Glazing', original_budget: 1500000 },
-  { code: '10-ELE', title: 'Electrical Systems', original_budget: 1200000 },
-  { code: '11-PLU', title: 'Plumbing & Sanitary', original_budget: 800000 },
-  { code: '12-MEC', title: 'HVAC & Ventilation', original_budget: 1300000 },
-  { code: '13-FF',  title: 'Fire Fighting & Alarms', original_budget: 600000 },
-  { code: '14-PNT', title: 'Wall Painting & Finishes', original_budget: 400000 },
-  { code: '15-LND', title: 'Roadworks & Landscaping', original_budget: 700000 },
-  { code: '16-MIS', title: 'Contingencies & Miscellaneous', original_budget: 500000 }
+  { code: '01-EAR', title: 'Earth Work', original_budget: 3000000 },
+  { code: '02-RCC', title: 'RCC Work', original_budget: 50000000 },
+  { code: '03-MAS', title: 'Masonry, Plaster Work', original_budget: 8000000 },
+  { code: '04-WPF', title: 'Waterproofing Work', original_budget: 4000000 },
+  { code: '05-DOO', title: 'Doors & Wooden Works', original_budget: 7000000 },
+  { code: '06-WIN', title: 'Windows & Sliding Doors', original_budget: 8000000 },
+  { code: '07-FLR', title: 'Flooring and Tiling works', original_budget: 9000000 },
+  { code: '08-MSS', title: 'MS & SS  Works- Grills & Railings', original_budget: 3000000 },
+  { code: '09-PNT', title: 'Painting & Polishing Works', original_budget: 4000000 },
+  { code: '10-PLU', title: 'Plumbing, Drainage Work', original_budget: 8000000 },
+  { code: '11-ELE', title: 'Electrical Work', original_budget: 12000000 },
+  { code: '12-LFT', title: 'Lift Work', original_budget: 5000000 },
+  { code: '13-FF',  title: 'Buildings Fire Fighting Work', original_budget: 6000000 },
+  { code: '14-EGF', title: 'Elevation, Glazing, Facade Work', original_budget: 10000000 },
+  { code: '15-BAM', title: 'Bldg Amenities', original_budget: 4000000 },
+  { code: '16-MIS', title: 'Misc, Dep. Labour, Cleaning', original_budget: 2000000 },
+  { code: '17-CIN', title: 'Civil Infrastructure', original_budget: 10000000 },
+  { code: '18-SCI', title: 'Services Civil Infrastructure', original_budget: 8000000 },
+  { code: '19-PLS', title: 'Plumbing Services', original_budget: 5000000 },
+  { code: '20-ELS', title: 'Electrical Services', original_budget: 6000000 },
+  { code: '21-PAM', title: 'Project Amenities', original_budget: 8000000 }
 ];
 
 const findParentBudgetHead = (lineItemText, l1Items) => {
@@ -229,7 +234,7 @@ export default function BudgetUploadPanel({ projects, projectFilter, budgetItems
             <code className="bg-muted px-1 rounded text-xs ml-1 font-mono">cost per unit quantity</code>.
           </p>
           <p className="text-xs text-muted-foreground mt-1">
-            The system will automatically initialize the 16 constant L1 budget heads for this project and map each line item to the correct category using keyword or prefix matching.
+            The system will automatically initialize the 21 constant L1 budget heads for this project and map each line item to the correct category using keyword or prefix matching.
           </p>
         </CardHeader>
         <CardContent className="space-y-4">

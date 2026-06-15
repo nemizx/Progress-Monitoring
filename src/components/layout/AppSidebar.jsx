@@ -24,7 +24,7 @@ const navStructure = [
   { type: 'group', label: 'WBS', icon: Network, children: [
     { path: '/wbs', label: 'WBS' },
     { path: '/budget', label: 'Budget' },
-    { path: '/cost', label: 'Cost' },
+    { path: '/cost', label: 'Cost Controls' },
   ]},
   { type: 'group', label: 'Admin', icon: Shield, children: [
     { path: '/admin', label: 'Administration' },

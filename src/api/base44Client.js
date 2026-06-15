@@ -41,7 +41,10 @@ const entityNames = [
   'Notification',
   'ScheduleTask',
   'SchedulingRule',
-  'User'
+  'User',
+  'SubProject',
+  'ProjectFlat',
+  'MepBoq'
 ];
 
 const entities = {};
