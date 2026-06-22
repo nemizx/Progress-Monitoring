@@ -8,8 +8,9 @@ import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import db from './db/index.js';
-import { authenticateToken } from './middleware/auth.js';
+import { authenticateToken, requireAdmin } from './middleware/auth.js';
 import { generateSchedule, finalizeSchedule, getModelParameters } from './services/scheduleModel.js';
+import { seedWbsTemplateIfEmpty, applyWbsTemplateToProject, compareWbsIds } from './db/wbsTemplate.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -846,7 +847,95 @@ A total of **${attendanceRes.rows.length} trade records** active this week, logg
   }
 });
 
+// --- Standard WBS Template API ---
+
+app.get('/api/wbs-template', authenticateToken, async (req, res) => {
+  try {
+    await seedWbsTemplateIfEmpty();
+    const result = await db.query(
+      'SELECT wbs_id, title, description, level, parent_wbs_id, order_index, updated_date FROM wbs_template_items ORDER BY level ASC, order_index ASC'
+    );
+    const items = result.rows.sort((a, b) => compareWbsIds(a.wbs_id, b.wbs_id));
+    res.json(items);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/wbs-template/items', authenticateToken, requireAdmin, async (req, res) => {
+  const { wbs_id, title, description, level, parent_wbs_id, order_index } = req.body;
+  if (!wbs_id || !title || !level) {
+    return res.status(400).json({ error: 'wbs_id, title, and level are required.' });
+  }
+  try {
+    const result = await db.query(
+      `INSERT INTO wbs_template_items (wbs_id, title, description, level, parent_wbs_id, order_index)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [wbs_id, title, description || null, level, parent_wbs_id || null, order_index ?? 0]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(400).json({ error: `WBS ID "${wbs_id}" already exists.` });
+    }
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/wbs-template/items/:wbsId', authenticateToken, requireAdmin, async (req, res) => {
+  const { wbsId } = req.params;
+  const { title, description, order_index } = req.body;
+  if (!title) {
+    return res.status(400).json({ error: 'title is required.' });
+  }
+  try {
+    const result = await db.query(
+      `UPDATE wbs_template_items
+       SET title = $1, description = $2, order_index = COALESCE($3, order_index), updated_date = CURRENT_TIMESTAMP
+       WHERE wbs_id = $4
+       RETURNING *`,
+      [title, description || null, order_index, wbsId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Template item not found.' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/wbs-template/items/:wbsId', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await db.query(
+      'DELETE FROM wbs_template_items WHERE wbs_id = $1 RETURNING wbs_id',
+      [req.params.wbsId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Template item not found.' });
+    }
+    res.json({ success: true, wbs_id: result.rows[0].wbs_id });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/wbs-template/apply', authenticateToken, async (req, res) => {
+  const { project_id, mode = 'merge' } = req.body;
+  if (!project_id) {
+    return res.status(400).json({ error: 'project_id is required.' });
+  }
+  try {
+    const result = await applyWbsTemplateToProject(project_id, mode);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Start listening
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
+  await seedWbsTemplateIfEmpty();
   console.log(`Express server running on http://localhost:${PORT} in development mode`);
 });

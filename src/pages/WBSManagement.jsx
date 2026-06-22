@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -9,9 +9,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { ChevronDown, ChevronRight, Plus, Pencil, Trash2, Layers } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ChevronDown, ChevronRight, Plus, Pencil, Trash2, Layers, BookTemplate, Download, Loader2 } from 'lucide-react';
 import EmptyState from '@/components/shared/EmptyState';
 import { formatCompactCurrencyINR } from '@/lib/formatters';
+import { compareWbsIds, getNextChildWbsId, getNextL1WbsId } from '@/lib/wbsUtils';
+import { useAuth } from '@/lib/AuthContext';
 
 const levelColors = {
   1: 'bg-primary/10 text-primary font-bold',
@@ -26,13 +29,26 @@ const defaultForm = {
   activity_id: '', budget_item_id: '',
 };
 
+const defaultTemplateForm = {
+  wbs_id: '', title: '', description: '', level: 1, parent_wbs_id: '', order_index: 0,
+};
+
 export default function WBSManagement() {
+  const [activeTab, setActiveTab] = useState('project');
   const [projectFilter, setProjectFilter] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [expanded, setExpanded] = useState({});
   const [form, setForm] = useState(defaultForm);
+  const [templateExpanded, setTemplateExpanded] = useState({});
+  const [showTemplateEdit, setShowTemplateEdit] = useState(false);
+  const [editTemplateItem, setEditTemplateItem] = useState(null);
+  const [templateForm, setTemplateForm] = useState(defaultTemplateForm);
+  const [applyMode, setApplyMode] = useState('merge');
+  const [applyMessage, setApplyMessage] = useState('');
 
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const queryClient = useQueryClient();
 
   const { data: projects = [] } = useQuery({
@@ -45,6 +61,11 @@ export default function WBSManagement() {
     queryFn: () => projectFilter
       ? base44.entities.WBSItem.filter({ project_id: projectFilter }, 'order_index', 500)
       : base44.entities.WBSItem.list('order_index', 500),
+  });
+
+  const { data: templateItems = [], isLoading: templateLoading } = useQuery({
+    queryKey: ['wbs-template'],
+    queryFn: () => base44.wbsTemplate.list(),
   });
 
   const { data: activities = [] } = useQuery({
@@ -76,6 +97,42 @@ export default function WBSManagement() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['wbs'] }),
   });
 
+  const applyTemplateMutation = useMutation({
+    mutationFn: ({ projectId, mode }) => base44.wbsTemplate.applyToProject(projectId, mode),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['wbs'] });
+      setApplyMessage(`Applied standard WBS: ${result.created} created, ${result.skipped} already existed.`);
+      setTimeout(() => setApplyMessage(''), 5000);
+    },
+  });
+
+  const createTemplateMutation = useMutation({
+    mutationFn: (data) => base44.wbsTemplate.createItem(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['wbs-template'] });
+      setShowTemplateEdit(false);
+      setEditTemplateItem(null);
+      setTemplateForm(defaultTemplateForm);
+    },
+  });
+
+  const updateTemplateMutation = useMutation({
+    mutationFn: ({ wbsId, data }) => base44.wbsTemplate.updateItem(wbsId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['wbs-template'] });
+      setShowTemplateEdit(false);
+      setEditTemplateItem(null);
+    },
+  });
+
+  const deleteTemplateMutation = useMutation({
+    mutationFn: (wbsId) => base44.wbsTemplate.deleteItem(wbsId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['wbs-template'] }),
+  });
+
+  const sortedWbsItems = [...wbsItems].sort((a, b) => compareWbsIds(a.code, b.code));
+  const sortedTemplateItems = [...templateItems].sort((a, b) => compareWbsIds(a.wbs_id, b.wbs_id));
+
   const openEdit = (item) => {
     const linkedAct = activities.find(a => a.wbs_item_id === item.id);
     const linkedBud = budgetItems.find(b => b.wbs_item_id === item.id);
@@ -88,6 +145,35 @@ export default function WBSManagement() {
       budget_item_id: linkedBud ? linkedBud.id : '',
     });
     setShowAdd(true);
+  };
+
+  const openAddTemplate = (parentItem = null) => {
+    if (parentItem) {
+      const siblings = templateItems.filter(t => t.parent_wbs_id === parentItem.wbs_id).map(t => t.wbs_id);
+      setTemplateForm({
+        ...defaultTemplateForm,
+        wbs_id: getNextChildWbsId(parentItem.wbs_id, siblings),
+        level: 2,
+        parent_wbs_id: parentItem.wbs_id,
+        order_index: siblings.length + 1,
+      });
+    } else {
+      setTemplateForm({
+        ...defaultTemplateForm,
+        wbs_id: getNextL1WbsId(templateItems),
+        level: 1,
+        parent_wbs_id: '',
+        order_index: templateItems.filter(t => t.level === 1).length,
+      });
+    }
+    setEditTemplateItem(null);
+    setShowTemplateEdit(true);
+  };
+
+  const openEditTemplate = (item) => {
+    setEditTemplateItem(item);
+    setTemplateForm({ ...defaultTemplateForm, ...item });
+    setShowTemplateEdit(true);
   };
 
   const handleSubmit = () => {
@@ -103,7 +189,6 @@ export default function WBSManagement() {
 
     const handleLinks = async (savedWBS) => {
       const wbsId = savedWBS.id;
-      // Clear WBS ID from activities that previously pointed here but are no longer linked
       const actsToClear = activities.filter(a => a.wbs_item_id === wbsId && a.id !== activity_id);
       for (const act of actsToClear) {
         await base44.entities.ScheduleActivity.update(act.id, { wbs_item_id: '' });
@@ -112,7 +197,6 @@ export default function WBSManagement() {
         await base44.entities.ScheduleActivity.update(activity_id, { wbs_item_id: wbsId });
       }
 
-      // Clear WBS ID from budget items that previously pointed here but are no longer linked
       const budsToClear = budgetItems.filter(b => b.wbs_item_id === wbsId && b.id !== budget_item_id);
       for (const bud of budsToClear) {
         await base44.entities.BudgetItem.update(bud.id, { wbs_item_id: '' });
@@ -145,10 +229,30 @@ export default function WBSManagement() {
     }
   };
 
-  const toggleExpand = (id) => setExpanded(e => ({ ...e, [id]: !e[id] }));
+  const handleTemplateSubmit = () => {
+    const payload = {
+      ...templateForm,
+      parent_wbs_id: templateForm.level === 1 ? null : templateForm.parent_wbs_id,
+    };
+    if (editTemplateItem) {
+      updateTemplateMutation.mutate({
+        wbsId: editTemplateItem.wbs_id,
+        data: { title: payload.title, description: payload.description, order_index: payload.order_index },
+      });
+    } else {
+      createTemplateMutation.mutate(payload);
+    }
+  };
 
-  const l1Items = wbsItems.filter(w => w.level === 1 || !w.parent_id);
-  const getChildren = (parentId) => wbsItems.filter(w => w.parent_id === parentId);
+  const toggleExpand = (id) => setExpanded(e => ({ ...e, [id]: !e[id] }));
+  const toggleTemplateExpand = (id) => setTemplateExpanded(e => ({ ...e, [id]: !e[id] }));
+
+  const l1Items = sortedWbsItems.filter(w => w.level === 1 || !w.parent_id);
+  const getChildren = (parentId) => sortedWbsItems.filter(w => w.parent_id === parentId);
+
+  const l1Template = sortedTemplateItems.filter(t => t.level === 1);
+  const getTemplateChildren = (parentWbsId) =>
+    sortedTemplateItems.filter(t => t.parent_wbs_id === parentWbsId);
 
   const totalBudget = l1Items.reduce((s, w) => s + (w.budget_amount || 0), 0);
   const avgProgress = wbsItems.length > 0 ? Math.round(wbsItems.reduce((s, w) => s + (w.progress || 0), 0) / wbsItems.length) : 0;
@@ -172,7 +276,7 @@ export default function WBSManagement() {
                 ? (isExp ? <ChevronDown className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />)
                 : <div className="w-4" />}
               <span className={`text-xs px-1.5 py-0.5 mt-0.5 rounded shrink-0 ${levelColors[item.level] || levelColors[3]}`}>L{item.level}</span>
-              <span className="text-xs text-muted-foreground mt-0.5 font-mono shrink-0">{item.code}</span>
+              <span className="text-xs font-mono font-semibold text-primary mt-0.5 shrink-0 min-w-[3rem]">{item.code}</span>
               <div className="flex flex-col">
                 <span className="font-medium text-sm">{item.title}</span>
                 {(linkedAct || linkedBud) && (
@@ -221,72 +325,193 @@ export default function WBSManagement() {
     );
   };
 
+  const renderTemplateRow = (item, depth = 0) => {
+    const children = getTemplateChildren(item.wbs_id);
+    const isExp = templateExpanded[item.wbs_id];
+    const indent = depth * 20;
+
+    return (
+      <React.Fragment key={item.wbs_id}>
+        <tr className="border-b hover:bg-muted/10">
+          <td className="p-3" style={{ paddingLeft: `${12 + indent}px` }}>
+            <div className="flex items-center gap-2">
+              {children.length > 0 ? (
+                <button type="button" onClick={() => toggleTemplateExpand(item.wbs_id)} className="p-0.5">
+                  {isExp ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+                </button>
+              ) : <div className="w-5" />}
+              <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${levelColors[item.level]}`}>L{item.level}</span>
+              <span className="text-sm font-mono font-semibold text-primary min-w-[3rem]">{item.wbs_id}</span>
+              <span className="text-sm font-medium">{item.title}</span>
+            </div>
+          </td>
+          {isAdmin && (
+            <td className="p-3">
+              <div className="flex gap-1 justify-end">
+                {item.level === 1 && (
+                  <Button variant="ghost" size="icon" className="h-6 w-6" title="Add sub-item" onClick={() => openAddTemplate(item)}>
+                    <Plus className="w-3 h-3" />
+                  </Button>
+                )}
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditTemplate(item)}><Pencil className="w-3 h-3" /></Button>
+                <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => deleteTemplateMutation.mutate(item.wbs_id)}><Trash2 className="w-3 h-3" /></Button>
+              </div>
+            </td>
+          )}
+        </tr>
+        {isExp && children.map(child => renderTemplateRow(child, depth + 1))}
+      </React.Fragment>
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-heading font-bold tracking-tight">WBS Management</h1>
-          <p className="text-sm text-muted-foreground mt-1 font-sans">Work Breakdown Structure — Activity and Budget Integration</p>
+          <p className="text-sm text-muted-foreground mt-1 font-sans">
+            Standard WBS IDs (1, 1.1, 1.2…) identify work packages across all projects
+          </p>
         </div>
-        <Button className="gap-2" onClick={() => { setEditItem(null); setForm(defaultForm); setShowAdd(true); }}>
-          <Plus className="w-4 h-4" /> Add WBS Item
-        </Button>
+        {activeTab === 'project' && (
+          <Button className="gap-2" onClick={() => { setEditItem(null); setForm(defaultForm); setShowAdd(true); }}>
+            <Plus className="w-4 h-4" /> Add WBS Item
+          </Button>
+        )}
+        {activeTab === 'template' && isAdmin && (
+          <Button className="gap-2" onClick={() => openAddTemplate()}>
+            <Plus className="w-4 h-4" /> Add Category
+          </Button>
+        )}
       </div>
 
-      {/* Filter */}
-      <Select value={projectFilter} onValueChange={setProjectFilter}>
-        <SelectTrigger className="w-52"><SelectValue placeholder="All Projects" /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value={null}>All Projects</SelectItem>
-          {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-        </SelectContent>
-      </Select>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="project" className="gap-2"><Layers className="w-4 h-4" /> Project WBS</TabsTrigger>
+          <TabsTrigger value="template" className="gap-2"><BookTemplate className="w-4 h-4" /> Standard Template</TabsTrigger>
+        </TabsList>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: 'Total Items', value: wbsItems.length },
-          { label: 'L1 Categories', value: l1Items.length },
-          { label: 'Avg Progress', value: `${avgProgress}%` },
-          { label: 'Total Budget', value: fmt(totalBudget) },
-        ].map(s => (
-          <Card key={s.label}>
-            <CardContent className="p-4 font-sans">
-              <p className="text-2xl font-bold">{s.value}</p>
-              <p className="text-xs text-muted-foreground mt-1">{s.label}</p>
+        <TabsContent value="project" className="space-y-4 mt-4">
+          <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+            <div className="flex-1">
+              <Label className="text-xs text-muted-foreground mb-1 block">Project</Label>
+              <Select value={projectFilter} onValueChange={setProjectFilter}>
+                <SelectTrigger className="w-full sm:w-52"><SelectValue placeholder="All Projects" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={null}>All Projects</SelectItem>
+                  {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            {projectFilter && (
+              <div className="flex gap-2 items-end">
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1 block">Apply mode</Label>
+                  <Select value={applyMode} onValueChange={setApplyMode}>
+                    <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="merge">Merge (keep existing)</SelectItem>
+                      <SelectItem value="replace">Replace all</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button
+                  className="gap-2"
+                  disabled={applyTemplateMutation.isPending}
+                  onClick={() => applyTemplateMutation.mutate({ projectId: projectFilter, mode: applyMode })}
+                >
+                  {applyTemplateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  Apply Standard WBS
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {applyMessage && (
+            <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2">{applyMessage}</div>
+          )}
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[
+              { label: 'Total Items', value: wbsItems.length },
+              { label: 'L1 Categories', value: l1Items.length },
+              { label: 'Avg Progress', value: `${avgProgress}%` },
+              { label: 'Total Budget', value: fmt(totalBudget) },
+            ].map(s => (
+              <Card key={s.label}>
+                <CardContent className="p-4 font-sans">
+                  <p className="text-2xl font-bold">{s.value}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{s.label}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {isLoading ? (
+            <div className="text-center py-12 text-muted-foreground text-sm font-sans">Loading WBS...</div>
+          ) : wbsItems.length === 0 ? (
+            <EmptyState
+              icon={Layers}
+              title="No WBS items"
+              description={projectFilter ? 'Apply the standard WBS format to this project, or add items manually.' : 'Select a project to view or apply the standard WBS format.'}
+              actionLabel={projectFilter ? 'Apply Standard WBS' : undefined}
+              onAction={projectFilter ? () => applyTemplateMutation.mutate({ projectId: projectFilter, mode: 'merge' }) : undefined}
+            />
+          ) : (
+            <Card>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm font-sans">
+                  <thead>
+                    <tr className="border-b bg-muted/30">
+                      <th className="text-left p-3 font-semibold">WBS ID / Name</th>
+                      <th className="text-right p-3 font-semibold">Planned Qty</th>
+                      <th className="text-right p-3 font-semibold">Actual Qty</th>
+                      <th className="text-right p-3 font-semibold">Budget</th>
+                      <th className="text-left p-3 font-semibold">Progress</th>
+                      <th className="p-3"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {l1Items.map(item => renderRow(item, 0))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="template" className="space-y-4 mt-4">
+          <Card className="border-dashed">
+            <CardContent className="p-4 text-sm text-muted-foreground">
+              This is the <strong>standard WBS format</strong> used for all projects. WBS ID <strong>1</strong> is a main category;
+              <strong> 1.1</strong> is the first item under 1, <strong>1.2</strong> the second, and <strong>5.4</strong> the fourth under 5.
+              {isAdmin ? ' Admins can update names here; changes apply when you use "Apply Standard WBS" on a project.' : ' Contact an admin to update the standard format.'}
             </CardContent>
           </Card>
-        ))}
-      </div>
 
-      {/* WBS Tree Table */}
-      {isLoading ? (
-        <div className="text-center py-12 text-muted-foreground text-sm font-sans">Loading WBS...</div>
-      ) : wbsItems.length === 0 ? (
-        <EmptyState icon={Layers} title="No WBS items" description="Build your work breakdown structure with L1, L2, and L3 items." actionLabel="Add WBS Item" onAction={() => { setEditItem(null); setForm(defaultForm); setShowAdd(true); }} />
-      ) : (
-        <Card>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm font-sans">
-              <thead>
-                <tr className="border-b bg-muted/30">
-                  <th className="text-left p-3 font-semibold">WBS Item / Linked Activity & Budget</th>
-                  <th className="text-right p-3 font-semibold">Planned Qty</th>
-                  <th className="text-right p-3 font-semibold">Actual Qty</th>
-                  <th className="text-right p-3 font-semibold">Budget</th>
-                  <th className="text-left p-3 font-semibold">Progress</th>
-                  <th className="p-3"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {l1Items.map(item => renderRow(item, 0))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
+          {templateLoading ? (
+            <div className="text-center py-12 text-muted-foreground text-sm">Loading template...</div>
+          ) : (
+            <Card>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/30">
+                      <th className="text-left p-3 font-semibold">WBS ID / WBS Name</th>
+                      {isAdmin && <th className="text-right p-3 font-semibold w-28">Actions</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {l1Template.map(item => renderTemplateRow(item, 0))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+        </TabsContent>
+      </Tabs>
 
-      {/* Add/Edit Dialog */}
+      {/* Add/Edit Project WBS Dialog */}
       <Dialog open={showAdd} onOpenChange={v => { setShowAdd(v); if (!v) { setEditItem(null); setForm(defaultForm); } }}>
         <DialogContent className="max-h-[85vh] overflow-y-auto max-w-lg font-sans">
           <DialogHeader><DialogTitle>{editItem ? 'Edit WBS Item' : 'Add WBS Item'}</DialogTitle></DialogHeader>
@@ -315,7 +540,7 @@ export default function WBSManagement() {
                   <SelectTrigger><SelectValue placeholder="Select parent" /></SelectTrigger>
                   <SelectContent>
                     {wbsItems.filter(w => w.level < form.level && w.project_id === form.project_id).map(w => (
-                      <SelectItem key={w.id} value={w.id}>{w.code} {w.title}</SelectItem>
+                      <SelectItem key={w.id} value={w.id}>{w.code} — {w.title}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -348,10 +573,10 @@ export default function WBSManagement() {
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <div><Label>Code</Label><Input value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} placeholder="e.g. 1.2.3" /></div>
+              <div><Label>WBS ID *</Label><Input value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} placeholder="e.g. 1.2" /></div>
               <div><Label>Order Index</Label><Input type="number" value={form.order_index} onChange={e => setForm({ ...form, order_index: parseInt(e.target.value) || 0 })} /></div>
             </div>
-            <div><Label>Title *</Label><Input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></div>
+            <div><Label>WBS Name *</Label><Input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></div>
             <div><Label>Description</Label><Textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={2} /></div>
             <div className="grid grid-cols-3 gap-4">
               <div><Label>Planned Qty</Label><Input type="number" value={form.planned_quantity} onChange={e => setForm({ ...form, planned_quantity: e.target.value })} /></div>
@@ -362,8 +587,46 @@ export default function WBSManagement() {
               <div><Label>Budget (₹)</Label><Input type="number" value={form.budget_amount} onChange={e => setForm({ ...form, budget_amount: e.target.value })} /></div>
               <div><Label>Progress (%)</Label><Input type="number" min="0" max="100" value={form.progress} onChange={e => setForm({ ...form, progress: parseFloat(e.target.value) || 0 })} /></div>
             </div>
-            <Button className="w-full mt-2" disabled={!form.project_id || !form.title} onClick={handleSubmit}>
+            <Button className="w-full mt-2" disabled={!form.project_id || !form.title || !form.code} onClick={handleSubmit}>
               {editItem ? 'Update Item' : 'Add WBS Item'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Standard Template Dialog */}
+      <Dialog open={showTemplateEdit} onOpenChange={v => { setShowTemplateEdit(v); if (!v) { setEditTemplateItem(null); setTemplateForm(defaultTemplateForm); } }}>
+        <DialogContent className="max-w-md font-sans">
+          <DialogHeader>
+            <DialogTitle>{editTemplateItem ? 'Edit Standard WBS Item' : 'Add Standard WBS Item'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>WBS ID</Label>
+                <Input value={templateForm.wbs_id} disabled={!!editTemplateItem} onChange={e => setTemplateForm({ ...templateForm, wbs_id: e.target.value })} />
+              </div>
+              <div>
+                <Label>Level</Label>
+                <Input value={`L${templateForm.level}`} disabled />
+              </div>
+            </div>
+            {templateForm.parent_wbs_id && (
+              <div>
+                <Label>Parent WBS ID</Label>
+                <Input value={templateForm.parent_wbs_id} disabled />
+              </div>
+            )}
+            <div>
+              <Label>WBS Name *</Label>
+              <Input value={templateForm.title} onChange={e => setTemplateForm({ ...templateForm, title: e.target.value })} />
+            </div>
+            <div>
+              <Label>Description</Label>
+              <Textarea value={templateForm.description || ''} onChange={e => setTemplateForm({ ...templateForm, description: e.target.value })} rows={2} />
+            </div>
+            <Button className="w-full" disabled={!templateForm.wbs_id || !templateForm.title} onClick={handleTemplateSubmit}>
+              {editTemplateItem ? 'Save Changes' : 'Add to Template'}
             </Button>
           </div>
         </DialogContent>

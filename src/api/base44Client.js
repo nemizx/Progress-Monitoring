@@ -267,6 +267,43 @@ export const base44 = {
   entities,
   auth,
   users: usersMock,
+  wbsTemplate: {
+    list: async () => {
+      const res = await fetch('/api/wbs-template', { headers: getHeaders() });
+      return handleResponse(res);
+    },
+    createItem: async (data) => {
+      const res = await fetch('/api/wbs-template/items', {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(data),
+      });
+      return handleResponse(res);
+    },
+    updateItem: async (wbsId, data) => {
+      const res = await fetch(`/api/wbs-template/items/${encodeURIComponent(wbsId)}`, {
+        method: 'PUT',
+        headers: getHeaders(),
+        body: JSON.stringify(data),
+      });
+      return handleResponse(res);
+    },
+    deleteItem: async (wbsId) => {
+      const res = await fetch(`/api/wbs-template/items/${encodeURIComponent(wbsId)}`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+      });
+      return handleResponse(res);
+    },
+    applyToProject: async (projectId, mode = 'merge') => {
+      const res = await fetch('/api/wbs-template/apply', {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ project_id: projectId, mode }),
+      });
+      return handleResponse(res);
+    },
+  },
   integrations: {
     Core: {
       InvokeLLM: invokeLLM,

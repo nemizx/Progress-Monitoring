@@ -9,6 +9,7 @@ DROP TABLE IF EXISTS progress_entries CASCADE;
 DROP TABLE IF EXISTS milestones CASCADE;
 DROP TABLE IF EXISTS budget_items CASCADE;
 DROP TABLE IF EXISTS schedule_activities CASCADE;
+DROP TABLE IF EXISTS wbs_template_items CASCADE;
 DROP TABLE IF EXISTS wbs_items CASCADE;
 DROP TABLE IF EXISTS schedule_tasks CASCADE;
 DROP TABLE IF EXISTS scheduling_rules CASCADE;
@@ -64,6 +65,17 @@ CREATE TABLE wbs_items (
     progress NUMERIC(5, 2) DEFAULT 0,
     budget_amount NUMERIC(15, 2) DEFAULT 0,
     order_index INTEGER DEFAULT 0
+);
+
+-- 3b. Standard WBS Template (global format for all projects)
+CREATE TABLE wbs_template_items (
+    wbs_id VARCHAR(20) PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    level INTEGER NOT NULL,
+    parent_wbs_id VARCHAR(20) REFERENCES wbs_template_items(wbs_id) ON DELETE CASCADE,
+    order_index INTEGER DEFAULT 0,
+    updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 4. Schedule Activities Table
