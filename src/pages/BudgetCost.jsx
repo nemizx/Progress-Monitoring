@@ -17,9 +17,17 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
 import StatCard from '@/components/shared/StatCard';
 import EmptyState from '@/components/shared/EmptyState';
 import BudgetUploadPanel from '@/components/budget/BudgetUploadPanel';
+import { useProjectSubProject } from '@/hooks/useProjectSubProject';
+import ProjectSubProjectSelector from '@/components/shared/ProjectSubProjectSelector';
+import SubProjectGate from '@/components/shared/SubProjectGate';
+import { filterBudgetBySubProject, filterWbsBySubProject } from '@/lib/subProjectScope';
 
 export default function BudgetCost() {
-  const [projectFilter, setProjectFilter] = useState('');
+  const {
+    projects, subProjects, wbsItems: allWbsItems, projectId, subProjectId,
+    setProjectId, setSubProjectId, isReady, selectedProject, selectedSubProject,
+  } = useProjectSubProject({ fetchWbs: true });
+
   const [showAdd, setShowAdd] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [expanded, setExpanded] = useState({});
@@ -27,15 +35,16 @@ export default function BudgetCost() {
 
   const queryClient = useQueryClient();
 
-  const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: () => base44.entities.Project.list('-created_date', 100) });
-  const { data: budgetItems = [] } = useQuery({
-    queryKey: ['budget', projectFilter],
-    queryFn: () => projectFilter ? base44.entities.BudgetItem.filter({ project_id: projectFilter }, 'code', 500) : base44.entities.BudgetItem.list('code', 500),
+  const { data: allBudgetItems = [] } = useQuery({
+    queryKey: ['budget', projectId],
+    queryFn: () => projectId ? base44.entities.BudgetItem.filter({ project_id: projectId }, 'code', 500) : Promise.resolve([]),
+    enabled: !!projectId,
   });
-  const { data: wbsItems = [] } = useQuery({
-    queryKey: ['wbs', projectFilter],
-    queryFn: () => projectFilter ? base44.entities.WBSItem.filter({ project_id: projectFilter }) : base44.entities.WBSItem.list('order_index', 500),
-  });
+
+  const budgetItems = isReady
+    ? filterBudgetBySubProject(allBudgetItems, allWbsItems, subProjectId)
+    : [];
+  const wbsItems = isReady ? filterWbsBySubProject(allWbsItems, subProjectId) : [];
 
   const createMutation = useMutation({
     mutationFn: (data) => base44.entities.BudgetItem.create(data),
@@ -50,7 +59,13 @@ export default function BudgetCost() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['budget'] }),
   });
 
-  const resetForm = () => setForm({ project_id: projectFilter || '', wbs_item_id: '', code: '', title: '', level: 1, parent_id: '', quantity: '', cost_per_unit: '', unit: '', original_budget: '', revised_budget: '', committed_cost: '', actual_cost: '', forecast_cost: '', revision_notes: '' });
+  const resetForm = () => setForm({
+    project_id: projectId || '', wbs_item_id: '', code: '', title: '', level: 1, parent_id: '',
+    quantity: '', cost_per_unit: '', unit: '', original_budget: '', revised_budget: '',
+    committed_cost: '', actual_cost: '', forecast_cost: '', revision_notes: '',
+  });
+
+  const openAddBudget = () => { setEditItem(null); resetForm(); setShowAdd(true); };
 
   const num = (v) => parseFloat(v) || 0;
   const fmt = (v) => formatCurrencyINR(v);
@@ -104,20 +119,29 @@ export default function BudgetCost() {
           <h1 className="text-2xl font-heading font-bold tracking-tight">Budget & Cost</h1>
           <p className="text-sm text-muted-foreground mt-1">L1 → L2 → L3 budget hierarchy with earned value tracking</p>
         </div>
-        <Button className="gap-2" onClick={() => { setEditItem(null); resetForm(); setShowAdd(true); }}>
+        <Button className="gap-2" disabled={!isReady} onClick={openAddBudget}>
           <Plus className="w-4 h-4" /> Add Budget Item
         </Button>
       </div>
 
-      <Select value={projectFilter} onValueChange={setProjectFilter}>
-        <SelectTrigger className="w-52"><SelectValue placeholder="Select project" /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value={null}>All Projects</SelectItem>
-          {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-        </SelectContent>
-      </Select>
+      <ProjectSubProjectSelector
+        projects={projects}
+        subProjects={subProjects}
+        projectId={projectId}
+        subProjectId={subProjectId}
+        onProjectChange={setProjectId}
+        onSubProjectChange={setSubProjectId}
+      />
 
-      {/* KPIs */}
+      {isReady && selectedProject && selectedSubProject && (
+        <p className="text-sm text-muted-foreground">
+          Budget for <span className="font-medium text-foreground">{selectedProject.name}</span>
+          {' → '}
+          <span className="font-medium text-foreground">{selectedSubProject.name}</span>
+        </p>
+      )}
+
+      <SubProjectGate projectId={projectId} subProjectId={subProjectId} subProjects={subProjects}>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard title="Original Budget" value={formatCompactCurrencyINR(totalOriginal)} icon={IndianRupee} />
         <StatCard title="Revised Budget" value={formatCompactCurrencyINR(totalRevised)} subtitle={totalRevised !== totalOriginal ? `${totalRevised > totalOriginal ? '+' : ''}${formatCompactCurrencyINR(totalRevised - totalOriginal)}` : 'No revisions'} icon={IndianRupee} />
@@ -243,7 +267,7 @@ export default function BudgetCost() {
         </TabsContent>
 
         <TabsContent value="upload" className="mt-4">
-          <BudgetUploadPanel projects={projects} projectFilter={projectFilter} budgetItems={budgetItems} onSuccess={() => queryClient.invalidateQueries({ queryKey: ['budget'] })} />
+          <BudgetUploadPanel projects={projects} projectFilter={projectId} subProjectId={subProjectId} budgetItems={allBudgetItems} wbsItems={allWbsItems} onSuccess={() => queryClient.invalidateQueries({ queryKey: ['budget'] })} />
         </TabsContent>
 
         <TabsContent value="ev" className="mt-4">
@@ -267,6 +291,7 @@ export default function BudgetCost() {
           </div>
         </TabsContent>
       </Tabs>
+      </SubProjectGate>
 
       {/* Add/Edit Dialog */}
       <Dialog open={showAdd} onOpenChange={v => { setShowAdd(v); if (!v) { setEditItem(null); resetForm(); } }}>

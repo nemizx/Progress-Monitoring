@@ -15,6 +15,11 @@ import StatusBadge from '@/components/shared/StatusBadge';
 import EmptyState from '@/components/shared/EmptyState';
 import ScheduleWizard from '@/components/schedule/ScheduleWizard';
 import ScheduleReview from '@/components/schedule/ScheduleReview';
+import { useProjectSubProject } from '@/hooks/useProjectSubProject';
+import ProjectSubProjectSelector from '@/components/shared/ProjectSubProjectSelector';
+import SubProjectGate from '@/components/shared/SubProjectGate';
+import { filterActivitiesBySubProject, filterWbsBySubProject } from '@/lib/subProjectScope';
+import { getProjectTypeLabel } from '@/lib/projectTypes';
 
 const phaseColors = {
   foundation: 'bg-amber-100 text-amber-700',
@@ -34,8 +39,12 @@ const defaultForm = {
 };
 
 export default function ScheduleBuilder() {
-  const [projectFilter, setProjectFilter] = useState('');
-  const [phaseFilter, setPhaseFilter] = useState('');
+  const {
+    projects, subProjects, wbsItems: allWbsItems, projectId, subProjectId,
+    setProjectId, setSubProjectId, isReady, selectedProject, selectedSubProject,
+  } = useProjectSubProject({ fetchWbs: true });
+
+  const [phaseFilter, setPhaseFilter] = useState('all');
   const [showAdd, setShowAdd] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [showReview, setShowReview] = useState(false);
@@ -45,24 +54,18 @@ export default function ScheduleBuilder() {
 
   const queryClient = useQueryClient();
 
-  const { data: projects = [] } = useQuery({
-    queryKey: ['projects'],
-    queryFn: () => base44.entities.Project.list('-created_date', 100),
+  const { data: allActivities = [], isLoading } = useQuery({
+    queryKey: ['activities', projectId],
+    queryFn: () => projectId
+      ? base44.entities.ScheduleActivity.filter({ project_id: projectId }, 'order_index', 500)
+      : Promise.resolve([]),
+    enabled: !!projectId,
   });
 
-  const { data: activities = [], isLoading } = useQuery({
-    queryKey: ['activities', projectFilter],
-    queryFn: () => projectFilter
-      ? base44.entities.ScheduleActivity.filter({ project_id: projectFilter }, 'order_index', 500)
-      : base44.entities.ScheduleActivity.list('order_index', 500),
-  });
-
-  const { data: wbsItems = [] } = useQuery({
-    queryKey: ['wbs', projectFilter],
-    queryFn: () => projectFilter
-      ? base44.entities.WBSItem.filter({ project_id: projectFilter })
-      : base44.entities.WBSItem.list('order_index', 200),
-  });
+  const activities = isReady
+    ? filterActivitiesBySubProject(allActivities, allWbsItems, subProjectId)
+    : [];
+  const wbsItems = isReady ? filterWbsBySubProject(allWbsItems, subProjectId) : [];
 
   const createMutation = useMutation({
     mutationFn: (data) => base44.entities.ScheduleActivity.create(data),
@@ -79,6 +82,12 @@ export default function ScheduleBuilder() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['activities'] }),
   });
 
+  const openAddActivity = () => {
+    setEditItem(null);
+    setForm({ ...defaultForm, project_id: projectId });
+    setShowAdd(true);
+  };
+
   const openEdit = (item) => {
     setEditItem(item);
     setForm({ ...defaultForm, ...item });
@@ -92,7 +101,7 @@ export default function ScheduleBuilder() {
   };
 
   const filtered = activities.filter(a =>
-    (!phaseFilter || a.phase === phaseFilter)
+    (phaseFilter === 'all' || a.phase === phaseFilter)
   );
 
   const criticalCount = activities.filter(a => a.is_critical_path).length;
@@ -107,28 +116,28 @@ export default function ScheduleBuilder() {
           <p className="text-sm text-muted-foreground mt-1">Build and manage project activity schedules with predecessor logic</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" className="gap-2" onClick={() => setShowWizard(true)}>
+          <Button variant="outline" className="gap-2" disabled={!isReady || !selectedProject?.project_type} onClick={() => setShowWizard(true)}>
             <Sparkles className="w-4 h-4 text-accent" /> ML Auto-Build
           </Button>
-          <Button className="gap-2" onClick={() => { setEditItem(null); setForm(defaultForm); setShowAdd(true); }}>
+          <Button className="gap-2" disabled={!isReady} onClick={openAddActivity}>
             <Plus className="w-4 h-4" /> Add Activity
           </Button>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <Select value={projectFilter} onValueChange={setProjectFilter}>
-          <SelectTrigger className="w-52"><SelectValue placeholder="All Projects" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value={null}>All Projects</SelectItem>
-            {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={phaseFilter} onValueChange={setPhaseFilter}>
+      <div className="flex flex-wrap gap-3 items-end">
+        <ProjectSubProjectSelector
+          projects={projects}
+          subProjects={subProjects}
+          projectId={projectId}
+          subProjectId={subProjectId}
+          onProjectChange={setProjectId}
+          onSubProjectChange={setSubProjectId}
+        />
+        <Select value={phaseFilter} onValueChange={setPhaseFilter} disabled={!isReady}>
           <SelectTrigger className="w-44"><SelectValue placeholder="All Phases" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value={null}>All Phases</SelectItem>
+            <SelectItem value="all">All Phases</SelectItem>
             {['foundation', 'structure', 'mep', 'finishing', 'handover', 'other'].map(p => (
               <SelectItem key={p} value={p} className="capitalize">{p}</SelectItem>
             ))}
@@ -136,7 +145,24 @@ export default function ScheduleBuilder() {
         </Select>
       </div>
 
-      {/* Stats */}
+      {isReady && selectedProject && selectedSubProject && (
+        <p className="text-sm text-muted-foreground">
+          Schedule for <span className="font-medium text-foreground">{selectedProject.name}</span>
+          {' → '}
+          <span className="font-medium text-foreground">{selectedSubProject.name}</span>
+          {selectedProject.project_type && (
+            <> · <span className="font-medium text-foreground">{getProjectTypeLabel(selectedProject.project_type)}</span></>
+          )}
+        </p>
+      )}
+
+      {isReady && selectedProject && !selectedProject.project_type && (
+        <p className="text-xs text-amber-600">
+          Set a project type under Projects → Admin to enable ML Auto-Build.
+        </p>
+      )}
+
+      <SubProjectGate projectId={projectId} subProjectId={subProjectId} subProjects={subProjects}>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label: 'Total Activities', value: activities.length, icon: Calendar },
@@ -160,7 +186,7 @@ export default function ScheduleBuilder() {
       {isLoading ? (
         <div className="text-center py-12 text-muted-foreground text-sm">Loading activities...</div>
       ) : filtered.length === 0 ? (
-        <EmptyState icon={Calendar} title="No activities yet" description="Add schedule activities to build your project timeline." actionLabel="Add Activity" onAction={() => { setEditItem(null); setForm(defaultForm); setShowAdd(true); }} />
+        <EmptyState icon={Calendar} title="No activities yet" description="Add schedule activities linked to this sub-project WBS." actionLabel="Add Activity" onAction={openAddActivity} />
       ) : (
         <Card>
           <div className="overflow-x-auto">
@@ -217,17 +243,24 @@ export default function ScheduleBuilder() {
           </div>
         </Card>
       )}
+      </SubProjectGate>
 
       {/* AI Wizard Dialog */}
       <Dialog open={showWizard} onOpenChange={setShowWizard}>
         <DialogContent className="max-w-lg">
           <ScheduleWizard
+            projectId={projectId}
+            subProjectId={subProjectId}
+            projectName={selectedProject?.name}
+            subProjectName={selectedSubProject?.name}
+            projectType={selectedProject?.project_type}
+            projectStartDate={selectedProject?.start_date}
             onGenerated={(data) => {
               setGeneratedScheduleData(data);
               setShowWizard(false);
               setShowReview(true);
             }}
-            onComplete={() => { setShowWizard(false); setProjectFilter(projectFilter); }}
+            onComplete={() => { setShowWizard(false); queryClient.invalidateQueries({ queryKey: ['activities'] }); }}
             onCancel={() => setShowWizard(false)}
           />
         </DialogContent>
@@ -244,10 +277,14 @@ export default function ScheduleBuilder() {
               schedule={generatedScheduleData.schedule}
               generationFeatures={generatedScheduleData.features}
               projectId={generatedScheduleData.projectId}
-              onFinalize={(created) => {
+              subProjectId={generatedScheduleData.subProjectId}
+              projectName={generatedScheduleData.projectName}
+              subProjectName={generatedScheduleData.subProjectName}
+              wbsItems={allWbsItems}
+              onFinalize={() => {
                 setShowReview(false);
                 setGeneratedScheduleData(null);
-                setProjectFilter(generatedScheduleData.projectId);
+                queryClient.invalidateQueries({ queryKey: ['activities'] });
               }}
               onCancel={() => {
                 setShowReview(false);

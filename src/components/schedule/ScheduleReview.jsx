@@ -11,6 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Pencil, Save, X, GitBranch, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
+import { linkActivitiesToSubProjectWbs, filterWbsBySubProject } from '@/lib/subProjectScope';
+
 const phaseColors = {
   foundation: 'bg-amber-100 text-amber-700',
   structure: 'bg-blue-100 text-blue-700',
@@ -20,7 +22,17 @@ const phaseColors = {
   other: 'bg-gray-100 text-gray-600',
 };
 
-export default function ScheduleReview({ schedule, generationFeatures, onFinalize, onCancel, projectId }) {
+export default function ScheduleReview({
+  schedule,
+  generationFeatures,
+  onFinalize,
+  onCancel,
+  projectId,
+  subProjectId,
+  projectName,
+  subProjectName,
+  wbsItems = [],
+}) {
   const [editedSchedule, setEditedSchedule] = useState(schedule.map(a => ({ ...a })));
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
@@ -29,21 +41,28 @@ export default function ScheduleReview({ schedule, generationFeatures, onFinaliz
 
   const queryClient = useQueryClient();
 
+  const scopedWbsCount = subProjectId ? filterWbsBySubProject(wbsItems, subProjectId).length : 0;
+
   const finalizeMutation = useMutation({
     mutationFn: async () => {
+      const linked = subProjectId
+        ? linkActivitiesToSubProjectWbs(editedSchedule, wbsItems, subProjectId)
+        : editedSchedule;
+
       const created = await base44.entities.ScheduleActivity.bulkCreate(
-        editedSchedule.map((a, index) => ({
+        linked.map((a, index) => ({
           ...a,
           project_id: projectId,
           order_index: index,
-          updated_date: new Date().toISOString()
+          updated_date: new Date().toISOString(),
         }))
       );
 
       await base44.integrations.Schedule.finalize({
         projectId,
+        subProjectId,
         features: generationFeatures,
-        schedule: created
+        schedule: created,
       });
 
       return created;
@@ -107,7 +126,17 @@ export default function ScheduleReview({ schedule, generationFeatures, onFinaliz
     <div className="space-y-6 max-w-7xl">
       <div>
         <h2 className="text-2xl font-heading font-bold tracking-tight">Review Generated Schedule</h2>
-        <p className="text-sm text-muted-foreground mt-1">Edit activities, change dependencies, and adjust dates before finalizing.</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Edit activities, change dependencies, and adjust dates before finalizing.
+          {projectName && subProjectName && (
+            <> Scope: <span className="font-medium text-foreground">{projectName} → {subProjectName}</span></>
+          )}
+        </p>
+        {subProjectId && scopedWbsCount === 0 && (
+          <p className="text-xs text-amber-600 mt-2">
+            No WBS items found for this sub-project. Apply the standard WBS template first to auto-link activities.
+          </p>
+        )}
       </div>
 
       {/* Summary Stats */}

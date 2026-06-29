@@ -10,6 +10,20 @@ const getHeaders = () => {
   return headers;
 };
 
+const apiFetch = async (url, options = {}) => {
+  try {
+    return await fetch(url, options);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      const port = window.location.port || '5173';
+      throw new Error(
+        `Cannot reach the API server. Use the dev URL from your terminal (http://localhost:${port}) and ensure "npm run dev" is running with the backend on port 3000.`
+      );
+    }
+    throw error;
+  }
+};
+
 const handleResponse = async (res) => {
   if (!res.ok) {
     let errData;
@@ -18,7 +32,7 @@ const handleResponse = async (res) => {
     } catch (e) {
       errData = { error: 'Unknown server error' };
     }
-    const err = new Error(errData.error || `HTTP error! status: ${res.status}`);
+    const err = new Error(errData.error || `Server error (${res.status}). Check that PostgreSQL is running and run npm run db:setup.`);
     err.status = res.status;
     throw err;
   }
@@ -57,7 +71,7 @@ entityNames.forEach(name => {
       if (limit) params.push(`limit=${parseInt(limit)}`);
       if (params.length > 0) url += `?${params.join('&')}`;
 
-      const res = await fetch(url, { headers: getHeaders() });
+      const res = await apiFetch(url, { headers: getHeaders() });
       return handleResponse(res);
     },
     
@@ -68,7 +82,7 @@ entityNames.forEach(name => {
       if (limit) params.push(`limit=${parseInt(limit)}`);
       if (params.length > 0) url += `?${params.join('&')}`;
 
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method: 'POST',
         headers: getHeaders(),
         body: JSON.stringify(criteria)
@@ -77,7 +91,7 @@ entityNames.forEach(name => {
     },
 
     create: async (data) => {
-      const res = await fetch(`/api/entities/${name}`, {
+      const res = await apiFetch(`/api/entities/${name}`, {
         method: 'POST',
         headers: getHeaders(),
         body: JSON.stringify(data)
@@ -86,7 +100,7 @@ entityNames.forEach(name => {
     },
 
     update: async (id, data) => {
-      const res = await fetch(`/api/entities/${name}/${id}`, {
+      const res = await apiFetch(`/api/entities/${name}/${id}`, {
         method: 'PUT',
         headers: getHeaders(),
         body: JSON.stringify(data)
@@ -95,7 +109,7 @@ entityNames.forEach(name => {
     },
 
     delete: async (id) => {
-      const res = await fetch(`/api/entities/${name}/${id}`, {
+      const res = await apiFetch(`/api/entities/${name}/${id}`, {
         method: 'DELETE',
         headers: getHeaders()
       });
@@ -103,7 +117,7 @@ entityNames.forEach(name => {
     },
 
     bulkCreate: async (items) => {
-      const res = await fetch(`/api/entities/${name}/bulk`, {
+      const res = await apiFetch(`/api/entities/${name}/bulk`, {
         method: 'POST',
         headers: getHeaders(),
         body: JSON.stringify(items)
@@ -120,7 +134,7 @@ const auth = {
     if (!token) {
       throw { status: 401, message: 'Authentication required' };
     }
-    const res = await fetch('/api/auth/me', { headers: getHeaders() });
+    const res = await apiFetch('/api/auth/me', { headers: getHeaders() });
     return handleResponse(res);
   },
 
@@ -130,7 +144,7 @@ const auth = {
   },
 
   loginViaEmailPassword: async (email, password) => {
-    const res = await fetch('/api/auth/login', {
+    const res = await apiFetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
@@ -142,7 +156,7 @@ const auth = {
   },
 
   register: async ({ email, password }) => {
-    const res = await fetch('/api/auth/register', {
+    const res = await apiFetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
@@ -192,8 +206,25 @@ const auth = {
   },
 
   redirectToLogin: (redirectUrl) => {
-    const redirectParam = redirectUrl ? `?from=${encodeURIComponent(redirectUrl)}` : '';
-    window.location.href = `/login${redirectParam}`;
+    const publicPaths = ['/login', '/register', '/forgot-password', '/reset-password'];
+    const currentPath = window.location.pathname;
+    if (publicPaths.some((path) => currentPath.startsWith(path))) {
+      window.location.replace('/login');
+      return;
+    }
+
+    let destination = redirectUrl || window.location.href;
+    try {
+      const url = new URL(destination, window.location.origin);
+      if (publicPaths.some((path) => url.pathname.startsWith(path))) {
+        window.location.replace('/login');
+        return;
+      }
+      const from = url.pathname + url.search;
+      window.location.replace(`/login?from=${encodeURIComponent(from)}`);
+    } catch {
+      window.location.replace('/login');
+    }
   }
 };
 
@@ -219,7 +250,7 @@ const uploadFile = async ({ file }) => {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch('/api/upload', {
+  const res = await apiFetch('/api/upload', {
     method: 'POST',
     headers,
     body: formData
@@ -228,7 +259,7 @@ const uploadFile = async ({ file }) => {
 };
 
 const invokeLLM = async ({ prompt }) => {
-  const res = await fetch('/api/integrations/llm', {
+  const res = await apiFetch('/api/integrations/llm', {
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify({ prompt })
@@ -238,7 +269,7 @@ const invokeLLM = async ({ prompt }) => {
 };
 
 const generateScheduleClient = async (params) => {
-  const res = await fetch('/api/integrations/schedule/generate', {
+  const res = await apiFetch('/api/integrations/schedule/generate', {
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify(params)
@@ -247,7 +278,7 @@ const generateScheduleClient = async (params) => {
 };
 
 const finalizeScheduleClient = async (params) => {
-  const res = await fetch('/api/integrations/schedule/finalize', {
+  const res = await apiFetch('/api/integrations/schedule/finalize', {
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify(params)
@@ -256,7 +287,7 @@ const finalizeScheduleClient = async (params) => {
 };
 
 const getModelParametersClient = async () => {
-  const res = await fetch('/api/integrations/schedule/parameters', {
+  const res = await apiFetch('/api/integrations/schedule/parameters', {
     headers: getHeaders()
   });
   return handleResponse(res);
@@ -269,11 +300,11 @@ export const base44 = {
   users: usersMock,
   wbsTemplate: {
     list: async () => {
-      const res = await fetch('/api/wbs-template', { headers: getHeaders() });
+      const res = await apiFetch('/api/wbs-template', { headers: getHeaders() });
       return handleResponse(res);
     },
     createItem: async (data) => {
-      const res = await fetch('/api/wbs-template/items', {
+      const res = await apiFetch('/api/wbs-template/items', {
         method: 'POST',
         headers: getHeaders(),
         body: JSON.stringify(data),
@@ -281,7 +312,7 @@ export const base44 = {
       return handleResponse(res);
     },
     updateItem: async (wbsId, data) => {
-      const res = await fetch(`/api/wbs-template/items/${encodeURIComponent(wbsId)}`, {
+      const res = await apiFetch(`/api/wbs-template/items/${encodeURIComponent(wbsId)}`, {
         method: 'PUT',
         headers: getHeaders(),
         body: JSON.stringify(data),
@@ -289,17 +320,24 @@ export const base44 = {
       return handleResponse(res);
     },
     deleteItem: async (wbsId) => {
-      const res = await fetch(`/api/wbs-template/items/${encodeURIComponent(wbsId)}`, {
+      const res = await apiFetch(`/api/wbs-template/items/${encodeURIComponent(wbsId)}`, {
         method: 'DELETE',
         headers: getHeaders(),
       });
       return handleResponse(res);
     },
-    applyToProject: async (projectId, mode = 'merge') => {
-      const res = await fetch('/api/wbs-template/apply', {
+    applyToProject: async (projectId, subProjectId, mode = 'merge') => {
+      const res = await apiFetch('/api/wbs-template/apply', {
         method: 'POST',
         headers: getHeaders(),
-        body: JSON.stringify({ project_id: projectId, mode }),
+        body: JSON.stringify({ project_id: projectId, sub_project_id: subProjectId, mode }),
+      });
+      return handleResponse(res);
+    },
+    resetToDefault: async () => {
+      const res = await apiFetch('/api/wbs-template/reset', {
+        method: 'POST',
+        headers: getHeaders(),
       });
       return handleResponse(res);
     },

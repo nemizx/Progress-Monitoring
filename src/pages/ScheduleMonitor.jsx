@@ -29,6 +29,15 @@ import {
   ArrowRight,
   CloudSun
 } from 'lucide-react';
+import { useProjectSubProject } from '@/hooks/useProjectSubProject';
+import ProjectSubProjectSelector from '@/components/shared/ProjectSubProjectSelector';
+import SubProjectGate from '@/components/shared/SubProjectGate';
+import {
+  filterActivitiesBySubProject,
+  filterBudgetBySubProject,
+  filterProgressBySubProject,
+  filterWbsBySubProject,
+} from '@/lib/subProjectScope';
 
 const BUDGET_HEADS = [
   { code: '01-PRE', title: 'Preliminaries & Site Setup' },
@@ -59,17 +68,19 @@ function dateRangeArray(start, end) {
 
 export default function ScheduleMonitor() {
   const queryClient = useQueryClient();
+  const {
+    projects, subProjects, projectId, subProjectId, setProjectId, setSubProjectId,
+    isReady, selectedProject, selectedSubProject,
+  } = useProjectSubProject({ fetchWbs: false });
 
   // Queries
   const { data: activities = [] } = useQuery({ queryKey: ['activities-monitor'], queryFn: () => base44.entities.ScheduleActivity.list('order_index', 1000) });
-  const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: () => base44.entities.Project.list('-created_date', 200) });
   const { data: progressEntries = [] } = useQuery({ queryKey: ['progress-entries'], queryFn: () => base44.entities.ProgressEntry.list('-date', 1000) });
   const { data: budgetItems = [] } = useQuery({ queryKey: ['budget-items'], queryFn: () => base44.entities.BudgetItem.list('code', 1000) });
   const { data: wbsItems = [] } = useQuery({ queryKey: ['wbs-items'], queryFn: () => base44.entities.WBSItem.list('order_index', 1000) });
   const { data: scheduleTasks = [] } = useQuery({ queryKey: ['schedule-tasks'], queryFn: () => base44.entities.ScheduleTask.list('order_index', 1000) });
 
   // States
-  const [selectedProjectId, setSelectedProjectId] = React.useState('');
   const [kanbanGrouping, setKanbanGrouping] = React.useState('status'); // 'status' | 'phase'
   const [timelineZoom, setTimelineZoom] = React.useState('weeks'); // 'days' | 'weeks' | 'months'
   const [viewMode, setViewMode] = React.useState('split'); // 'table' | 'split' | 'timeline'
@@ -102,13 +113,6 @@ export default function ScheduleMonitor() {
   });
 
   const today = new Date().toISOString().split('T')[0];
-
-  // Set default project when projects load
-  React.useEffect(() => {
-    if (projects.length > 0 && !selectedProjectId) {
-      setSelectedProjectId(projects[0].id);
-    }
-  }, [projects, selectedProjectId]);
 
   // Mutations
   const updateActivityMutation = useMutation({ 
@@ -203,26 +207,50 @@ export default function ScheduleMonitor() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activities, progressByWbs, today]);
 
-  // Project Level Filtering
-  const projectActivities = React.useMemo(() => {
-    return activities.filter(a => !selectedProjectId || a.project_id === selectedProjectId);
-  }, [activities, selectedProjectId]);
+  // Project + sub-project scoped data
+  const projectWbsAll = React.useMemo(
+    () => wbsItems.filter((w) => !projectId || w.project_id === projectId),
+    [wbsItems, projectId]
+  );
 
-  const projectBudgetItems = React.useMemo(() => {
-    return budgetItems.filter(b => !selectedProjectId || b.project_id === selectedProjectId);
-  }, [budgetItems, selectedProjectId]);
+  const projectWbsItems = React.useMemo(
+    () => (isReady ? filterWbsBySubProject(projectWbsAll, subProjectId) : []),
+    [projectWbsAll, subProjectId, isReady]
+  );
 
-  const projectWbsItems = React.useMemo(() => {
-    return wbsItems.filter(w => !selectedProjectId || w.project_id === selectedProjectId);
-  }, [wbsItems, selectedProjectId]);
+  const projectBudgetAll = React.useMemo(
+    () => budgetItems.filter((b) => !projectId || b.project_id === projectId),
+    [budgetItems, projectId]
+  );
 
-  const projectTasks = React.useMemo(() => {
-    return scheduleTasks.filter(t => !selectedProjectId || t.project_id === selectedProjectId);
-  }, [scheduleTasks, selectedProjectId]);
+  const projectBudgetItems = React.useMemo(
+    () => (isReady ? filterBudgetBySubProject(projectBudgetAll, projectWbsAll, subProjectId) : []),
+    [projectBudgetAll, projectWbsAll, subProjectId, isReady]
+  );
 
-  const projectProgressEntries = React.useMemo(() => {
-    return progressEntries.filter(p => !selectedProjectId || p.project_id === selectedProjectId);
-  }, [progressEntries, selectedProjectId]);
+  const projectActivities = React.useMemo(
+    () => (isReady ? filterActivitiesBySubProject(
+      activities.filter((a) => !projectId || a.project_id === projectId),
+      projectWbsAll,
+      subProjectId
+    ) : []),
+    [activities, projectId, projectWbsAll, subProjectId, isReady]
+  );
+
+  const projectTasks = React.useMemo(
+    () => scheduleTasks.filter((t) => !projectId || t.project_id === projectId),
+    [scheduleTasks, projectId]
+  );
+
+  const projectProgressEntries = React.useMemo(
+    () => (isReady ? filterProgressBySubProject(
+      progressEntries.filter((p) => !projectId || p.project_id === projectId),
+      projectBudgetAll,
+      projectWbsAll,
+      subProjectId
+    ) : []),
+    [progressEntries, projectId, projectBudgetAll, projectWbsAll, subProjectId, isReady]
+  );
 
   // Dynamic Tree Grid Construction
   const treeData = React.useMemo(() => {
@@ -600,7 +628,7 @@ export default function ScheduleMonitor() {
     }
 
     const payload = {
-      project_id: selectedProjectId,
+      project_id: projectId,
       budget_item_id: logForm.budgetItem?.id || logForm.budgetHead?.id || '',
       wbs_item_id: selectedItem?.item.wbs_item_id || '',
       activity_id: selectedItem?.id,
@@ -662,18 +690,27 @@ export default function ScheduleMonitor() {
           <h1 className="text-3xl font-heading font-black tracking-tight text-primary">Schedule Monitoring Console</h1>
           <p className="text-sm text-muted-foreground mt-1 font-medium">MS Project interactive Gantt timeline & status Kanban dashboards.</p>
         </div>
-        <div className="flex items-center gap-3">
-          <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Active Project:</Label>
-          <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
-            <SelectTrigger className="w-64 bg-background shadow-sm border-primary/20 h-10 font-medium">
-              <SelectValue placeholder="Select Project" />
-            </SelectTrigger>
-            <SelectContent>
-              {projects.map(p => <SelectItem key={p.id} value={p.id} className="font-medium">{p.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+        <div className="flex flex-col sm:flex-row items-start sm:items-end gap-3">
+          <ProjectSubProjectSelector
+            projects={projects}
+            subProjects={subProjects}
+            projectId={projectId}
+            subProjectId={subProjectId}
+            onProjectChange={setProjectId}
+            onSubProjectChange={setSubProjectId}
+          />
         </div>
       </div>
+
+      {isReady && selectedProject && selectedSubProject && (
+        <p className="text-sm text-muted-foreground px-1">
+          Monitoring <span className="font-medium text-foreground">{selectedProject.name}</span>
+          {' → '}
+          <span className="font-medium text-foreground">{selectedSubProject.name}</span>
+        </p>
+      )}
+
+      <SubProjectGate projectId={projectId} subProjectId={subProjectId} subProjects={subProjects}>
 
       {/* Main Tabs Navigation */}
       <Tabs defaultValue="timeline" className="space-y-6">
@@ -1227,6 +1264,7 @@ export default function ScheduleMonitor() {
           </div>
         </TabsContent>
       </Tabs>
+      </SubProjectGate>
 
       {/* --- SIDE DETAILS DRAWER (ACTION SHEET) --- */}
       <Sheet open={isDrawerOpen} onOpenChange={setIsDrawerOpen}>

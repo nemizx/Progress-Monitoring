@@ -12,31 +12,68 @@ import ReactMarkdown from 'react-markdown';
 import StatCard from '@/components/shared/StatCard';
 import StatusBadge from '@/components/shared/StatusBadge';
 import { formatCompactCurrencyINR } from '@/lib/formatters';
+import { useProjectSubProject } from '@/hooks/useProjectSubProject';
+import ProjectSubProjectSelector from '@/components/shared/ProjectSubProjectSelector';
+import SubProjectGate from '@/components/shared/SubProjectGate';
+import {
+  filterActivitiesBySubProject,
+  filterBudgetBySubProject,
+  filterProgressBySubProject,
+} from '@/lib/subProjectScope';
 
 const PIE_COLORS = ['#1e3a5f', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444'];
 
 export default function Reports() {
+  const {
+    projects, subProjects, wbsItems, projectId, subProjectId,
+    setProjectId, setSubProjectId, isReady, selectedProject, selectedSubProject,
+  } = useProjectSubProject({ fetchWbs: true });
+
   const [reportType, setReportType] = useState('daily');
-  const [projectId, setProjectId] = useState('all');
   const [generating, setGenerating] = useState(false);
   const [report, setReport] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboards');
 
-  const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: () => base44.entities.Project.list('-created_date', 100) });
-  const { data: milestones = [] } = useQuery({ queryKey: ['milestones-all'], queryFn: () => base44.entities.Milestone.list('-created_date', 500) });
-  const { data: scheduleTasks = [] } = useQuery({ queryKey: ['schedule-activities-all'], queryFn: () => base44.entities.ScheduleActivity.list('-created_date', 500) });
-  const { data: progressEntries = [] } = useQuery({ queryKey: ['progress-all'], queryFn: () => base44.entities.ProgressEntry.list('-date', 500) });
-  const { data: changes = [] } = useQuery({ queryKey: ['changes-all'], queryFn: () => base44.entities.ChangeEvent.list('-created_date', 200) });
-  const { data: budgetItems = [] } = useQuery({ queryKey: ['budget-all'], queryFn: () => base44.entities.BudgetItem.list('code', 500) });
+  const { data: milestones = [] } = useQuery({
+    queryKey: ['milestones', projectId],
+    queryFn: () => projectId ? base44.entities.Milestone.filter({ project_id: projectId }, '-created_date', 500) : Promise.resolve([]),
+    enabled: !!projectId,
+  });
+  const { data: scheduleTasks = [] } = useQuery({
+    queryKey: ['schedule-activities', projectId],
+    queryFn: () => projectId ? base44.entities.ScheduleActivity.filter({ project_id: projectId }, '-created_date', 500) : Promise.resolve([]),
+    enabled: !!projectId,
+  });
+  const { data: progressEntries = [] } = useQuery({
+    queryKey: ['progress', projectId],
+    queryFn: () => projectId ? base44.entities.ProgressEntry.filter({ project_id: projectId }, '-date', 500) : Promise.resolve([]),
+    enabled: !!projectId,
+  });
+  const { data: changes = [] } = useQuery({
+    queryKey: ['changes', projectId],
+    queryFn: () => projectId ? base44.entities.ChangeEvent.filter({ project_id: projectId }, '-created_date', 200) : Promise.resolve([]),
+    enabled: !!projectId,
+  });
+  const { data: budgetItems = [] } = useQuery({
+    queryKey: ['budget', projectId],
+    queryFn: () => projectId ? base44.entities.BudgetItem.filter({ project_id: projectId }, 'code', 500) : Promise.resolve([]),
+    enabled: !!projectId,
+  });
 
-  const fp = (items) => projectId === 'all' ? items : items.filter(i => i.project_id === projectId);
+  const scopedBudget = isReady ? filterBudgetBySubProject(budgetItems, wbsItems, subProjectId) : [];
+  const scopedTasks = isReady ? filterActivitiesBySubProject(scheduleTasks, wbsItems, subProjectId) : [];
+  const scopedEntries = isReady ? filterProgressBySubProject(progressEntries, budgetItems, wbsItems, subProjectId) : [];
+  const scopedActivityIds = new Set(scopedTasks.map((t) => t.id));
+  const scopedChanges = isReady
+    ? changes.filter((c) => !c.activity_id || scopedActivityIds.has(c.activity_id))
+    : [];
 
-  const filteredProjects = projectId === 'all' ? projects : projects.filter(p => p.id === projectId);
-  const filteredMilestones = fp(milestones);
-  const filteredTasks = fp(scheduleTasks);
-  const filteredEntries = fp(progressEntries);
-  const filteredChanges = fp(changes);
-  const filteredBudget = fp(budgetItems);
+  const filteredProjects = isReady && selectedProject ? [selectedProject] : [];
+  const filteredMilestones = isReady ? milestones : [];
+  const filteredTasks = scopedTasks;
+  const filteredEntries = scopedEntries;
+  const filteredChanges = scopedChanges;
+  const filteredBudget = scopedBudget;
 
   // Portfolio metrics
   const avgProgress = filteredProjects.length > 0 ? Math.round(filteredProjects.reduce((s, p) => s + (p.progress || 0), 0) / filteredProjects.length) : 0;
@@ -63,6 +100,7 @@ export default function Reports() {
   const changeChart = Object.entries(changeCats).map(([name, value]) => ({ name: name.replace(/_/g,' '), value }));
 
   const generateReport = async () => {
+    if (!isReady) return;
     setGenerating(true);
     const today = new Date().toISOString().split('T')[0];
     const prompt = `Generate a professional ${reportType} construction progress report (${today}).
@@ -87,17 +125,23 @@ Format with markdown. Be specific, professional, and actionable.`;
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-heading font-bold tracking-tight">Reports & Analytics</h1>
-          <p className="text-sm text-muted-foreground mt-1">Executive dashboards, DPR/WPR/MPR, and portfolio analytics</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            Executive dashboards, DPR/WPR/MPR, and portfolio analytics
+            {selectedSubProject ? ` — ${selectedSubProject.name}` : ''}
+          </p>
         </div>
-        <Select value={projectId} onValueChange={setProjectId}>
-          <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Projects</SelectItem>
-            {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
       </div>
 
+      <ProjectSubProjectSelector
+        projects={projects}
+        subProjects={subProjects}
+        projectId={projectId}
+        subProjectId={subProjectId}
+        onProjectChange={setProjectId}
+        onSubProjectChange={setSubProjectId}
+      />
+
+      <SubProjectGate projectId={projectId} subProjectId={subProjectId} subProjects={subProjects}>
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="dashboards">Dashboards</TabsTrigger>
@@ -230,7 +274,7 @@ Format with markdown. Be specific, professional, and actionable.`;
                     </TabsList>
                   </Tabs>
                 </div>
-                <Button onClick={generateReport} disabled={generating} className="gap-2">
+                <Button onClick={generateReport} disabled={generating || !isReady} className="gap-2">
                   {generating ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</> : <><FileText className="w-4 h-4" /> Generate Report</>}
                 </Button>
               </div>
@@ -262,6 +306,7 @@ Format with markdown. Be specific, professional, and actionable.`;
           )}
         </TabsContent>
       </Tabs>
+      </SubProjectGate>
     </div>
   );
 }

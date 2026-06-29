@@ -284,7 +284,7 @@ export const getModelParameters = async () => {
   return await loadModelParameters();
 };
 
-export const generateSchedule = async ({ projectId, projectType, startDate, durationMonths, floors, numSubprojects, includeMep, handoverType, standardAnswers = {}, keyConstraints }) => {
+export const generateSchedule = async ({ projectId, subProjectId, projectType, startDate, durationMonths, floors, numSubprojects, includeMep, handoverType, standardAnswers = {}, keyConstraints }) => {
   const modelParams = await loadModelParameters();
   const templates = buildMilestoneTemplates({ projectType, floors, numSubprojects, includeMep, handoverType, standardAnswers, modelParams });
   const schedule = computeScheduleDates(templates, startDate).map((item) => ({
@@ -301,7 +301,8 @@ export const generateSchedule = async ({ projectId, projectType, startDate, dura
   return {
     schedule,
     features: {
-      projectType,
+      projectType: projectType || 'Standard',
+      subProjectId: subProjectId || null,
       durationMonths: normalizeNumeric(durationMonths, 12),
       floors: normalizeNumeric(floors, 5),
       numSubprojects: normalizeNumeric(numSubprojects, 1),
@@ -317,11 +318,12 @@ export const generateSchedule = async ({ projectId, projectType, startDate, dura
   };
 };
 
-export const finalizeSchedule = async ({ projectId, features, schedule }) => {
+export const finalizeSchedule = async ({ projectId, subProjectId, features, schedule }) => {
   const records = await loadTrainingRecords();
   const modelParams = await loadModelParameters();
   const normalizedFeatures = {
     ...features,
+    subProjectId: subProjectId || features?.subProjectId || null,
     floors: normalizeNumeric(features.floors, 5),
     numSubprojects: normalizeNumeric(features.numSubprojects, 1)
   };
@@ -329,6 +331,7 @@ export const finalizeSchedule = async ({ projectId, features, schedule }) => {
   const record = {
     id: `train_${Math.random().toString(36).substring(2, 11)}`,
     projectId,
+    subProjectId: normalizedFeatures.subProjectId,
     created_at: new Date().toISOString(),
     features: normalizedFeatures,
     schedule: schedule.map(item => ({ ...item }))

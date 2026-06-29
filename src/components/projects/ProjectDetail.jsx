@@ -9,24 +9,32 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { ArrowLeft, Plus, Target, Clock, Trash2, Shield, Settings, Users, Layers, Save } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { ArrowLeft, Plus, Target, Clock, Trash2, Settings, Users, Save, Building2, Pencil } from 'lucide-react';
 import StatusBadge from '@/components/shared/StatusBadge';
 import ProgressRing from '@/components/shared/ProgressRing';
 import { formatCurrencyINR, formatDateIndian } from '@/lib/formatters';
+import { useToast } from '@/components/ui/use-toast';
+import { PROJECT_TYPES, getProjectTypeLabel } from '@/lib/projectTypes';
 
 export default function ProjectDetail({ project, onBack }) {
   const [showAddMilestone, setShowAddMilestone] = useState(false);
+  const [showSubProjectModal, setShowSubProjectModal] = useState(false);
+  const [editSubProject, setEditSubProject] = useState(null);
   const [projectForm, setProjectForm] = useState({ ...project });
+  const [subProjForm, setSubProjForm] = useState({
+    name: '', built_up_area: '', floors_count: '', flats_per_floor: '',
+  });
   const [milestoneForm, setMilestoneForm] = useState({ 
     project_id: project.id, title: '', description: '', phase: 'other', status: 'not_started',
     planned_start: '', planned_end: '', assigned_to: '', priority: 'medium', progress: 0 
   });
   
-  const [newWbsName, setNewWbsName] = useState('');
   const [selectedUserToAssign, setSelectedUserToAssign] = useState('');
 
   const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const resetSubProjForm = () => setSubProjForm({ name: '', built_up_area: '', floors_count: '', flats_per_floor: '' });
 
   useEffect(() => {
     setProjectForm({ ...project });
@@ -38,9 +46,9 @@ export default function ProjectDetail({ project, onBack }) {
     queryFn: () => base44.entities.Milestone.filter({ project_id: project.id }, '-created_date', 100),
   });
 
-  const { data: wbsItems = [] } = useQuery({
-    queryKey: ['wbs', project.id],
-    queryFn: () => base44.entities.WBSItem.filter({ project_id: project.id }),
+  const { data: subProjects = [], isLoading: loadingSubProjects } = useQuery({
+    queryKey: ['subprojects', project.id],
+    queryFn: () => base44.entities.SubProject.filter({ project_id: project.id }, '-created_date', 100),
   });
 
   const { data: users = [] } = useQuery({
@@ -62,10 +70,30 @@ export default function ProjectDetail({ project, onBack }) {
   });
 
   const updateProjectMutation = useMutation({
-    mutationFn: (data) => base44.entities.Project.update(project.id, data),
-    onSuccess: (updated) => { 
-      queryClient.invalidateQueries({ queryKey: ['projects'] }); 
+    mutationFn: (data) => {
+      const {
+        id: _id,
+        created_date: _created,
+        updated_date: _updated,
+        created_by_id: _creator,
+        ...payload
+      } = data;
+      return base44.entities.Project.update(project.id, payload);
+    },
+    onSuccess: (updated) => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
       setProjectForm(updated);
+      toast({
+        title: 'Project saved',
+        description: 'Project details were updated successfully.',
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Save failed',
+        description: error?.message || 'Could not update project. Try again.',
+        variant: 'destructive',
+      });
     },
   });
 
@@ -79,29 +107,122 @@ export default function ProjectDetail({ project, onBack }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['milestones', project.id] }),
   });
 
-  const createWbsMutation = useMutation({
-    mutationFn: (name) => base44.entities.WBSItem.create({
-      project_id: project.id,
-      title: name,
-      name: name,
-      code: `SP_${Date.now().toString().slice(-4)}`,
-      level: 1,
-      order_index: wbsItems.length,
-      status: 'not_started',
-      progress: 0
-    }),
+  const createSubProjectMutation = useMutation({
+    mutationFn: async (data) => {
+      const subProj = await base44.entities.SubProject.create(data);
+      const floors = parseInt(data.floors_count, 10) || 0;
+      const flatsPerFloor = parseInt(data.flats_per_floor, 10) || 0;
+      const totalFlats = floors * flatsPerFloor;
+
+      if (totalFlats > 0) {
+        const flatsList = [];
+        const baseArea = (parseFloat(data.built_up_area) || 0) / totalFlats;
+        for (let floor = 1; floor <= floors; floor++) {
+          for (let fIdx = 1; fIdx <= flatsPerFloor; fIdx++) {
+            flatsList.push({
+              project_id: project.id,
+              sub_project_id: subProj.id,
+              floor_number: floor,
+              flat_number: `${floor}${String(fIdx).padStart(2, '0')}`,
+              area_sqft: parseFloat(baseArea.toFixed(2)),
+              cost_estimate: 0,
+            });
+          }
+        }
+        await base44.entities.ProjectFlat.bulkCreate(flatsList);
+      }
+      return subProj;
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['wbs', project.id] });
-      setNewWbsName('');
-    }
+      queryClient.invalidateQueries({ queryKey: ['subprojects', project.id] });
+      queryClient.invalidateQueries({ queryKey: ['flats', project.id] });
+      setShowSubProjectModal(false);
+      setEditSubProject(null);
+      resetSubProjForm();
+      toast({ title: 'Sub-project Created', description: 'Sub-project was added successfully.' });
+    },
+    onError: (err) => {
+      toast({
+        title: 'Could not create sub-project',
+        description: err?.message || 'Something went wrong. Check that the server is running.',
+        variant: 'destructive',
+      });
+    },
   });
 
-  const deleteWbsMutation = useMutation({
-    mutationFn: (id) => base44.entities.WBSItem.delete(id),
+  const updateSubProjectMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.SubProject.update(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['wbs', project.id] });
-    }
+      queryClient.invalidateQueries({ queryKey: ['subprojects', project.id] });
+      setShowSubProjectModal(false);
+      setEditSubProject(null);
+      resetSubProjForm();
+      toast({ title: 'Sub-project Updated', description: 'Changes were saved.' });
+    },
+    onError: (err) => {
+      toast({
+        title: 'Could not update sub-project',
+        description: err?.message || 'Something went wrong.',
+        variant: 'destructive',
+      });
+    },
   });
+
+  const deleteSubProjectMutation = useMutation({
+    mutationFn: (id) => base44.entities.SubProject.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['subprojects', project.id] });
+      queryClient.invalidateQueries({ queryKey: ['flats', project.id] });
+      toast({ title: 'Sub-project Deleted' });
+    },
+    onError: (err) => {
+      toast({
+        title: 'Could not delete sub-project',
+        description: err?.message || 'Something went wrong.',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const openAddSubProject = () => {
+    setEditSubProject(null);
+    resetSubProjForm();
+    setShowSubProjectModal(true);
+  };
+
+  const openEditSubProject = (sp) => {
+    setEditSubProject(sp);
+    setSubProjForm({
+      name: sp.name || '',
+      built_up_area: sp.built_up_area ?? '',
+      floors_count: sp.floors_count != null && sp.floors_count !== '' ? String(sp.floors_count) : '',
+      flats_per_floor: sp.flats_per_floor != null && sp.flats_per_floor !== '' ? String(sp.flats_per_floor) : '',
+    });
+    setShowSubProjectModal(true);
+  };
+
+  const handleSubProjectSubmit = () => {
+    if (!subProjForm.name.trim()) {
+      toast({
+        title: 'Name required',
+        description: 'Please enter a sub-project name.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    const payload = {
+      project_id: project.id,
+      name: subProjForm.name.trim(),
+      built_up_area: subProjForm.built_up_area !== '' ? parseFloat(subProjForm.built_up_area) || 0 : 0,
+      floors_count: subProjForm.floors_count !== '' ? parseInt(subProjForm.floors_count, 10) || 0 : 0,
+      flats_per_floor: subProjForm.flats_per_floor !== '' ? parseInt(subProjForm.flats_per_floor, 10) || 0 : 0,
+    };
+    if (editSubProject) {
+      updateSubProjectMutation.mutate({ id: editSubProject.id, data: payload });
+    } else {
+      createSubProjectMutation.mutate(payload);
+    }
+  };
 
   const phases = ['foundation', 'structure', 'mep', 'finishing', 'handover', 'other'];
   const assignedUsers = projectForm.assigned_users || [];
@@ -120,7 +241,13 @@ export default function ProjectDetail({ project, onBack }) {
               <ProgressRing value={project.progress || 0} size={64} strokeWidth={4} />
               <div>
                 <h1 className="text-xl font-heading font-bold">{project.name}</h1>
-                <p className="text-sm text-muted-foreground">{project.location || 'No Location Set'} · {project.client || 'No Client Set'}</p>
+                <p className="text-sm text-muted-foreground">
+                  {project.project_code ? `Code: ${project.project_code} · ` : ''}
+                  {project.location || 'No Location Set'} · {project.client || 'No Client Set'}
+                  {project.project_type && (
+                    <> · <span className="font-medium text-foreground">{getProjectTypeLabel(project.project_type)}</span></>
+                  )}
+                </p>
                 <div className="flex gap-2 mt-2">
                   <StatusBadge status={project.status} />
                   <StatusBadge status={project.priority} />
@@ -140,12 +267,15 @@ export default function ProjectDetail({ project, onBack }) {
 
       {/* Navigation tabs between Milestones and Administration Settings */}
       <Tabs defaultValue="milestones" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-2 max-w-[400px]">
+        <TabsList className="grid w-full grid-cols-3 max-w-[560px]">
           <TabsTrigger value="milestones" className="gap-2">
-            <Target className="w-4 h-4" /> Milestones & Phases
+            <Target className="w-4 h-4" /> Milestones
+          </TabsTrigger>
+          <TabsTrigger value="subprojects" className="gap-2">
+            <Building2 className="w-4 h-4" /> Sub Projects
           </TabsTrigger>
           <TabsTrigger value="admin" className="gap-2">
-            <Settings className="w-4 h-4" /> Project Admin & Settings
+            <Settings className="w-4 h-4" /> Settings
           </TabsTrigger>
         </TabsList>
 
@@ -239,7 +369,83 @@ export default function ProjectDetail({ project, onBack }) {
           </Tabs>
         </TabsContent>
 
-        {/* 2. Admin Settings & Edit Tab */}
+        {/* 2. Sub Projects Tab */}
+        <TabsContent value="subprojects" className="space-y-6 mt-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-heading font-semibold">Sub Projects</h2>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Assign one or more sub-projects (towers, blocks, phases) to this project.
+              </p>
+            </div>
+            <Button size="sm" className="gap-2" onClick={openAddSubProject}>
+              <Plus className="w-4 h-4" /> Add Sub Project
+            </Button>
+          </div>
+
+          {loadingSubProjects ? (
+            <p className="text-center text-sm text-muted-foreground py-12">Loading sub-projects...</p>
+          ) : subProjects.length === 0 ? (
+            <Card className="border-dashed">
+              <CardContent className="py-12 text-center">
+                <Building2 className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
+                <p className="text-sm font-medium">No sub-projects yet</p>
+                <p className="text-xs text-muted-foreground mt-1 mb-4">
+                  Add towers, blocks, or packages linked to this project.
+                </p>
+                <Button size="sm" className="gap-2" onClick={openAddSubProject}>
+                  <Plus className="w-4 h-4" /> Add Sub Project
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {subProjects.map((sp) => (
+                <Card key={sp.id} className="hover:shadow-md transition-shadow">
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-semibold text-sm">{sp.name}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {(sp.floors_count || 0)} floors · {(sp.flats_per_floor || 0)} flats/floor
+                        </p>
+                      </div>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditSubProject(sp)}>
+                          <Pencil className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                          onClick={() => {
+                            if (confirm(`Delete sub-project "${sp.name}" and its flat breakdown?`)) {
+                              deleteSubProjectMutation.mutate(sp.id);
+                            }
+                          }}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="p-2 rounded-lg bg-muted/40">
+                        <p className="text-muted-foreground">Built-up Area</p>
+                        <p className="font-semibold mt-0.5">{Number(sp.built_up_area || 0).toLocaleString()} sqft</p>
+                      </div>
+                      <div className="p-2 rounded-lg bg-muted/40">
+                        <p className="text-muted-foreground">Total Flats</p>
+                        <p className="font-semibold mt-0.5">{(sp.floors_count || 0) * (sp.flats_per_floor || 0)}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* 3. Admin Settings Tab */}
         <TabsContent value="admin" className="mt-4">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
@@ -261,6 +467,17 @@ export default function ProjectDetail({ project, onBack }) {
                       />
                     </div>
                     <div>
+                      <Label>Project Code</Label>
+                      <Input
+                        value={projectForm.project_code || ''}
+                        onChange={e => setProjectForm({ ...projectForm, project_code: e.target.value })}
+                        placeholder="e.g. PRJ-001"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
                       <Label>Client Name</Label>
                       <Input 
                         value={projectForm.client || ''} 
@@ -271,11 +488,18 @@ export default function ProjectDetail({ project, onBack }) {
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <Label>Location</Label>
-                      <Input 
-                        value={projectForm.location || ''} 
-                        onChange={e => setProjectForm({ ...projectForm, location: e.target.value })} 
-                      />
+                      <Label>Project Type *</Label>
+                      <Select
+                        value={projectForm.project_type || undefined}
+                        onValueChange={(v) => setProjectForm({ ...projectForm, project_type: v })}
+                      >
+                        <SelectTrigger><SelectValue placeholder="Select project type" /></SelectTrigger>
+                        <SelectContent>
+                          {PROJECT_TYPES.map((t) => (
+                            <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div>
                       <Label>Project Manager</Label>
@@ -284,6 +508,14 @@ export default function ProjectDetail({ project, onBack }) {
                         onChange={e => setProjectForm({ ...projectForm, project_manager: e.target.value })} 
                       />
                     </div>
+                  </div>
+
+                  <div>
+                    <Label>Location</Label>
+                    <Input 
+                      value={projectForm.location || ''} 
+                      onChange={e => setProjectForm({ ...projectForm, location: e.target.value })} 
+                    />
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -370,9 +602,10 @@ export default function ProjectDetail({ project, onBack }) {
                   </div>
 
                   <Button 
+                    type="button"
                     className="w-full gap-2 bg-primary text-white" 
                     onClick={() => updateProjectMutation.mutate(projectForm)}
-                    disabled={updateProjectMutation.isPending}
+                    disabled={updateProjectMutation.isPending || !projectForm.name?.trim()}
                   >
                     <Save className="w-4 h-4" />
                     {updateProjectMutation.isPending ? 'Saving...' : 'Save Project Details'}
@@ -381,66 +614,9 @@ export default function ProjectDetail({ project, onBack }) {
               </Card>
             </div>
 
-            {/* Right Side: Sub-projects (Towers) and Assigned Users config */}
+            {/* Right Side: Assigned Users config */}
             <div className="space-y-6">
               
-              {/* Sub-projects (Towers) */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base font-semibold flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-primary" /> Sub-Projects & Towers
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  
-                  {/* Create Subproject */}
-                  <div className="flex gap-2">
-                    <Input 
-                      placeholder="e.g. Tower A" 
-                      value={newWbsName} 
-                      onChange={e => setNewWbsName(e.target.value)} 
-                    />
-                    <Button 
-                      onClick={() => {
-                        if (newWbsName.trim()) {
-                          createWbsMutation.mutate(newWbsName.trim());
-                        }
-                      }}
-                      disabled={createWbsMutation.isPending || !newWbsName.trim()}
-                    >
-                      Add
-                    </Button>
-                  </div>
-
-                  {/* List of subprojects */}
-                  <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
-                    {wbsItems.map(item => (
-                      <div key={item.id} className="flex items-center justify-between p-2.5 rounded-lg border bg-card text-xs">
-                        <div>
-                          <p className="font-semibold text-foreground">{item.title || item.name}</p>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">{item.code}</p>
-                        </div>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-7 w-7 text-destructive hover:bg-destructive/10"
-                          onClick={() => {
-                            if (confirm(`Are you sure you want to delete ${item.title || item.name}?`)) {
-                              deleteWbsMutation.mutate(item.id);
-                            }
-                          }}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
-                      </div>
-                    ))}
-                    {wbsItems.length === 0 && (
-                      <p className="text-center text-xs text-muted-foreground py-6">No sub-projects/towers configured.</p>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-
               {/* Assigned Users */}
               <Card>
                 <CardHeader>
@@ -517,6 +693,73 @@ export default function ProjectDetail({ project, onBack }) {
           </div>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={showSubProjectModal} onOpenChange={(open) => {
+        setShowSubProjectModal(open);
+        if (!open) {
+          setEditSubProject(null);
+          resetSubProjForm();
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editSubProject ? 'Edit Sub Project' : 'Add Sub Project'}</DialogTitle>
+            <DialogDescription>
+              Sub-projects are linked to this project only. You can add multiple towers, blocks, or packages.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label>Sub-project Name *</Label>
+              <Input
+                value={subProjForm.name}
+                onChange={(e) => setSubProjForm({ ...subProjForm, name: e.target.value })}
+                placeholder="e.g. Tower A, Block B, Phase 1"
+              />
+            </div>
+            <div>
+              <Label>Built-up Area (sqft)</Label>
+              <Input
+                type="number"
+                value={subProjForm.built_up_area}
+                onChange={(e) => setSubProjForm({ ...subProjForm, built_up_area: e.target.value })}
+                placeholder="e.g. 50000"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Floors</Label>
+                <Input
+                  type="number"
+                  value={subProjForm.floors_count}
+                  onChange={(e) => setSubProjForm({ ...subProjForm, floors_count: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label>Flats per Floor</Label>
+                <Input
+                  type="number"
+                  value={subProjForm.flats_per_floor}
+                  onChange={(e) => setSubProjForm({ ...subProjForm, flats_per_floor: e.target.value })}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSubProjectModal(false)}>Cancel</Button>
+            <Button
+              onClick={handleSubProjectSubmit}
+              disabled={
+                !subProjForm.name.trim() ||
+                createSubProjectMutation.isPending ||
+                updateSubProjectMutation.isPending
+              }
+            >
+              {editSubProject ? 'Save Changes' : 'Add Sub Project'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

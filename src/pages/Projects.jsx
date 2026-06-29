@@ -14,13 +14,18 @@ import ProgressRing from '@/components/shared/ProgressRing';
 import EmptyState from '@/components/shared/EmptyState';
 import ProjectDetail from '@/components/projects/ProjectDetail';
 import { formatCompactCurrencyINR } from '@/lib/formatters';
+import { PROJECT_TYPES, getProjectTypeLabel } from '@/lib/projectTypes';
 
 export default function Projects() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [showCreate, setShowCreate] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null);
-  const [form, setForm] = useState({ name: '', description: '', location: '', client: '', status: 'planning', start_date: '', end_date: '', budget: '', project_manager: '', priority: 'medium' });
+  const [form, setForm] = useState({
+    name: '', description: '', location: '', client: '', status: 'planning',
+    start_date: '', end_date: '', budget: '', project_manager: '', priority: 'medium',
+    project_type: 'residential', project_code: '',
+  });
 
   const queryClient = useQueryClient();
 
@@ -34,10 +39,18 @@ export default function Projects() {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['projects'] }); setShowCreate(false); resetForm(); },
   });
 
-  const resetForm = () => setForm({ name: '', description: '', location: '', client: '', status: 'planning', start_date: '', end_date: '', budget: '', project_manager: '', priority: 'medium' });
+  const resetForm = () => setForm({
+    name: '', description: '', location: '', client: '', status: 'planning',
+    start_date: '', end_date: '', budget: '', project_manager: '', priority: 'medium',
+    project_type: 'residential', project_code: '',
+  });
 
   const filtered = projects.filter(p => {
-    const matchSearch = !search || p.name?.toLowerCase().includes(search.toLowerCase()) || p.location?.toLowerCase().includes(search.toLowerCase());
+    const query = search.toLowerCase();
+    const matchSearch = !search
+      || p.name?.toLowerCase().includes(query)
+      || p.location?.toLowerCase().includes(query)
+      || p.project_code?.toLowerCase().includes(query);
     const matchStatus = statusFilter === 'all' || p.status === statusFilter;
     return matchSearch && matchStatus;
   });
@@ -70,8 +83,23 @@ export default function Projects() {
                 <Input value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="e.g. Tower Block A" />
               </div>
               <div>
+                <Label>Project Code</Label>
+                <Input value={form.project_code} onChange={e => setForm({...form, project_code: e.target.value})} placeholder="e.g. PRJ-001" />
+              </div>
+              <div>
                 <Label>Description</Label>
                 <Textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="Project details..." rows={3} />
+              </div>
+              <div>
+                <Label>Project Type *</Label>
+                <Select value={form.project_type} onValueChange={(v) => setForm({ ...form, project_type: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select project type" /></SelectTrigger>
+                  <SelectContent>
+                    {PROJECT_TYPES.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -115,7 +143,7 @@ export default function Projects() {
                 <Label>Project Manager</Label>
                 <Input value={form.project_manager} onChange={e => setForm({...form, project_manager: e.target.value})} placeholder="Name" />
               </div>
-              <Button className="w-full" onClick={() => createMutation.mutate({...form, budget: form.budget || 0})} disabled={!form.name || createMutation.isPending}>
+              <Button className="w-full" onClick={() => createMutation.mutate({ ...form, budget: form.budget || 0 })} disabled={!form.name || !form.project_type || createMutation.isPending}>
                 {createMutation.isPending ? 'Creating...' : 'Create Project'}
               </Button>
             </div>
@@ -155,6 +183,9 @@ export default function Projects() {
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
                     <CardTitle className="text-base font-heading truncate group-hover:text-accent transition-colors">{project.name}</CardTitle>
+                    {project.project_code && (
+                      <p className="text-xs text-muted-foreground mt-0.5">Code: {project.project_code}</p>
+                    )}
                     {project.location && (
                       <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
                         <MapPin className="w-3 h-3" /> {project.location}
@@ -168,6 +199,11 @@ export default function Projects() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <StatusBadge status={project.status} />
                   <StatusBadge status={project.priority} />
+                  {project.project_type && (
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border">
+                      {getProjectTypeLabel(project.project_type)}
+                    </span>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-3 text-xs text-muted-foreground">
                   {project.start_date && (

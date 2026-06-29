@@ -12,13 +12,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Wand2, Upload, Plus, AlertTriangle, CheckCircle, Loader2, CalendarClock, Trash2 } from 'lucide-react';
 import StatusBadge from '@/components/shared/StatusBadge';
 import EmptyState from '@/components/shared/EmptyState';
+import { useProjectSubProject } from '@/hooks/useProjectSubProject';
+import ProjectSubProjectSelector from '@/components/shared/ProjectSubProjectSelector';
+import SubProjectGate from '@/components/shared/SubProjectGate';
 
 export default function SmartScheduler() {
+  const {
+    projects, subProjects, projectId, subProjectId,
+    setProjectId, setSubProjectId, isReady, selectedSubProject,
+  } = useProjectSubProject();
+
   const [activeTab, setActiveTab] = useState('schedule');
   const [showGenerate, setShowGenerate] = useState(false);
   const [showAddTask, setShowAddTask] = useState(false);
   const [showAnalyze, setShowAnalyze] = useState(false);
-  const [projectFilter, setProjectFilter] = useState('all');
   const [generating, setGenerating] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
@@ -29,13 +36,11 @@ export default function SmartScheduler() {
   const queryClient = useQueryClient();
 
   const { data: tasks = [] } = useQuery({
-    queryKey: ['schedule-tasks'],
-    queryFn: () => base44.entities.ScheduleTask.list('order_index', 500),
-  });
-
-  const { data: projects = [] } = useQuery({
-    queryKey: ['projects'],
-    queryFn: () => base44.entities.Project.list('-created_date', 100),
+    queryKey: ['schedule-tasks', projectId],
+    queryFn: () => projectId
+      ? base44.entities.ScheduleTask.filter({ project_id: projectId }, 'order_index', 500)
+      : Promise.resolve([]),
+    enabled: !!projectId,
   });
 
   const createTaskMutation = useMutation({
@@ -53,9 +58,25 @@ export default function SmartScheduler() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['schedule-tasks'] }),
   });
 
-  const filtered = projectFilter === 'all' ? tasks : tasks.filter(t => t.project_id === projectFilter);
+  const filtered = isReady ? tasks : [];
   const getProjectName = (id) => projects.find(p => p.id === id)?.name || 'Unknown';
 
+  const openAddTask = () => {
+    setTaskForm({
+      project_id: projectId,
+      name: '', phase: 'other', start_date: '', end_date: '', duration_days: '',
+      assigned_crew: '', resources_needed: '', is_critical_path: false,
+    });
+    setShowAddTask(true);
+  };
+
+  const openGenerate = () => {
+    setGenForm({
+      project_id: projectId,
+      project_type: '', num_floors: '', start_date: '', duration_months: '', special_requirements: '',
+    });
+    setShowGenerate(true);
+  };
   const handleGenerateSchedule = async () => {
     setGenerating(true);
     const prompt = `Generate a detailed construction schedule for a ${genForm.project_type} project with ${genForm.num_floors} floors. 
@@ -157,12 +178,15 @@ export default function SmartScheduler() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-heading font-bold tracking-tight">Smart Scheduler</h1>
-          <p className="text-sm text-muted-foreground mt-1">AI-powered scheduling and schedule analysis</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            AI-powered scheduling and schedule analysis
+            {selectedSubProject ? ` — ${selectedSubProject.name}` : ''}
+          </p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <Dialog open={showAnalyze} onOpenChange={v => { setShowAnalyze(v); if(!v) setAnalysisResult(null); }}>
             <DialogTrigger asChild>
-              <Button variant="outline" className="gap-2"><Upload className="w-4 h-4" /> Analyze Schedule</Button>
+              <Button variant="outline" className="gap-2" disabled={!isReady}><Upload className="w-4 h-4" /> Analyze Schedule</Button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
               <DialogHeader><DialogTitle>Analyze Schedule File</DialogTitle></DialogHeader>
@@ -200,19 +224,13 @@ export default function SmartScheduler() {
               </div>
             </DialogContent>
           </Dialog>
+          <Button className="gap-2" disabled={!isReady} onClick={openGenerate}>
+            <Wand2 className="w-4 h-4" /> Generate Schedule
+          </Button>
           <Dialog open={showGenerate} onOpenChange={setShowGenerate}>
-            <DialogTrigger asChild>
-              <Button className="gap-2"><Wand2 className="w-4 h-4" /> Generate Schedule</Button>
-            </DialogTrigger>
             <DialogContent>
               <DialogHeader><DialogTitle>AI Schedule Generator</DialogTitle></DialogHeader>
               <div className="space-y-4 mt-4">
-                <div><Label>Project *</Label>
-                  <Select value={genForm.project_id} onValueChange={v => setGenForm({...genForm, project_id: v})}>
-                    <SelectTrigger><SelectValue placeholder="Select project" /></SelectTrigger>
-                    <SelectContent>{projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
                 <div><Label>Project Type</Label><Input value={genForm.project_type} onChange={e => setGenForm({...genForm, project_type: e.target.value})} placeholder="e.g. Residential tower, Commercial building" /></div>
                 <div className="grid grid-cols-2 gap-4">
                   <div><Label>Number of Floors</Label><Input type="number" value={genForm.num_floors} onChange={e => setGenForm({...genForm, num_floors: e.target.value})} /></div>
@@ -229,28 +247,24 @@ export default function SmartScheduler() {
         </div>
       </div>
 
-      {/* Filters */}
+      <ProjectSubProjectSelector
+        projects={projects}
+        subProjects={subProjects}
+        projectId={projectId}
+        subProjectId={subProjectId}
+        onProjectChange={setProjectId}
+        onSubProjectChange={setSubProjectId}
+      />
+
+      <SubProjectGate projectId={projectId} subProjectId={subProjectId} subProjects={subProjects}>
       <div className="flex gap-3 flex-wrap">
-        <Select value={projectFilter} onValueChange={setProjectFilter}>
-          <SelectTrigger className="w-48"><SelectValue placeholder="Filter by project" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Projects</SelectItem>
-            {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <Button variant="outline" size="sm" className="gap-2" disabled={!isReady} onClick={openAddTask}>
+          <Plus className="w-4 h-4" /> Add Task
+        </Button>
         <Dialog open={showAddTask} onOpenChange={setShowAddTask}>
-          <DialogTrigger asChild>
-            <Button variant="outline" size="sm" className="gap-2"><Plus className="w-4 h-4" /> Add Task</Button>
-          </DialogTrigger>
           <DialogContent>
             <DialogHeader><DialogTitle>Add Schedule Task</DialogTitle></DialogHeader>
             <div className="space-y-4 mt-4">
-              <div><Label>Project *</Label>
-                <Select value={taskForm.project_id} onValueChange={v => setTaskForm({...taskForm, project_id: v})}>
-                  <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                  <SelectContent>{projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
               <div><Label>Task Name *</Label><Input value={taskForm.name} onChange={e => setTaskForm({...taskForm, name: e.target.value})} /></div>
               <div className="grid grid-cols-2 gap-4">
                 <div><Label>Phase</Label>
@@ -316,7 +330,7 @@ export default function SmartScheduler() {
             );
           })}
           {filtered.length === 0 && (
-            <EmptyState icon={CalendarClock} title="No schedule tasks" description="Generate a schedule using AI or add tasks manually." actionLabel="Generate Schedule" onAction={() => setShowGenerate(true)} />
+            <EmptyState icon={CalendarClock} title="No schedule tasks" description="Generate a schedule using AI or add tasks manually." actionLabel="Generate Schedule" onAction={openGenerate} />
           )}
         </TabsContent>
 
@@ -328,6 +342,7 @@ export default function SmartScheduler() {
           </Card>
         </TabsContent>
       </Tabs>
+      </SubProjectGate>
     </div>
   );
 }

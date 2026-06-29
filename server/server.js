@@ -10,7 +10,7 @@ import jwt from 'jsonwebtoken';
 import db from './db/index.js';
 import { authenticateToken, requireAdmin } from './middleware/auth.js';
 import { generateSchedule, finalizeSchedule, getModelParameters } from './services/scheduleModel.js';
-import { seedWbsTemplateIfEmpty, applyWbsTemplateToProject, compareWbsIds } from './db/wbsTemplate.js';
+import { seedWbsTemplateIfEmpty, syncDefaultWbsTemplate, applyWbsTemplateToProject, compareWbsIds } from './db/wbsTemplate.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +18,17 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretplanedgekey123!';
+
+function formatDbError(error) {
+  if (error?.code === 'ECONNREFUSED') {
+    return 'Database is not running. Start the PostgreSQL service, then run: npm run db:setup';
+  }
+  const cause = error?.errors?.[0];
+  if (cause?.code === 'ECONNREFUSED') {
+    return 'Database is not running. Start the PostgreSQL service, then run: npm run db:setup';
+  }
+  return error?.message || 'Database error';
+}
 
 // Express Middleware
 app.use(cors());
@@ -69,6 +80,8 @@ const tableMap = {
   'ProjectFlat': 'project_flats',
   'MepBoq': 'mep_boqs'
 };
+
+const TABLES_WITH_CREATED_BY = new Set(['projects']);
 
 // --- Helpers for formatting values and DB operations ---
 const formatValue = (val) => {
@@ -328,7 +341,7 @@ app.post('/api/auth/register', async (req, res) => {
 
     res.json({ user, access_token: token });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatDbError(error) });
   }
 });
 
@@ -355,7 +368,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     res.json({ user: profile, access_token: token });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatDbError(error) });
   }
 });
 
@@ -367,7 +380,7 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
     }
     res.json(userRes.rows[0]);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatDbError(error) });
   }
 });
 
@@ -409,7 +422,7 @@ app.get('/api/entities/:entity', authenticateToken, async (req, res) => {
     const processed = await getCollectionProcessed(entity, result.rows);
     res.json(processed);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatDbError(error) });
   }
 });
 
@@ -448,7 +461,7 @@ app.post('/api/entities/:entity/filter', authenticateToken, async (req, res) => 
     const processed = await getCollectionProcessed(entity, result.rows);
     res.json(processed);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatDbError(error) });
   }
 });
 
@@ -469,8 +482,8 @@ app.post('/api/entities/:entity', authenticateToken, async (req, res) => {
       data.id = `${prefix}_${Math.random().toString(36).substring(2, 11)}`;
     }
     
-    // Inject created_by_id if not present
-    if (tableName !== 'users' && !data.created_by_id) {
+    // Inject created_by_id only for tables that have this column
+    if (TABLES_WITH_CREATED_BY.has(tableName) && !data.created_by_id) {
       data.created_by_id = req.user.id;
     }
 
@@ -532,7 +545,7 @@ app.post('/api/entities/:entity', authenticateToken, async (req, res) => {
 
     res.json(newItem);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatDbError(error) });
   }
 });
 
@@ -558,8 +571,11 @@ app.put('/api/entities/:entity/:id', authenticateToken, async (req, res) => {
       }
     }
 
-    // Separate id and strip metadata keys if present
-    const keys = Object.keys(data).filter(k => k !== 'id' && k !== 'created_date' && k !== 'created_by_id' && !k.startsWith('_'));
+    // Separate id and strip metadata / auto-managed keys
+    const READ_ONLY_UPDATE_KEYS = new Set(['id', 'created_date', 'created_by_id', 'updated_date']);
+    const keys = Object.keys(data).filter(
+      (k) => !READ_ONLY_UPDATE_KEYS.has(k) && !k.startsWith('_')
+    );
     
     if (keys.length === 0) {
       return res.status(400).json({ error: 'No fields to update' });
@@ -627,7 +643,7 @@ app.put('/api/entities/:entity/:id', authenticateToken, async (req, res) => {
 
     res.json(updatedItem);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatDbError(error) });
   }
 });
 
@@ -654,7 +670,7 @@ app.delete('/api/entities/:entity/:id', authenticateToken, async (req, res) => {
     }
     res.json(result.rows[0]);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatDbError(error) });
   }
 });
 
@@ -680,7 +696,7 @@ app.post('/api/entities/:entity/bulk', authenticateToken, async (req, res) => {
         item.id = `${prefix}_${Math.random().toString(36).substring(2, 11)}`;
       }
       
-      if (!item.created_by_id && tableName !== 'users') {
+      if (!item.created_by_id && TABLES_WITH_CREATED_BY.has(tableName)) {
         item.created_by_id = req.user.id;
       }
 
@@ -697,7 +713,7 @@ app.post('/api/entities/:entity/bulk', authenticateToken, async (req, res) => {
     }
     res.json(createdItems);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatDbError(error) });
   }
 });
 
@@ -722,7 +738,7 @@ app.get('/api/integrations/schedule/parameters', authenticateToken, async (req, 
     const params = await getModelParameters();
     res.json(params);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatDbError(error) });
   }
 });
 
@@ -731,7 +747,7 @@ app.post('/api/integrations/schedule/generate', authenticateToken, async (req, r
     const result = await generateSchedule(req.body);
     res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatDbError(error) });
   }
 });
 
@@ -740,7 +756,7 @@ app.post('/api/integrations/schedule/finalize', authenticateToken, async (req, r
     const result = await finalizeSchedule(req.body);
     res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatDbError(error) });
   }
 });
 
@@ -843,7 +859,7 @@ A total of **${attendanceRes.rows.length} trade records** active this week, logg
 
     res.json({ text: reportText.trim() });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatDbError(error) });
   }
 });
 
@@ -858,7 +874,7 @@ app.get('/api/wbs-template', authenticateToken, async (req, res) => {
     const items = result.rows.sort((a, b) => compareWbsIds(a.wbs_id, b.wbs_id));
     res.json(items);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatDbError(error) });
   }
 });
 
@@ -879,7 +895,7 @@ app.post('/api/wbs-template/items', authenticateToken, requireAdmin, async (req,
     if (error.code === '23505') {
       return res.status(400).json({ error: `WBS ID "${wbs_id}" already exists.` });
     }
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatDbError(error) });
   }
 });
 
@@ -902,7 +918,7 @@ app.put('/api/wbs-template/items/:wbsId', authenticateToken, requireAdmin, async
     }
     res.json(result.rows[0]);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatDbError(error) });
   }
 });
 
@@ -917,25 +933,111 @@ app.delete('/api/wbs-template/items/:wbsId', authenticateToken, requireAdmin, as
     }
     res.json({ success: true, wbs_id: result.rows[0].wbs_id });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatDbError(error) });
   }
 });
 
 app.post('/api/wbs-template/apply', authenticateToken, async (req, res) => {
-  const { project_id, mode = 'merge' } = req.body;
+  const { project_id, sub_project_id, mode = 'merge' } = req.body;
   if (!project_id) {
     return res.status(400).json({ error: 'project_id is required.' });
   }
+  if (!sub_project_id) {
+    return res.status(400).json({ error: 'sub_project_id is required.' });
+  }
   try {
-    const result = await applyWbsTemplateToProject(project_id, mode);
+    const result = await applyWbsTemplateToProject(project_id, sub_project_id, mode);
     res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatDbError(error) });
   }
 });
 
+app.post('/api/wbs-template/reset', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await syncDefaultWbsTemplate();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    res.status(500).json({ error: formatDbError(error) });
+  }
+});
+
+// Ensure tables added after initial schema setup
+async function ensureExtendedTables() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS sub_projects (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      built_up_area NUMERIC(15, 2) DEFAULT 0,
+      floors_count INTEGER DEFAULT 1,
+      flats_per_floor INTEGER DEFAULT 0,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS project_flats (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      floor_number INTEGER NOT NULL,
+      flat_number VARCHAR(50) NOT NULL,
+      area_sqft NUMERIC(12, 2) DEFAULT 0,
+      cost_estimate NUMERIC(15, 2) DEFAULT 0,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await db.query(`
+    ALTER TABLE wbs_items
+    ADD COLUMN IF NOT EXISTS sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE
+  `);
+  await db.query(`
+    ALTER TABLE wbs_items
+    ADD COLUMN IF NOT EXISTS activity_id VARCHAR(50)
+  `);
+  await db.query(`
+    ALTER TABLE wbs_items
+    ADD COLUMN IF NOT EXISTS activity_code VARCHAR(255)
+  `);
+  await db.query(`
+    ALTER TABLE wbs_items
+    ADD COLUMN IF NOT EXISTS lumsum_rate NUMERIC(15, 2) DEFAULT 0
+  `);
+  await db.query(`
+    ALTER TABLE wbs_items
+    ADD COLUMN IF NOT EXISTS total_days NUMERIC(10, 2) DEFAULT 0
+  `);
+  await db.query(`
+    ALTER TABLE wbs_items
+    ADD COLUMN IF NOT EXISTS source_upload_type VARCHAR(30)
+  `);
+  await db.query(`
+    ALTER TABLE wbs_items
+    ADD COLUMN IF NOT EXISTS level_label VARCHAR(50)
+  `);
+  await db.query(`
+    ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS project_type VARCHAR(100)
+  `);
+  await db.query(`
+    ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS project_code VARCHAR(100)
+  `);
+  await db.query(`
+    ALTER TABLE progress_entries
+    ADD COLUMN IF NOT EXISTS wbs_item_id VARCHAR(50) REFERENCES wbs_items(id) ON DELETE SET NULL
+  `);
+}
+
 // Start listening
 app.listen(PORT, async () => {
-  await seedWbsTemplateIfEmpty();
   console.log(`Express server running on http://localhost:${PORT} in development mode`);
+  try {
+    await ensureExtendedTables();
+    await seedWbsTemplateIfEmpty();
+  } catch (error) {
+    console.error('Startup initialization failed:', error.message);
+  }
 });

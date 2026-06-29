@@ -1,16 +1,17 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { base44 } from '@/api/base44Client';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { Sparkles, ChevronRight, ChevronLeft, Loader2, CheckCircle2 } from 'lucide-react';
+import { Sparkles, ChevronRight, ChevronLeft, Loader2, CheckCircle2, Building2 } from 'lucide-react';
+import { mapProjectTypeToScheduleLabel, getProjectTypeLabel } from '@/lib/projectTypes';
 
-const QUESTIONS = [
-  { key: 'project_type', label: 'What type of project is this?', type: 'select', options: ['Residential Building', 'Commercial Tower', 'Industrial Facility', 'Infrastructure / Civil', 'Renovation / Fit-out', 'Other'] },
+const ALL_QUESTIONS = [
+  { key: 'project_type', label: 'What type of project is this?', type: 'project_type_select' },
   { key: 'project_id', label: 'Which project should this schedule be for?', type: 'project_select' },
   { key: 'start_date', label: 'What is the planned project start date?', type: 'date' },
   { key: 'duration_months', label: 'What is the total project duration (months)?', type: 'number', placeholder: 'e.g. 18' },
@@ -24,101 +25,112 @@ const QUESTIONS = [
   { key: 'key_constraints', label: 'Any key constraints or special requirements?', type: 'textarea', placeholder: 'e.g. restricted site access, fast-track delivery, phased handover...' },
 ];
 
-export default function ScheduleWizard({ onComplete, onCancel, onGenerated }) {
+export default function ScheduleWizard({
+  onComplete,
+  onCancel,
+  onGenerated,
+  projectId: scopedProjectId,
+  subProjectId: scopedSubProjectId,
+  projectName: scopedProjectName,
+  subProjectName: scopedSubProjectName,
+  projectType: scopedProjectType,
+  projectStartDate,
+}) {
+  const isScoped = !!(scopedProjectId && scopedSubProjectId);
+  const scheduleProjectType = scopedProjectType ? mapProjectTypeToScheduleLabel(scopedProjectType) : null;
+  const hasKnownProjectType = !!scheduleProjectType;
+
+  const questions = useMemo(() => {
+    let list = isScoped
+      ? ALL_QUESTIONS.filter((q) => q.key !== 'project_id' && q.key !== 'num_subprojects')
+      : ALL_QUESTIONS;
+    if (hasKnownProjectType) {
+      list = list.filter((q) => q.key !== 'project_type');
+    }
+    return list;
+  }, [isScoped, hasKnownProjectType]);
+
   const [step, setStep] = useState(0);
-  const [answers, setAnswers] = useState({});
+  const [answers, setAnswers] = useState(() => {
+    const base = isScoped ? { project_id: scopedProjectId, num_subprojects: '1' } : {};
+    if (scheduleProjectType) base.project_type = scheduleProjectType;
+    if (projectStartDate) base.start_date = projectStartDate;
+    return base;
+  });
   const [generating, setGenerating] = useState(false);
   const [done, setDone] = useState(false);
   const [generatedCount, setGeneratedCount] = useState(0);
-  const [generatedData, setGeneratedData] = useState(null);
-
-  const queryClient = useQueryClient();
 
   const { data: projects = [] } = useQuery({
     queryKey: ['projects'],
     queryFn: () => base44.entities.Project.list('-created_date', 100),
+    enabled: !isScoped,
   });
 
-  const q = QUESTIONS[step];
-  const isLast = step === QUESTIONS.length - 1;
+  const q = questions[step];
+  const isLast = step === questions.length - 1;
   const canNext = answers[q?.key] !== undefined && answers[q?.key] !== '';
 
-  const updateAnswer = (val) => setAnswers(a => ({ ...a, [q.key]: val }));
+  const updateAnswer = (val) => setAnswers((a) => ({ ...a, [q.key]: val }));
+
+  const handleProjectSelect = (projectId) => {
+    const selected = projects.find((p) => p.id === projectId);
+    const mappedType = selected?.project_type
+      ? mapProjectTypeToScheduleLabel(selected.project_type)
+      : undefined;
+    setAnswers((a) => ({
+      ...a,
+      project_id: projectId,
+      ...(mappedType ? { project_type: mappedType } : {}),
+      ...(selected?.start_date && !a.start_date ? { start_date: selected.start_date } : {}),
+    }));
+  };
 
   const handleGenerate = async () => {
     setGenerating(true);
-    const projectId = answers.project_id;
-    const projectName = projects.find(p => p.id === projectId)?.name || 'Project';
-
-    const prompt = `You are a senior construction planner. Generate a detailed construction schedule in JSON format for the following project:
-
-Project name: ${projectName}
-Project type: ${answers.project_type}
-Start date: ${answers.start_date}
-Total duration: ${answers.duration_months} months
-Floors/storeys: ${answers.floors || 'N/A'}
-MEP scope: ${answers.include_mep}
-Handover type: ${answers.handover_type}
-Key constraints: ${answers.key_constraints || 'None'}
-
-Generate a realistic schedule with 20-30 activities covering all phases. 
-Each activity should follow standard construction sequencing with logical predecessors.
-Return ONLY a JSON array of activity objects (no wrapper key), each with:
-{
-  "activity_id": "A1010",
-  "name": "string",
-  "phase": "foundation|structure|mep|finishing|handover|other",
-  "planned_start": "YYYY-MM-DD",
-  "planned_end": "YYYY-MM-DD",
-  "duration_days": number,
-  "float_days": number,
-  "is_critical_path": boolean,
-  "is_milestone": boolean,
-  "status": "not_started",
-  "progress": 0,
-  "assigned_crew": "string",
-  "order_index": number,
-  "predecessors": ["A1000"]
-}
-
-Distribute activities logically across the ${answers.duration_months}-month timeline starting ${answers.start_date}.
-Critical path activities should have float_days = 0.`;
+    const projectId = isScoped ? scopedProjectId : answers.project_id;
+    const subProjectId = isScoped ? scopedSubProjectId : null;
+    const projectName = isScoped
+      ? scopedProjectName
+      : (projects.find((p) => p.id === projectId)?.name || 'Project');
+    const subProjectName = isScoped ? scopedSubProjectName : null;
 
     const modelInputs = {
       projectId,
+      subProjectId,
       projectType: answers.project_type,
       startDate: answers.start_date,
       durationMonths: answers.duration_months,
       floors: answers.floors,
-      numSubprojects: answers.num_subprojects,
+      numSubprojects: isScoped ? 1 : answers.num_subprojects,
       includeMep: answers.include_mep,
       handoverType: answers.handover_type,
       keyConstraints: answers.key_constraints,
       standardAnswers: {
         site_access: answers.site_access,
         delivery_strategy: answers.delivery_strategy,
-        finish_quality: answers.finish_quality
-      }
+        finish_quality: answers.finish_quality,
+      },
     };
 
     const result = await base44.integrations.Schedule.generate(modelInputs);
     const activityList = result?.schedule || [];
 
     setGeneratedCount(activityList.length);
-    setGeneratedData({
+
+    const payload = {
       schedule: activityList,
       features: result.features,
       projectId,
-      projectName: projects.find(p => p.id === projectId)?.name || 'Project'
-    });
+      subProjectId,
+      projectName: projectName || 'Project',
+      subProjectName,
+    };
 
     if (onGenerated) {
-      onGenerated({
-        schedule: activityList,
-        features: result.features,
-        projectId,
-        projectName: projects.find(p => p.id === projectId)?.name || 'Project'
-      });
+      onGenerated(payload);
+      setGenerating(false);
+      return;
     }
 
     setGenerating(false);
@@ -148,7 +160,10 @@ Critical path activities should have float_days = 0.`;
             <Loader2 className="w-8 h-8 text-primary animate-spin" />
           </div>
           <h3 className="text-xl font-heading font-bold">Building Your Schedule...</h3>
-          <p className="text-muted-foreground text-sm">AI is generating a full site schedule based on your project parameters. This takes about 15–20 seconds.</p>
+          <p className="text-muted-foreground text-sm">
+            Generating activities for {scopedProjectName || 'your project'}
+            {scopedSubProjectName ? ` → ${scopedSubProjectName}` : ''}. This takes a few seconds.
+          </p>
         </CardContent>
       </Card>
     );
@@ -161,53 +176,93 @@ Critical path activities should have float_days = 0.`;
           <Sparkles className="w-5 h-5 text-accent" />
           <CardTitle className="text-base font-heading">AI Schedule Builder</CardTitle>
         </div>
-        {/* Progress dots */}
+        {isScoped && (
+          <div className="space-y-2 mt-2">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/50 border text-xs">
+              <Building2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+              <span>
+                <span className="font-medium">{scopedProjectName}</span>
+                <span className="text-muted-foreground"> → </span>
+                <span className="font-medium">{scopedSubProjectName}</span>
+              </span>
+            </div>
+            {hasKnownProjectType && (
+              <p className="text-xs text-muted-foreground px-1">
+                Project type: <span className="font-medium text-foreground">{getProjectTypeLabel(scopedProjectType)}</span>
+                <span className="text-muted-foreground"> (from project settings)</span>
+              </p>
+            )}
+            {!hasKnownProjectType && (
+              <p className="text-xs text-amber-600 px-1">
+                Set project type under Projects → Admin before using AI builder for best results.
+              </p>
+            )}
+          </div>
+        )}
         <div className="flex gap-1.5 mt-2">
-          {QUESTIONS.map((_, i) => (
+          {questions.map((_, i) => (
             <div key={i} className={`h-1.5 rounded-full flex-1 transition-all ${i <= step ? 'bg-accent' : 'bg-muted'}`} />
           ))}
         </div>
-        <p className="text-xs text-muted-foreground mt-1">Step {step + 1} of {QUESTIONS.length}</p>
+        <p className="text-xs text-muted-foreground mt-1">Step {step + 1} of {questions.length}</p>
       </CardHeader>
       <CardContent className="space-y-4">
         <Label className="text-sm font-medium">{q?.label}</Label>
 
         {q?.type === 'select' && (
-          <Select value={answers[q.key] || ''} onValueChange={updateAnswer}>
+          <Select value={answers[q.key] || undefined} onValueChange={updateAnswer}>
             <SelectTrigger><SelectValue placeholder="Select an option" /></SelectTrigger>
             <SelectContent>
-              {q.options.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+              {q.options.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
+
+        {q?.type === 'project_type_select' && (
+          <Select value={answers[q.key] || undefined} onValueChange={updateAnswer}>
+            <SelectTrigger><SelectValue placeholder="Select project type" /></SelectTrigger>
+            <SelectContent>
+              {[
+                'Residential Building',
+                'Commercial Tower',
+                'Residential + Commercial (Mixed Use)',
+                'Industrial Facility',
+                'Infrastructure / Civil',
+                'Renovation / Fit-out',
+              ].map((o) => (
+                <SelectItem key={o} value={o}>{o}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         )}
 
         {q?.type === 'project_select' && (
-          <Select value={answers[q.key] || ''} onValueChange={updateAnswer}>
+          <Select value={answers[q.key] || undefined} onValueChange={handleProjectSelect}>
             <SelectTrigger><SelectValue placeholder="Select project" /></SelectTrigger>
             <SelectContent>
-              {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+              {projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
             </SelectContent>
           </Select>
         )}
 
         {q?.type === 'date' && (
-          <Input type="date" value={answers[q.key] || ''} onChange={e => updateAnswer(e.target.value)} />
+          <Input type="date" value={answers[q.key] || ''} onChange={(e) => updateAnswer(e.target.value)} />
         )}
 
         {q?.type === 'number' && (
-          <Input type="number" placeholder={q.placeholder} value={answers[q.key] || ''} onChange={e => updateAnswer(e.target.value)} />
+          <Input type="number" placeholder={q.placeholder} value={answers[q.key] || ''} onChange={(e) => updateAnswer(e.target.value)} />
         )}
 
         {q?.type === 'text' && (
-          <Input placeholder={q.placeholder} value={answers[q.key] || ''} onChange={e => updateAnswer(e.target.value)} />
+          <Input placeholder={q.placeholder} value={answers[q.key] || ''} onChange={(e) => updateAnswer(e.target.value)} />
         )}
 
         {q?.type === 'textarea' && (
-          <Textarea placeholder={q.placeholder} value={answers[q.key] || ''} onChange={e => updateAnswer(e.target.value)} rows={3} />
+          <Textarea placeholder={q.placeholder} value={answers[q.key] || ''} onChange={(e) => updateAnswer(e.target.value)} rows={3} />
         )}
 
         <div className="flex gap-3 pt-2">
-          <Button variant="outline" onClick={() => step === 0 ? onCancel() : setStep(s => s - 1)} className="gap-1">
+          <Button variant="outline" onClick={() => (step === 0 ? onCancel() : setStep((s) => s - 1))} className="gap-1">
             <ChevronLeft className="w-4 h-4" /> {step === 0 ? 'Cancel' : 'Back'}
           </Button>
           {isLast ? (
@@ -215,7 +270,7 @@ Critical path activities should have float_days = 0.`;
               <Sparkles className="w-4 h-4" /> Generate Schedule
             </Button>
           ) : (
-            <Button className="flex-1 gap-1" disabled={!canNext} onClick={() => setStep(s => s + 1)}>
+            <Button className="flex-1 gap-1" disabled={!canNext} onClick={() => setStep((s) => s + 1)}>
               Next <ChevronRight className="w-4 h-4" />
             </Button>
           )}

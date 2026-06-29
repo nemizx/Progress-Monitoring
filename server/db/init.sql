@@ -34,6 +34,7 @@ CREATE TABLE users (
 CREATE TABLE projects (
     id VARCHAR(50) PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
+    project_code VARCHAR(100),
     description TEXT,
     location VARCHAR(255),
     client VARCHAR(255),
@@ -45,16 +46,32 @@ CREATE TABLE projects (
     progress NUMERIC(5, 2) DEFAULT 0,
     project_manager VARCHAR(255),
     priority VARCHAR(50) DEFAULT 'medium',
+    project_type VARCHAR(100),
     created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by_id VARCHAR(50) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- 2b. Sub-Projects Table
+CREATE TABLE sub_projects (
+    id VARCHAR(50) PRIMARY KEY,
+    project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    built_up_area NUMERIC(15, 2) DEFAULT 0,
+    floors_count INTEGER DEFAULT 1,
+    flats_per_floor INTEGER DEFAULT 0,
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 3. WBS Items Table
 CREATE TABLE wbs_items (
     id VARCHAR(50) PRIMARY KEY,
     project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+    sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
     code VARCHAR(50) NOT NULL,
+    activity_id VARCHAR(50),
+    activity_code VARCHAR(255),
     title VARCHAR(255) NOT NULL,
     description TEXT,
     level INTEGER NOT NULL,
@@ -62,6 +79,10 @@ CREATE TABLE wbs_items (
     planned_quantity NUMERIC(12, 2) DEFAULT 0,
     actual_quantity NUMERIC(12, 2) DEFAULT 0,
     unit VARCHAR(50),
+    lumsum_rate NUMERIC(15, 2) DEFAULT 0,
+    total_days NUMERIC(10, 2) DEFAULT 0,
+    source_upload_type VARCHAR(30),
+    level_label VARCHAR(50),
     progress NUMERIC(5, 2) DEFAULT 0,
     budget_amount NUMERIC(15, 2) DEFAULT 0,
     order_index INTEGER DEFAULT 0
@@ -153,6 +174,7 @@ CREATE TABLE progress_entries (
     id VARCHAR(50) PRIMARY KEY,
     project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
     budget_item_id VARCHAR(50) REFERENCES budget_items(id) ON DELETE SET NULL,
+    wbs_item_id VARCHAR(50) REFERENCES wbs_items(id) ON DELETE SET NULL,
     milestone_id VARCHAR(50) REFERENCES milestones(id) ON DELETE SET NULL,
     date DATE NOT NULL,
     report_type VARCHAR(50) DEFAULT 'daily',
@@ -292,18 +314,6 @@ CREATE TABLE scheduling_rules (
     created_by VARCHAR(255)
 );
 
--- 16. Sub-Projects Table
-CREATE TABLE sub_projects (
-    id VARCHAR(50) PRIMARY KEY,
-    project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL,
-    built_up_area NUMERIC(15, 2) DEFAULT 0,
-    floors_count INTEGER DEFAULT 1,
-    flats_per_floor INTEGER DEFAULT 0,
-    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
 -- 17. Project Flats Table
 CREATE TABLE project_flats (
     id VARCHAR(50) PRIMARY KEY,
@@ -341,10 +351,10 @@ INSERT INTO users (id, email, role, password_hash) VALUES
 ('usr_pm', 'pm@planedge.co', 'user', '$2a$10$0BvHq7WcYjLWYbezQR0Leu0kwU/v1P4bjgAl7vyEAD7Yfblkq2u3u');
 
 -- Seed Projects
-INSERT INTO projects (id, name, description, location, client, status, start_date, end_date, budget, spent, progress, project_manager, priority, created_by_id) VALUES
-('prj_emerald', 'Ganga Residency', 'A 12-storey premium residential tower with glass facade, subterranean parking, and sustainable green rooftop design in Mumbai.', 'Worli Sea Face, Mumbai', 'Lodha Estates Private Limited', 'in_progress', '2026-01-01', '2027-06-30', 120000000.00, 78000000.00, 65.00, 'Suresh Sharma', 'high', 'usr_admin'),
-('prj_oceanic', 'Noida Commercial Galleria', 'Multi-level commercial retail mall featuring a cinema complex, food court, and central atrium plaza.', 'Sector 62, Noida, Uttar Pradesh', 'DLF Commercial Projects', 'planning', '2026-08-01', '2028-02-28', 280000000.00, 15000000.00, 12.00, 'Amit Patel', 'medium', 'usr_admin'),
-('prj_highway', 'NH-8 Pune-Solapur Highway Extension', 'Widening of the existing 4-lane state highway to a 6-lane divided freeway, including structural upgrades to two overpasses.', 'Pune to Solapur Expressway, Km 45 to 58', 'National Highways Authority of India (NHAI)', 'delayed', '2025-10-01', '2026-11-30', 85000000.00, 48000000.00, 45.00, 'Rohan Mehta', 'critical', 'usr_admin');
+INSERT INTO projects (id, name, description, location, client, status, start_date, end_date, budget, spent, progress, project_manager, priority, project_type, created_by_id) VALUES
+('prj_emerald', 'Ganga Residency', 'A 12-storey premium residential tower with glass facade, subterranean parking, and sustainable green rooftop design in Mumbai.', 'Worli Sea Face, Mumbai', 'Lodha Estates Private Limited', 'in_progress', '2026-01-01', '2027-06-30', 120000000.00, 78000000.00, 65.00, 'Suresh Sharma', 'high', 'residential', 'usr_admin'),
+('prj_oceanic', 'Noida Commercial Galleria', 'Multi-level commercial retail mall featuring a cinema complex, food court, and central atrium plaza.', 'Sector 62, Noida, Uttar Pradesh', 'DLF Commercial Projects', 'planning', '2026-08-01', '2028-02-28', 280000000.00, 15000000.00, 12.00, 'Amit Patel', 'medium', 'commercial', 'usr_admin'),
+('prj_highway', 'NH-8 Pune-Solapur Highway Extension', 'Widening of the existing 4-lane state highway to a 6-lane divided freeway, including structural upgrades to two overpasses.', 'Pune to Solapur Expressway, Km 45 to 58', 'National Highways Authority of India (NHAI)', 'delayed', '2025-10-01', '2026-11-30', 85000000.00, 48000000.00, 45.00, 'Rohan Mehta', 'critical', 'infrastructure', 'usr_admin');
 
 -- Seed WBS Items
 INSERT INTO wbs_items (id, project_id, code, title, description, level, parent_id, planned_quantity, actual_quantity, unit, progress, budget_amount, order_index) VALUES

@@ -1,37 +1,67 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { ClipboardList, CheckCircle2, Clock, AlertTriangle, Calendar, Check, Save, X } from 'lucide-react';
+import { useToast } from '@/components/ui/use-toast';
+import { ClipboardList, CheckCircle2, Clock, AlertTriangle, Calendar, Check, Save, X, ChevronsUpDown } from 'lucide-react';
 import EmptyState from '@/components/shared/EmptyState';
 import { formatCompactCurrencyINR, formatCurrencyINR } from '@/lib/formatters';
 import { useAuth } from '@/lib/AuthContext';
+import { useProjectSubProject } from '@/hooks/useProjectSubProject';
+import ProjectSubProjectSelector from '@/components/shared/ProjectSubProjectSelector';
+import SubProjectGate from '@/components/shared/SubProjectGate';
+import { filterBudgetBySubProject, filterProgressBySubProject, filterWbsBySubProject } from '@/lib/subProjectScope';
 
 const weatherIcons = { clear: '☀️', cloudy: '⛅', rainy: '🌧️', stormy: '⛈️', hot: '🌡️' };
+const normalizeActivityKey = (value) => String(value || '').trim().toLowerCase();
+
+const mapForecastToWeatherCondition = (weatherCode, maxTemp) => {
+  const code = Number(weatherCode);
+  const temp = Number(maxTemp);
+
+  if (Number.isFinite(temp) && temp >= 37) return 'hot';
+  if ([95, 96, 99].includes(code)) return 'stormy';
+  if (
+    [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86].includes(code)
+  ) return 'rainy';
+  if ([0].includes(code)) return 'clear';
+  return 'cloudy';
+};
 
 export default function SiteProgress() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const { toast } = useToast();
 
-  const [projectFilter, setProjectFilter] = useState('');
+  const {
+    projects, subProjects, wbsItems: allWbsItems, projectId, subProjectId,
+    setProjectId, setSubProjectId, isReady, selectedProject, selectedSubProject,
+  } = useProjectSubProject({ fetchWbs: true });
+
   const [typeFilter, setTypeFilter] = useState('');
   const [activeTab, setActiveTab] = useState('sheet'); // 'sheet', 'wpr', 'mpr', 'history'
   const [dprState, setDprState] = useState({});
   const [activeBudgetIds, setActiveBudgetIds] = useState([]);
   const [weatherCondition, setWeatherCondition] = useState('clear');
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [weatherInfo, setWeatherInfo] = useState('');
+  const [weatherError, setWeatherError] = useState('');
+  const [weatherManuallyEdited, setWeatherManuallyEdited] = useState(false);
   const [submittedBy, setSubmittedBy] = useState('Supervisor');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [loadedProject, setLoadedProject] = useState(null);
+  const [loadedScope, setLoadedScope] = useState(null);
+  const [lockedScopes, setLockedScopes] = useState({});
   
-  // L1-L2-L3 Selectors states
-  const [selectedL1, setSelectedL1] = useState('');
-  const [selectedL2, setSelectedL2] = useState('');
-  const [selectedL3, setSelectedL3] = useState('');
+  const [activityPickerOpen, setActivityPickerOpen] = useState(false);
+  const [selectedActivityId, setSelectedActivityId] = useState('');
+  const weatherManualRef = useRef(false);
 
   const queryClient = useQueryClient();
 
@@ -50,8 +80,8 @@ export default function SiteProgress() {
     return localDate.toISOString().split('T')[0];
   };
 
-  const todayStr = getLocalDateString();
-  const formattedToday = new Date(todayStr).toLocaleDateString('en-IN', {
+  const [selectedReportDate, setSelectedReportDate] = useState(getLocalDateString());
+  const formattedSelectedDate = new Date(selectedReportDate).toLocaleDateString('en-IN', {
     weekday: 'long',
     year: 'numeric',
     month: 'long',
@@ -122,121 +152,381 @@ export default function SiteProgress() {
     }
   }, [activeTab, isAdmin]);
 
-  // Queries
-  const { data: projects = [] } = useQuery({
-    queryKey: ['projects'],
-    queryFn: () => base44.entities.Project.list('-created_date', 100),
+  const { data: allEntries = [], isLoading: entriesLoading } = useQuery({
+    queryKey: ['progress', projectId],
+    queryFn: () => projectId
+      ? base44.entities.ProgressEntry.filter({ project_id: projectId }, '-date', 200)
+      : Promise.resolve([]),
+    enabled: !!projectId,
   });
 
-  // Auto-select first project
-  useEffect(() => {
-    if (projects.length > 0 && !projectFilter) {
-      setProjectFilter(projects[0].id);
-    }
-  }, [projects, projectFilter]);
-
-  const { data: entries = [], isLoading: entriesLoading } = useQuery({
-    queryKey: ['progress', projectFilter],
-    queryFn: () => projectFilter
-      ? base44.entities.ProgressEntry.filter({ project_id: projectFilter }, '-date', 200)
-      : base44.entities.ProgressEntry.list('-date', 200),
-  });
-
-  const { data: wbsItems = [] } = useQuery({
-    queryKey: ['wbs', projectFilter],
-    queryFn: () => projectFilter
-      ? base44.entities.WBSItem.filter({ project_id: projectFilter })
-      : base44.entities.WBSItem.list('order_index', 200),
+  const { data: allBudgetItems = [] } = useQuery({
+    queryKey: ['budgetItems', projectId],
+    queryFn: () => projectId
+      ? base44.entities.BudgetItem.filter({ project_id: projectId })
+      : Promise.resolve([]),
+    enabled: !!projectId,
   });
 
   const { data: milestones = [] } = useQuery({
-    queryKey: ['milestones', projectFilter],
-    queryFn: () => projectFilter
-      ? base44.entities.Milestone.filter({ project_id: projectFilter })
-      : base44.entities.Milestone.list('-created_date', 200),
+    queryKey: ['milestones', projectId],
+    queryFn: () => projectId
+      ? base44.entities.Milestone.filter({ project_id: projectId })
+      : Promise.resolve([]),
+    enabled: !!projectId,
   });
 
-  const { data: budgetItems = [] } = useQuery({
-    queryKey: ['budgetItems', projectFilter],
-    queryFn: () => projectFilter
-      ? base44.entities.BudgetItem.filter({ project_id: projectFilter })
-      : base44.entities.BudgetItem.list('-created_date', 500),
-  });
+  const wbsItems = useMemo(
+    () => (isReady ? filterWbsBySubProject(allWbsItems, subProjectId) : []),
+    [isReady, allWbsItems, subProjectId]
+  );
+  const budgetItems = useMemo(
+    () => (isReady ? filterBudgetBySubProject(allBudgetItems, allWbsItems, subProjectId) : []),
+    [isReady, allBudgetItems, allWbsItems, subProjectId]
+  );
+  const entries = useMemo(
+    () => (isReady ? filterProgressBySubProject(allEntries, allBudgetItems, allWbsItems, subProjectId) : []),
+    [isReady, allEntries, allBudgetItems, allWbsItems, subProjectId]
+  );
 
-  // Pre-populate active line items for today's DPR sheet
+  const budgetById = useMemo(
+    () => new Map(budgetItems.map((item) => [item.id, item])),
+    [budgetItems]
+  );
+  const budgetByWbsId = useMemo(() => {
+    const map = new Map();
+    budgetItems.forEach((item) => {
+      if (item.wbs_item_id && !map.has(item.wbs_item_id)) {
+        map.set(item.wbs_item_id, item);
+      }
+    });
+    return map;
+  }, [budgetItems]);
+  const wbsById = useMemo(
+    () => new Map(wbsItems.map((item) => [item.id, item])),
+    [wbsItems]
+  );
+
+  const worksheetRows = useMemo(() => {
+    const activityItems = wbsItems.filter((item) => {
+      const levelNumber = Number(item.level);
+      const levelText = String(item.level || '').trim().toLowerCase();
+      const hasActivityId = String(item.activity_id || '').trim() !== '';
+      return levelNumber === 3 || levelText === 'l3' || hasActivityId;
+    });
+
+    const toWorksheetRow = (activity, extra = {}) => {
+      const linkedBudget = budgetByWbsId.get(activity.id);
+      const activityKey = normalizeActivityKey(activity.activity_id || activity.code);
+      const sourceType = String(activity.source_upload_type || '').trim().toLowerCase();
+      const sourceLabel = sourceType === 'l1_activity' ? 'l1_activity' : sourceType === 'l3' ? 'l3' : 'legacy';
+      const quantity = Number(linkedBudget?.quantity ?? activity.planned_quantity ?? 0) || 0;
+      const rate = Number(linkedBudget?.cost_per_unit ?? activity.lumsum_rate ?? 0) || 0;
+
+      return {
+        row_id: `wbs_${activity.id}`,
+        budget_item_id_ref: linkedBudget?.id || '',
+        wbs_item_id: activity.id,
+        title: linkedBudget?.title || activity.title || activity.name || 'Activity',
+        code: linkedBudget?.code || activity.activity_code || activity.activity_id || activity.code || '',
+        unit: linkedBudget?.unit || activity.unit || '',
+        quantity,
+        cost_per_unit: rate,
+        parent_id: linkedBudget?.parent_id || null,
+        level: linkedBudget?.level || 3,
+        milestone_id: linkedBudget?.milestone_id || '',
+        activity_id_key: activityKey,
+        source_upload_type: sourceLabel,
+        is_l1_carry_forward: Boolean(extra.isCarryForward),
+        carry_forward_consumed_qty: Number(extra.consumedQty || 0),
+      };
+    };
+
+    const l1Activities = activityItems.filter(
+      (item) => String(item.source_upload_type || '').trim().toLowerCase() === 'l1_activity'
+    );
+    const l3Activities = activityItems.filter(
+      (item) => String(item.source_upload_type || '').trim().toLowerCase() === 'l3'
+    );
+    const hasL3Activities = l3Activities.length > 0;
+
+    if (!hasL3Activities) {
+      const fallbackActivities = l1Activities.length > 0 ? l1Activities : activityItems;
+      return fallbackActivities
+        .map((activity) => toWorksheetRow(activity))
+        .sort((a, b) => String(a.code || '').localeCompare(String(b.code || ''), undefined, { numeric: true }));
+    }
+
+    const l3ActivityKeys = new Set(
+      l3Activities
+        .map((item) => normalizeActivityKey(item.activity_id || item.code))
+        .filter(Boolean)
+    );
+
+    const carryForwardRows = l1Activities
+      .map((l1Activity) => {
+        const activityKey = normalizeActivityKey(l1Activity.activity_id || l1Activity.code);
+        if (!activityKey || l3ActivityKeys.has(activityKey)) return null;
+
+        const linkedBudget = budgetByWbsId.get(l1Activity.id);
+        const consumedQty = entries
+          .filter(
+            (entry) =>
+              (entry.wbs_item_id && entry.wbs_item_id === l1Activity.id) ||
+              (linkedBudget?.id && entry.budget_item_id === linkedBudget.id)
+          )
+          .reduce((sum, entry) => sum + (parseFloat(entry.quantity_done) || 0), 0);
+
+        if (consumedQty <= 0) return null;
+        return toWorksheetRow(l1Activity, { isCarryForward: true, consumedQty });
+      })
+      .filter(Boolean)
+      .sort((a, b) => String(a.code || '').localeCompare(String(b.code || ''), undefined, { numeric: true }));
+
+    const l3Rows = l3Activities
+      .map((activity) => toWorksheetRow(activity))
+      .sort((a, b) => String(a.code || '').localeCompare(String(b.code || ''), undefined, { numeric: true }));
+
+    return [...l3Rows, ...carryForwardRows];
+  }, [wbsItems, budgetByWbsId, entries]);
+
+  const worksheetCarryForwardCount = useMemo(
+    () => worksheetRows.filter((row) => row.is_l1_carry_forward).length,
+    [worksheetRows]
+  );
+
+  const worksheetRowById = useMemo(
+    () => new Map(worksheetRows.map((row) => [row.row_id, row])),
+    [worksheetRows]
+  );
+  const worksheetRowByBudgetId = useMemo(() => {
+    const map = new Map();
+    worksheetRows.forEach((row) => {
+      if (row.budget_item_id_ref) map.set(row.budget_item_id_ref, row);
+    });
+    return map;
+  }, [worksheetRows]);
+  const worksheetRowByWbsId = useMemo(() => {
+    const map = new Map();
+    worksheetRows.forEach((row) => {
+      if (row.wbs_item_id) map.set(row.wbs_item_id, row);
+    });
+    return map;
+  }, [worksheetRows]);
+  const worksheetRowByActivityId = useMemo(() => {
+    const map = new Map();
+    worksheetRows.forEach((row) => {
+      if (row.activity_id_key && !map.has(row.activity_id_key)) {
+        map.set(row.activity_id_key, row);
+      }
+    });
+    return map;
+  }, [worksheetRows]);
+
+  const getEntryActivityKey = useCallback((entry) => {
+    if (!entry) return '';
+
+    if (entry.wbs_item_id) {
+      const wbsItem = wbsById.get(entry.wbs_item_id);
+      const key = normalizeActivityKey(wbsItem?.activity_id || wbsItem?.code);
+      if (key) return key;
+    }
+
+    if (entry.budget_item_id) {
+      const budgetItem = budgetById.get(entry.budget_item_id);
+      if (budgetItem?.wbs_item_id) {
+        const linkedWbs = wbsById.get(budgetItem.wbs_item_id);
+        const key = normalizeActivityKey(linkedWbs?.activity_id || linkedWbs?.code);
+        if (key) return key;
+      }
+    }
+
+    return '';
+  }, [budgetById, wbsById]);
+
+  const rowMatchesEntry = useCallback((row, entry) => {
+    if (!row || !entry) return false;
+    if (row.budget_item_id_ref && entry.budget_item_id === row.budget_item_id_ref) return true;
+    if (row.wbs_item_id && entry.wbs_item_id === row.wbs_item_id) return true;
+    const rowActivityKey = row.activity_id_key || '';
+    const entryActivityKey = getEntryActivityKey(entry);
+    if (rowActivityKey && entryActivityKey && rowActivityKey === entryActivityKey) return true;
+    return false;
+  }, [getEntryActivityKey]);
+
+  const scopeKey = isReady ? `${projectId}:${subProjectId}:${selectedReportDate}` : null;
+  const dprEntriesForSelectedDate = useMemo(
+    () =>
+      entries.filter(
+        (entry) =>
+          entry.date === selectedReportDate &&
+          (entry.report_type === 'daily' || !entry.report_type) &&
+          !entry._is_aggregated
+      ),
+    [entries, selectedReportDate]
+  );
+  const isScopeLockedLocally = scopeKey ? Boolean(lockedScopes[scopeKey]) : false;
+  const isSelectedDateLocked = isScopeLockedLocally || dprEntriesForSelectedDate.length > 0;
+
   useEffect(() => {
-    if (!projectFilter) {
+    setSelectedActivityId('');
+    setActivityPickerOpen(false);
+  }, [scopeKey]);
+
+  useEffect(() => {
+    weatherManualRef.current = false;
+    setWeatherManuallyEdited(false);
+    setWeatherInfo('');
+    setWeatherError('');
+  }, [projectId, subProjectId, selectedReportDate]);
+
+  useEffect(() => {
+    if (!isReady || !selectedProject?.location || weatherManuallyEdited) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const fetchWeatherFromProjectLocation = async () => {
+      try {
+        setWeatherLoading(true);
+        setWeatherError('');
+
+        const geoRes = await fetch(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(selectedProject.location)}&count=1&language=en&format=json`
+        );
+        if (!geoRes.ok) {
+          throw new Error('Could not reach weather geocoding service.');
+        }
+        const geoJson = await geoRes.json();
+        const place = geoJson?.results?.[0];
+        if (!place) {
+          throw new Error('No weather location match found for project location.');
+        }
+
+        const weatherParams = new URLSearchParams({
+          latitude: String(place.latitude),
+          longitude: String(place.longitude),
+          timezone: 'auto',
+          daily: 'weather_code,temperature_2m_max',
+          start_date: selectedReportDate,
+          end_date: selectedReportDate,
+        });
+
+        const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?${weatherParams.toString()}`);
+        if (!weatherRes.ok) {
+          throw new Error('Could not fetch weather forecast.');
+        }
+        const weatherJson = await weatherRes.json();
+        const weatherCode = weatherJson?.daily?.weather_code?.[0];
+        const maxTemp = weatherJson?.daily?.temperature_2m_max?.[0];
+        const mappedWeather = mapForecastToWeatherCondition(weatherCode, maxTemp);
+
+        if (cancelled || weatherManualRef.current) return;
+
+        setWeatherCondition(mappedWeather);
+        setWeatherInfo(`${place.name}${place.admin1 ? `, ${place.admin1}` : ''}`);
+      } catch (error) {
+        if (cancelled) return;
+        setWeatherError(error.message || 'Unable to auto-fill weather from location.');
+      } finally {
+        if (!cancelled) setWeatherLoading(false);
+      }
+    };
+
+    fetchWeatherFromProjectLocation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isReady, selectedProject?.location, selectedReportDate, weatherManuallyEdited]);
+
+  // Pre-populate active line items for selected DPR date
+  useEffect(() => {
+    if (!isReady) {
       setActiveBudgetIds([]);
       return;
     }
-    const todayEntries = entries.filter(
-      e => e.project_id === projectFilter &&
-      e.date === todayStr &&
-      (e.report_type === 'daily' || !e.report_type) &&
-      !e._is_aggregated
-    );
-    const todayItemIds = todayEntries.map(e => e.budget_item_id).filter(Boolean);
-    
-    // Set active item IDs to include anything logged today
-    setActiveBudgetIds(prev => {
-      const merged = [...new Set([...prev, ...todayItemIds])];
-      return merged;
-    });
-  }, [projectFilter, entries]);
+    const selectedDateItemIds = dprEntriesForSelectedDate
+      .map((entry) => {
+        if (entry.budget_item_id) {
+          const budgetRowId = worksheetRowByBudgetId.get(entry.budget_item_id)?.row_id;
+          if (budgetRowId) return budgetRowId;
+        }
+        if (entry.wbs_item_id) {
+          const wbsRowId = worksheetRowByWbsId.get(entry.wbs_item_id)?.row_id;
+          if (wbsRowId) return wbsRowId;
+        }
+        const entryActivityKey = getEntryActivityKey(entry);
+        if (entryActivityKey) {
+          return worksheetRowByActivityId.get(entryActivityKey)?.row_id || null;
+        }
+        return null;
+      })
+      .filter(Boolean);
+    setActiveBudgetIds([...new Set(selectedDateItemIds)]);
+  }, [
+    scopeKey,
+    dprEntriesForSelectedDate,
+    isReady,
+    worksheetRowByBudgetId,
+    worksheetRowByWbsId,
+    worksheetRowByActivityId,
+    getEntryActivityKey,
+  ]);
 
   // Sync state for tabular DPR sheet fields
   useEffect(() => {
-    if (!projectFilter) {
+    if (!isReady) {
       setDprState({});
-      setLoadedProject(null);
+      setLoadedScope(null);
       return;
     }
-    
-    if (projectFilter !== loadedProject) {
-      const newState = {};
-      budgetItems.forEach(b => {
-        const itemProgress = entries.filter(e => e.budget_item_id === b.id && (e.report_type === 'daily' || !e.report_type) && !e._is_aggregated);
-        const todayEntry = itemProgress.find(e => e.date === todayStr);
-        
-        newState[b.id] = {
-          qty_executed: todayEntry ? String(todayEntry.quantity_done) : '',
-          labor_count: todayEntry ? String(todayEntry.labor_count) : '',
-          description: todayEntry ? todayEntry.work_done_description : '',
-          issues: todayEntry ? todayEntry.issues_reported : '',
-          entry_id: todayEntry ? todayEntry.id : null,
-          wbs_item_id: todayEntry ? todayEntry.wbs_item_id : b.wbs_item_id || ''
+
+    setDprState((prev) => {
+      const next = {};
+
+      activeBudgetIds.forEach((rowId) => {
+        const row = worksheetRowById.get(rowId);
+        if (!row) return;
+
+        const selectedDateEntry = dprEntriesForSelectedDate.find((entry) => rowMatchesEntry(row, entry));
+        const prevRow = scopeKey === loadedScope ? prev[rowId] || {} : {};
+
+        next[rowId] = {
+          qty_executed:
+            prevRow.qty_executed !== undefined && prevRow.qty_executed !== ''
+              ? prevRow.qty_executed
+              : selectedDateEntry
+                ? String(selectedDateEntry.quantity_done ?? '')
+                : '',
+          labor_count:
+            prevRow.labor_count !== undefined && prevRow.labor_count !== ''
+              ? prevRow.labor_count
+              : selectedDateEntry
+                ? String(selectedDateEntry.labor_count ?? '')
+                : '',
+          description:
+            prevRow.description !== undefined && prevRow.description !== ''
+              ? prevRow.description
+              : selectedDateEntry?.work_done_description || '',
+          issues:
+            prevRow.issues !== undefined && prevRow.issues !== ''
+              ? prevRow.issues
+              : selectedDateEntry?.issues_reported || '',
+          entry_id: selectedDateEntry ? selectedDateEntry.id : null,
+          wbs_item_id: prevRow.wbs_item_id || selectedDateEntry?.wbs_item_id || row.wbs_item_id || '',
         };
       });
-      setDprState(newState);
-      setLoadedProject(projectFilter);
-    } else {
-      setDprState(prev => {
-        const updated = { ...prev };
-        budgetItems.forEach(b => {
-          const itemProgress = entries.filter(e => e.budget_item_id === b.id && (e.report_type === 'daily' || !e.report_type) && !e._is_aggregated);
-          const todayEntry = itemProgress.find(e => e.date === todayStr);
-          if (todayEntry) {
-            updated[b.id] = {
-              ...updated[b.id],
-              entry_id: todayEntry.id,
-              qty_executed: updated[b.id]?.qty_executed !== undefined && updated[b.id]?.qty_executed !== '' ? updated[b.id].qty_executed : String(todayEntry.quantity_done),
-              labor_count: updated[b.id]?.labor_count !== undefined && updated[b.id]?.labor_count !== '' ? updated[b.id].labor_count : String(todayEntry.labor_count),
-              description: updated[b.id]?.description || todayEntry.work_done_description || '',
-              issues: updated[b.id]?.issues || todayEntry.issues_reported || '',
-              wbs_item_id: updated[b.id]?.wbs_item_id || todayEntry.wbs_item_id || b.wbs_item_id || ''
-            };
-          } else {
-            if (updated[b.id] && updated[b.id].entry_id) {
-              updated[b.id].entry_id = null;
-            }
-          }
-        });
-        return updated;
-      });
-    }
-  }, [projectFilter, entries, budgetItems, loadedProject]);
+
+      return next;
+    });
+
+    setLoadedScope(scopeKey);
+  }, [scopeKey, activeBudgetIds, worksheetRowById, dprEntriesForSelectedDate, isReady, loadedScope, rowMatchesEntry]);
 
   const handleInputChange = (budgetItemId, field, value) => {
+    if (isSelectedDateLocked) return;
     setDprState(prev => ({
       ...prev,
       [budgetItemId]: {
@@ -247,8 +537,11 @@ export default function SiteProgress() {
   };
 
   const handleAddActivity = (id) => {
+    if (isSelectedDateLocked) return;
     if (!id) return;
     if (activeBudgetIds.includes(id)) return;
+
+    const row = worksheetRowById.get(id);
     
     setActiveBudgetIds(prev => [...prev, id]);
     setDprState(prev => ({
@@ -259,12 +552,13 @@ export default function SiteProgress() {
         description: '',
         issues: '',
         entry_id: null,
-        wbs_item_id: ''
+        wbs_item_id: row?.wbs_item_id || ''
       }
     }));
   };
 
   const handleRemoveActivity = async (bItemId) => {
+    if (isSelectedDateLocked) return;
     const state = dprState[bItemId];
     if (state?.entry_id) {
       if (confirm('This will delete today\'s logged entry for this activity from the database. Are you sure?')) {
@@ -281,78 +575,141 @@ export default function SiteProgress() {
   };
 
   const handleSaveDpr = async () => {
+    if (isSelectedDateLocked) {
+      toast({
+        title: 'Date Locked',
+        description: 'DPR is already submitted for this date and cannot be changed.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (activeBudgetIds.length === 0) {
+      toast({
+        title: 'No Activity Selected',
+        description: 'Add at least one activity before saving DPR.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      for (const budgetItemId of activeBudgetIds) {
-        const state = dprState[budgetItemId];
-        const bItem = budgetItems.find(b => b.id === budgetItemId);
-        if (!bItem || !state) continue;
+      let savedCount = 0;
+      let deletedCount = 0;
+      const persistedEntryIds = {};
+
+      for (const rowId of activeBudgetIds) {
+        const state = dprState[rowId];
+        const row = worksheetRowById.get(rowId);
+        if (!row || !state) continue;
 
         const hasValue = state.qty_executed !== '' || state.labor_count !== '' || state.description !== '' || state.issues !== '';
 
         if (hasValue) {
           const payload = {
-            project_id: projectFilter,
-            budget_item_id: budgetItemId,
-            date: todayStr,
+            project_id: projectId,
+            budget_item_id: row.budget_item_id_ref || null,
+            date: selectedReportDate,
             report_type: 'daily',
             submitted_by: submittedBy || 'Supervisor',
-            work_done_description: state.description || `Completed ${state.qty_executed} ${bItem.unit} of ${bItem.title}`,
+            work_done_description: state.description || `Completed ${state.qty_executed} ${row.unit} of ${row.title}`,
             quantity_done: parseFloat(state.qty_executed) || 0,
-            unit: bItem.unit,
+            unit: row.unit,
             labor_count: parseFloat(state.labor_count) || 0,
             issues_reported: state.issues || '',
             weather_condition: weatherCondition,
             status: 'approved',
-            value_of_work_done: (parseFloat(state.qty_executed) || 0) * (parseFloat(bItem.cost_per_unit) || 0),
-            wbs_item_id: state.wbs_item_id || bItem.wbs_item_id || '',
-            milestone_id: bItem.milestone_id || '',
+            value_of_work_done: (parseFloat(state.qty_executed) || 0) * (parseFloat(row.cost_per_unit) || 0),
+            milestone_id: row.milestone_id || null,
           };
+          const resolvedWbsItemId = state.wbs_item_id || row.wbs_item_id || '';
+          // Only send wbs_item_id for WBS-only rows; older DBs may not have this column yet.
+          if (!row.budget_item_id_ref && resolvedWbsItemId) {
+            payload.wbs_item_id = resolvedWbsItemId;
+          }
 
           if (state.entry_id) {
-            await base44.entities.ProgressEntry.update(state.entry_id, payload);
+            const updatedEntry = await base44.entities.ProgressEntry.update(state.entry_id, payload);
+            persistedEntryIds[rowId] = updatedEntry?.id || state.entry_id;
           } else {
-            await base44.entities.ProgressEntry.create(payload);
+            const createdEntry = await base44.entities.ProgressEntry.create(payload);
+            persistedEntryIds[rowId] = createdEntry?.id || null;
           }
+          savedCount += 1;
         } else if (state.entry_id) {
           await base44.entities.ProgressEntry.delete(state.entry_id);
+          deletedCount += 1;
         }
+      }
+
+      if (Object.keys(persistedEntryIds).length > 0) {
+        setDprState((prev) => {
+          const next = { ...prev };
+          Object.entries(persistedEntryIds).forEach(([rowId, entryId]) => {
+            if (next[rowId]) {
+              next[rowId] = {
+                ...next[rowId],
+                entry_id: entryId,
+              };
+            }
+          });
+          return next;
+        });
       }
 
       queryClient.invalidateQueries({ queryKey: ['progress'] });
       queryClient.invalidateQueries({ queryKey: ['budgetItems'] });
       queryClient.invalidateQueries({ queryKey: ['milestones'] });
       queryClient.invalidateQueries({ queryKey: ['wbs'] });
+
+      if (savedCount > 0 && scopeKey) {
+        setLockedScopes((prev) => ({
+          ...prev,
+          [scopeKey]: true,
+        }));
+      }
       
-      setLoadedProject(null); // Reforce clean sync
+      setLoadedScope(null); // force clean sync on re-fetch
+      toast({
+        title: 'DPR Saved',
+        description: `Saved ${savedCount} row${savedCount === 1 ? '' : 's'}${deletedCount ? `, removed ${deletedCount}` : ''}.`,
+      });
     } catch (e) {
       console.error('Error saving DPR:', e);
+      const msg = e?.message || 'Unable to save DPR. Please check backend logs.';
+      toast({
+        title: 'Failed to Save DPR',
+        description: msg,
+        variant: 'destructive',
+      });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const isRowModified = (bItemId) => {
-    const state = dprState[bItemId];
+  const isRowModified = (rowId) => {
+    const state = dprState[rowId];
     if (!state) return false;
-    
-    const itemProgress = entries.filter(e => e.budget_item_id === bItemId && (e.report_type === 'daily' || !e.report_type) && !e._is_aggregated);
-    const todayEntry = itemProgress.find(e => e.date === todayStr);
+
+    const row = worksheetRowById.get(rowId);
+    if (!row) return false;
+
+    const selectedDateEntry = dprEntriesForSelectedDate.find((entry) => rowMatchesEntry(row, entry));
     
     const currentQty = state.qty_executed === '' ? 0 : parseFloat(state.qty_executed) || 0;
-    const dbQty = todayEntry ? todayEntry.quantity_done || 0 : 0;
+    const dbQty = selectedDateEntry ? selectedDateEntry.quantity_done || 0 : 0;
     
     const currentLabor = state.labor_count === '' ? 0 : parseFloat(state.labor_count) || 0;
-    const dbLabor = todayEntry ? todayEntry.labor_count || 0 : 0;
+    const dbLabor = selectedDateEntry ? selectedDateEntry.labor_count || 0 : 0;
     
     const currentDesc = state.description || '';
-    const dbDesc = todayEntry ? todayEntry.work_done_description || '' : '';
+    const dbDesc = selectedDateEntry ? selectedDateEntry.work_done_description || '' : '';
     
     const currentIssues = state.issues || '';
-    const dbIssues = todayEntry ? todayEntry.issues_reported || '' : '';
+    const dbIssues = selectedDateEntry ? selectedDateEntry.issues_reported || '' : '';
 
     const currentWBS = state.wbs_item_id || '';
-    const dbWBS = todayEntry ? todayEntry.wbs_item_id || '' : '';
+    const dbWBS = selectedDateEntry ? selectedDateEntry.wbs_item_id || '' : '';
     
     return currentQty !== dbQty || currentLabor !== dbLabor || currentDesc !== dbDesc || currentIssues !== dbIssues || currentWBS !== dbWBS;
   };
@@ -365,115 +722,84 @@ export default function SiteProgress() {
     },
   });
 
-  // L1-L2-L3 selection logic
-  const l2Children = selectedL1 ? budgetItems.filter(b => b.parent_id === selectedL1 && b.level === 2) : [];
-  const l3Children = selectedL2 ? budgetItems.filter(b => b.parent_id === selectedL2 && b.level === 3) : [];
-
-  let targetActivityToAdd = null;
-  let addBtnDisabled = true;
-  let addBtnMessage = 'Add Activity';
-
-  if (selectedL1) {
-    if (l2Children.length > 0) {
-      if (selectedL2) {
-        if (l3Children.length > 0) {
-          if (selectedL3) {
-            targetActivityToAdd = budgetItems.find(b => b.id === selectedL3);
-            addBtnDisabled = false;
-          } else {
-            addBtnMessage = 'Select L3 Activity';
-          }
-        } else {
-          targetActivityToAdd = budgetItems.find(b => b.id === selectedL2);
-          addBtnDisabled = false;
-        }
-      } else {
-        addBtnMessage = 'Select L2 Sub-head';
-      }
-    } else {
-      targetActivityToAdd = budgetItems.find(b => b.id === selectedL1);
-      addBtnDisabled = false;
-    }
-  } else {
-    addBtnMessage = 'Select L1 Head';
-  }
+  const searchableActivities = useMemo(
+    () => worksheetRows.filter((item) => !activeBudgetIds.includes(item.row_id)),
+    [worksheetRows, activeBudgetIds]
+  );
+  const selectedActivityOption = searchableActivities.find((item) => item.row_id === selectedActivityId);
+  const addActivityDisabled = isSelectedDateLocked || !selectedActivityOption;
 
   // Active budget items listed in DPR sheet
-  const activeBudgetItems = budgetItems.filter(b => activeBudgetIds.includes(b.id));
+  const activeBudgetItems = activeBudgetIds
+    .map((rowId) => worksheetRowById.get(rowId))
+    .filter(Boolean);
   const modifiedCount = activeBudgetIds.filter(id => isRowModified(id)).length;
 
   // Aggregated data generator helpers for WPR/MPR
-  const getWeeklyAggregatedData = (start, end) => {
+  const buildAggregatedData = (start, end) => {
     const data = [];
-    const weekEntries = entries.filter(e => e.date >= start && e.date <= end && (e.report_type === 'daily' || !e.report_type) && !e._is_aggregated);
+    const scopedEntries = entries.filter(
+      (e) => e.date >= start && e.date <= end && (e.report_type === 'daily' || !e.report_type) && !e._is_aggregated
+    );
     
     const grouped = {};
-    weekEntries.forEach(e => {
-      if (!e.budget_item_id) return;
-      if (!grouped[e.budget_item_id]) {
-        grouped[e.budget_item_id] = { qtyDone: 0, value: 0, laborCount: 0 };
+    scopedEntries.forEach((entry) => {
+      const key = entry.budget_item_id || (entry.wbs_item_id ? `wbs_${entry.wbs_item_id}` : null);
+      if (!key) return;
+
+      if (!grouped[key]) {
+        grouped[key] = {
+          qtyDone: 0,
+          value: 0,
+          laborCount: 0,
+          budgetItemId: entry.budget_item_id || '',
+          wbsItemId: entry.wbs_item_id || '',
+          activityKey: getEntryActivityKey(entry),
+        };
       }
-      grouped[e.budget_item_id].qtyDone += parseFloat(e.quantity_done) || 0;
-      grouped[e.budget_item_id].value += parseFloat(e.value_of_work_done) || 0;
-      grouped[e.budget_item_id].laborCount += parseFloat(e.labor_count) || 0;
+
+      grouped[key].qtyDone += parseFloat(entry.quantity_done) || 0;
+      grouped[key].value += parseFloat(entry.value_of_work_done) || 0;
+      grouped[key].laborCount += parseFloat(entry.labor_count) || 0;
+      if (!grouped[key].wbsItemId && entry.wbs_item_id) grouped[key].wbsItemId = entry.wbs_item_id;
+      if (!grouped[key].activityKey) grouped[key].activityKey = getEntryActivityKey(entry);
     });
     
     Object.entries(grouped).forEach(([itemId, metrics]) => {
-      const bItem = budgetItems.find(b => b.id === itemId);
-      if (!bItem) return;
-      const parentHead = budgetItems.find(p => p.id === bItem.parent_id);
-      const wbsItem = wbsItems.find(w => w.id === bItem.wbs_item_id);
+      const mappedRow = (
+        (metrics.budgetItemId ? worksheetRowByBudgetId.get(metrics.budgetItemId) : null) ||
+        (metrics.wbsItemId ? worksheetRowByWbsId.get(metrics.wbsItemId) : null) ||
+        (metrics.activityKey ? worksheetRowByActivityId.get(metrics.activityKey) : null)
+      );
+      const fallbackBudget = metrics.budgetItemId
+        ? budgetItems.find((b) => b.id === metrics.budgetItemId)
+        : null;
+      const row = mappedRow || fallbackBudget;
+      if (!row) return;
+
+      const parentHead = budgetItems.find((p) => p.id === row.parent_id);
+      const wbsItem = wbsItems.find((w) => w.id === (row.wbs_item_id || metrics.wbsItemId));
       
       data.push({
         id: itemId,
-        title: bItem.title,
-        code: bItem.code,
+        title: row.title,
+        code: row.code,
         domain: parentHead ? `${parentHead.code}: ${parentHead.title}` : '—',
         subProject: wbsItem ? wbsItem.title || wbsItem.name : '—',
-        unit: bItem.unit,
+        unit: row.unit,
         qtyDone: metrics.qtyDone,
         value: metrics.value,
         laborCount: metrics.laborCount
       });
     });
-    return data.sort((a,b) => a.code.localeCompare(b.code));
+
+    return data.sort((a, b) =>
+      String(a.code || '').localeCompare(String(b.code || ''), undefined, { numeric: true })
+    );
   };
 
-  const getMonthlyAggregatedData = (start, end) => {
-    const data = [];
-    const monthEntries = entries.filter(e => e.date >= start && e.date <= end && (e.report_type === 'daily' || !e.report_type) && !e._is_aggregated);
-    
-    const grouped = {};
-    monthEntries.forEach(e => {
-      if (!e.budget_item_id) return;
-      if (!grouped[e.budget_item_id]) {
-        grouped[e.budget_item_id] = { qtyDone: 0, value: 0, laborCount: 0 };
-      }
-      grouped[e.budget_item_id].qtyDone += parseFloat(e.quantity_done) || 0;
-      grouped[e.budget_item_id].value += parseFloat(e.value_of_work_done) || 0;
-      grouped[e.budget_item_id].laborCount += parseFloat(e.labor_count) || 0;
-    });
-    
-    Object.entries(grouped).forEach(([itemId, metrics]) => {
-      const bItem = budgetItems.find(b => b.id === itemId);
-      if (!bItem) return;
-      const parentHead = budgetItems.find(p => p.id === bItem.parent_id);
-      const wbsItem = wbsItems.find(w => w.id === bItem.wbs_item_id);
-      
-      data.push({
-        id: itemId,
-        title: bItem.title,
-        code: bItem.code,
-        domain: parentHead ? `${parentHead.code}: ${parentHead.title}` : '—',
-        subProject: wbsItem ? wbsItem.title || wbsItem.name : '—',
-        unit: bItem.unit,
-        qtyDone: metrics.qtyDone,
-        value: metrics.value,
-        laborCount: metrics.laborCount
-      });
-    });
-    return data.sort((a,b) => a.code.localeCompare(b.code));
-  };
+  const getWeeklyAggregatedData = (start, end) => buildAggregatedData(start, end);
+  const getMonthlyAggregatedData = (start, end) => buildAggregatedData(start, end);
 
   // History stats
   const filtered = entries.filter(e => !typeFilter || e.report_type === typeFilter);
@@ -510,22 +836,25 @@ export default function SiteProgress() {
         </div>
       </div>
 
-      {/* Primary Project Filter */}
-      <div className="flex flex-wrap gap-4 items-center">
-        <div className="flex items-center gap-2">
-          <Label className="text-sm font-semibold text-muted-foreground whitespace-nowrap">Active Project:</Label>
-          <Select value={projectFilter} onValueChange={setProjectFilter}>
-            <SelectTrigger className="w-64">
-              <SelectValue placeholder="Select Project" />
-            </SelectTrigger>
-            <SelectContent>
-              {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+      {/* Primary Project + Sub Project Filter */}
+      <ProjectSubProjectSelector
+        projects={projects}
+        subProjects={subProjects}
+        projectId={projectId}
+        subProjectId={subProjectId}
+        onProjectChange={setProjectId}
+        onSubProjectChange={setSubProjectId}
+      />
 
-      {/* Tabs Menu */}
+      {isReady && selectedProject && selectedSubProject && (
+        <p className="text-sm text-muted-foreground">
+          Progress for <span className="font-medium text-foreground">{selectedProject.name}</span>
+          {' → '}
+          <span className="font-medium text-foreground">{selectedSubProject.name}</span>
+        </p>
+      )}
+
+      <SubProjectGate projectId={projectId} subProjectId={subProjectId} subProjects={subProjects}>
       <div className="flex border-b border-border gap-2 overflow-x-auto pb-1">
         <button 
           onClick={() => setActiveTab('sheet')} 
@@ -574,7 +903,7 @@ export default function SiteProgress() {
       {/* 1. Daily DPR Sheet Tab */}
       {activeTab === 'sheet' && (
         <div className="space-y-4">
-          {projectFilter ? (
+          {isReady ? (
             <>
               {/* DPR context card */}
               <div className="flex flex-wrap gap-4 items-center bg-card border rounded-xl p-4 shadow-sm">
@@ -584,15 +913,29 @@ export default function SiteProgress() {
                   </div>
                   <div>
                     <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Reporting Date</p>
-                    <p className="text-sm font-bold text-foreground">{formattedToday}</p>
+                    <Input
+                      type="date"
+                      value={selectedReportDate}
+                      onChange={(event) => setSelectedReportDate(event.target.value)}
+                      className="h-9 w-40 font-semibold"
+                    />
+                    <p className="text-[11px] text-muted-foreground mt-1">{formattedSelectedDate}</p>
                   </div>
                 </div>
                 
                 <div className="h-8 w-px bg-border hidden md:block" />
                 
                 <div className="flex flex-col gap-1">
-                  <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Today's Weather</span>
-                  <Select value={weatherCondition} onValueChange={setWeatherCondition}>
+                  <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Weather</span>
+                  <Select
+                    value={weatherCondition}
+                    onValueChange={(value) => {
+                      weatherManualRef.current = true;
+                      setWeatherManuallyEdited(true);
+                      setWeatherCondition(value);
+                    }}
+                    disabled={isSelectedDateLocked}
+                  >
                     <SelectTrigger className="w-36 h-9">
                       <SelectValue />
                     </SelectTrigger>
@@ -602,6 +945,15 @@ export default function SiteProgress() {
                       ))}
                     </SelectContent>
                   </Select>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    {weatherLoading
+                      ? 'Fetching weather from project location...'
+                      : weatherError
+                        ? weatherError
+                        : weatherInfo
+                          ? `Auto-filled from ${weatherInfo} (editable)`
+                          : 'Weather is editable.'}
+                  </p>
                 </div>
                 
                 <div className="h-8 w-px bg-border hidden md:block" />
@@ -613,117 +965,111 @@ export default function SiteProgress() {
                     onChange={e => setSubmittedBy(e.target.value)}
                     className="h-9 w-40 font-semibold"
                     placeholder="Name..."
+                    disabled={isSelectedDateLocked}
                   />
                 </div>
                 
                 <div className="ml-auto flex items-center gap-3">
-                  {modifiedCount > 0 && (
+                  {!isSelectedDateLocked && modifiedCount > 0 && (
                     <Badge variant="outline" className="bg-amber-500/10 text-amber-700 border-amber-500/20 text-xs px-2.5 py-1 font-bold">
                       ⚠️ {modifiedCount} unsaved row{modifiedCount > 1 ? 's' : ''}
                     </Badge>
                   )}
                   <Button 
                     onClick={handleSaveDpr} 
-                    disabled={isSubmitting || !projectFilter} 
+                    disabled={isSubmitting || !isReady || isSelectedDateLocked} 
                     className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold h-10 px-5 shadow-sm transition-colors"
                   >
                     <Save className="w-4 h-4" />
-                    {isSubmitting ? 'Saving DPR...' : 'Save Today\'s DPR'}
+                    {isSelectedDateLocked ? 'Date Locked' : (isSubmitting ? 'Saving DPR...' : 'Save DPR')}
                   </Button>
                 </div>
               </div>
 
-              {/* L1-L2-L3 Selectors */}
+              {isSelectedDateLocked && (
+                <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
+                  DPR is already filled for this date. This date is locked and cannot be submitted again.
+                </div>
+              )}
+
+              {/* Searchable Activity Selector */}
               <div className="bg-card border rounded-xl p-4 shadow-sm space-y-3">
                 <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Add Activity to Worksheet</div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  
-                  {/* L1 Head Selector */}
+                {worksheetCarryForwardCount > 0 && (
+                  <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+                    {worksheetCarryForwardCount} legacy L1 activit{worksheetCarryForwardCount === 1 ? 'y is' : 'ies are'} carried into L3 because consumed quantity exists.
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-3 items-end">
                   <div className="flex flex-col gap-1">
-                    <Label className="text-[10px] uppercase font-bold text-muted-foreground">L1 Budget Head</Label>
-                    <Select value={selectedL1} onValueChange={(val) => {
-                      setSelectedL1(val);
-                      setSelectedL2('');
-                      setSelectedL3('');
-                    }}>
-                      <SelectTrigger className="h-9 mt-0.5">
-                        <SelectValue placeholder="Choose L1 Head..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {budgetItems.filter(b => b.level === 1).map(b => (
-                          <SelectItem key={b.id} value={b.id}>
-                            {b.code}: {b.title}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Label className="text-[10px] uppercase font-bold text-muted-foreground">Search Activity</Label>
+                    <Popover open={activityPickerOpen} onOpenChange={setActivityPickerOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          role="combobox"
+                          disabled={isSelectedDateLocked || searchableActivities.length === 0}
+                          className="h-9 mt-0.5 justify-between font-normal"
+                        >
+                          {selectedActivityOption
+                            ? `${selectedActivityOption.code || '—'}: ${selectedActivityOption.title}${
+                                selectedActivityOption.is_l1_carry_forward ? ' (L1 carried)' : ''
+                              }`
+                            : (searchableActivities.length === 0 ? 'No activities available' : 'Search by activity code or name...')}
+                          <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50 shrink-0" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[min(90vw,560px)] p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="Type activity code or name..." />
+                          <CommandList>
+                            <CommandEmpty>No activity found.</CommandEmpty>
+                            <CommandGroup>
+                              {searchableActivities.map((item) => (
+                                <CommandItem
+                                  key={item.row_id}
+                                  value={`${item.code || ''} ${item.title || ''}`}
+                                  onSelect={() => {
+                                    setSelectedActivityId(item.row_id);
+                                    setActivityPickerOpen(false);
+                                  }}
+                                  className="gap-3"
+                                >
+                                  <span className="font-mono text-xs font-semibold whitespace-nowrap min-w-[170px] max-w-[220px] truncate">
+                                    {item.code || '—'}
+                                  </span>
+                                  <span className="truncate flex-1">{item.title}</span>
+                                  {item.is_l1_carry_forward && (
+                                    <span className="text-[10px] font-medium text-sky-700 bg-sky-100 border border-sky-200 rounded px-1.5 py-0.5">
+                                      L1 carried
+                                    </span>
+                                  )}
+                                  {selectedActivityId === item.row_id && <Check className="ml-auto h-4 w-4" />}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                   </div>
 
-                  {/* L2 Sub-Head Selector */}
-                  <div className="flex flex-col gap-1">
-                    <Label className="text-[10px] uppercase font-bold text-muted-foreground">L2 Sub-Head</Label>
-                    <Select 
-                      value={selectedL2} 
-                      onValueChange={(val) => {
-                        setSelectedL2(val);
-                        setSelectedL3('');
-                      }}
-                      disabled={l2Children.length === 0}
-                    >
-                      <SelectTrigger className="h-9 mt-0.5">
-                        <SelectValue placeholder={l2Children.length > 0 ? "Choose L2 Sub-head..." : "No L2 Sub-heads"} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {l2Children.map(b => (
-                          <SelectItem key={b.id} value={b.id}>
-                            {b.code}: {b.title}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {/* L3 Activity Selector */}
-                  <div className="flex flex-col gap-1">
-                    <Label className="text-[10px] uppercase font-bold text-muted-foreground">L3 Activity</Label>
-                    <Select 
-                      value={selectedL3} 
-                      onValueChange={setSelectedL3}
-                      disabled={l3Children.length === 0}
-                    >
-                      <SelectTrigger className="h-9 mt-0.5">
-                        <SelectValue placeholder={l3Children.length > 0 ? "Choose L3 Activity..." : "No L3 Activities"} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {l3Children.map(b => (
-                          <SelectItem key={b.id} value={b.id}>
-                            {b.code}: {b.title}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                </div>
-
-                <div className="flex justify-end pt-2">
-                  <Button 
+                  <Button
+                    type="button"
                     onClick={() => {
-                      if (targetActivityToAdd) {
-                        handleAddActivity(targetActivityToAdd.id);
-                        setSelectedL1('');
-                        setSelectedL2('');
-                        setSelectedL3('');
-                      }
+                      if (!selectedActivityOption) return;
+                      handleAddActivity(selectedActivityOption.row_id);
+                      setSelectedActivityId('');
                     }}
-                    disabled={addBtnDisabled}
+                    disabled={addActivityDisabled}
                     className={`font-semibold h-9 px-6 gap-1.5 ${
-                      addBtnDisabled 
-                        ? 'bg-muted text-muted-foreground' 
+                      addActivityDisabled
+                        ? 'bg-muted text-muted-foreground'
                         : 'bg-primary hover:bg-primary/95 text-white'
                     }`}
                   >
-                    <span>➕</span> {addBtnMessage}
+                    <span>➕</span> {isSelectedDateLocked ? 'Date Locked' : 'Add Activity'}
                   </Button>
                 </div>
               </div>
@@ -736,7 +1082,7 @@ export default function SiteProgress() {
                   <ClipboardList className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
                   <p className="font-semibold text-sm">DPR Worksheet Empty</p>
                   <p className="text-xs mt-1 text-muted-foreground/80 max-w-md mx-auto">
-                    No activities selected for today. Use the L1-L2-L3 dropdown selectors above to add activities and report progress for today.
+                    No activities selected for {selectedReportDate}. Use the searchable activity selector above to add activities and report progress.
                   </p>
                 </div>
               ) : (
@@ -745,10 +1091,7 @@ export default function SiteProgress() {
                     <table className="w-full text-sm font-sans border-collapse">
                       <thead>
                         <tr className="border-b bg-muted/50">
-                          <th className="sticky left-0 bg-muted z-20 text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider border-r shadow-[2px_0_5px_rgba(0,0,0,0.02)]">Line Item</th>
-                          <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Domain</th>
-                          <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider w-44">Sub-Project / Tower</th>
-                          <th className="text-center p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Unit</th>
+                          <th className="sticky left-0 bg-muted z-20 text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider border-r shadow-[2px_0_5px_rgba(0,0,0,0.02)] w-[320px] min-w-[320px]">Line Item</th>
                           <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Qty Pending</th>
                           <th className="text-center p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider w-32">Qty Executed</th>
                           <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Prog Before</th>
@@ -763,19 +1106,19 @@ export default function SiteProgress() {
                       </thead>
                       <tbody>
                         {activeBudgetItems.map(bItem => {
-                          const parentHead = budgetItems.find(p => p.id === bItem.parent_id);
+                          const rowId = bItem.row_id;
                           
                           const itemProgress = entries.filter(
-                            e => e.budget_item_id === bItem.id && 
+                            e => rowMatchesEntry(bItem, e) &&
                             (e.report_type === 'daily' || !e.report_type) && 
                             !e._is_aggregated
                           );
                           
                           const qtyBefore = itemProgress
-                            .filter(e => e.date < todayStr)
+                            .filter(e => e.date < selectedReportDate)
                             .reduce((sum, e) => sum + (parseFloat(e.quantity_done) || 0), 0);
                           
-                          const state = dprState[bItem.id] || {};
+                          const state = dprState[rowId] || {};
                           const qtyExecuted = parseFloat(state.qty_executed) || 0;
                           
                           const qtyPending = Math.max(0, bItem.quantity - qtyBefore);
@@ -790,67 +1133,45 @@ export default function SiteProgress() {
                           
                           const isMilestone = milestones.some(m => m.id === bItem.milestone_id || m.title.toUpperCase().includes(bItem.title.toUpperCase()));
                           const isComplete = progressAfter >= 100;
+                          const isCarryForwardRow = bItem.is_l1_carry_forward;
                           
-                          const rowModified = isRowModified(bItem.id);
+                          const rowModified = isRowModified(rowId);
 
                           return (
                             <tr 
-                              key={bItem.id} 
+                              key={rowId} 
                               className={`border-b hover:bg-muted/20 transition-colors ${
                                 rowModified 
                                   ? 'bg-amber-500/5 hover:bg-amber-500/10' 
                                   : isComplete 
                                     ? 'bg-emerald-500/5 hover:bg-emerald-500/10' 
-                                    : ''
+                                    : isCarryForwardRow
+                                      ? 'bg-sky-500/5 hover:bg-sky-500/10'
+                                      : ''
                               }`}
                             >
                               {/* Sticky Line Item */}
-                              <td className={`sticky left-0 border-r shadow-[2px_0_5px_rgba(0,0,0,0.02)] z-10 p-3 text-xs font-medium transition-colors ${
+                              <td className={`sticky left-0 border-r shadow-[2px_0_5px_rgba(0,0,0,0.02)] z-10 p-3 text-xs font-medium transition-colors w-[320px] min-w-[320px] ${
                                 rowModified 
                                   ? 'bg-amber-50/95 dark:bg-amber-950/20' 
                                   : isComplete 
                                     ? 'bg-emerald-50/95 dark:bg-emerald-950/20' 
-                                    : 'bg-card'
+                                    : isCarryForwardRow
+                                      ? 'bg-sky-50/95 dark:bg-sky-950/20'
+                                      : 'bg-card'
                               }`}>
                                 <p className="font-semibold text-foreground leading-normal">{bItem.title}</p>
                                 <p className="text-[9px] text-muted-foreground mt-0.5">{bItem.code}</p>
+                                {isCarryForwardRow && (
+                                  <p className="text-[10px] mt-1 inline-flex items-center rounded border border-sky-200 bg-sky-100 px-1.5 py-0.5 text-sky-700">
+                                    L1 carried to L3 (consumed {Number(bItem.carry_forward_consumed_qty || 0).toLocaleString()})
+                                  </p>
+                                )}
                               </td>
 
-                              {/* Domain */}
-                              <td className="p-3 text-xs font-semibold text-muted-foreground whitespace-nowrap">
-                                {parentHead ? `${parentHead.code}: ${parentHead.title}` : '—'}
-                              </td>
-                              
-                              {/* Sub-Project selector dropdown */}
-                              <td className="p-3">
-                                <Select 
-                                  value={state.wbs_item_id || bItem.wbs_item_id || ''} 
-                                  onValueChange={val => handleInputChange(bItem.id, 'wbs_item_id', val)}
-                                >
-                                  <SelectTrigger className="w-40 h-8 text-xs font-medium">
-                                    <SelectValue placeholder="Select Sub-Project..." />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {wbsItems.map(w => (
-                                      <SelectItem key={w.id} value={w.id}>
-                                        {w.title || w.name}
-                                      </SelectItem>
-                                    ))}
-                                    {wbsItems.length === 0 && (
-                                      <div className="p-2 text-xs text-muted-foreground text-center">No Sub-Projects</div>
-                                    )}
-                                  </SelectContent>
-                                </Select>
-                              </td>
-                              
-                              {/* Unit */}
-                              <td className="p-3 text-center text-xs font-bold text-muted-foreground whitespace-nowrap">
-                                {bItem.unit}
-                              </td>
-                              
                               {/* Qty Pending */}
                               <td className="p-3 text-right font-mono text-xs whitespace-nowrap font-medium text-slate-700">
-                                {qtyPending.toLocaleString()}
+                                {[qtyPending.toLocaleString(), bItem.unit].filter(Boolean).join(' ')}
                               </td>
                               
                               {/* Qty Executed Input */}
@@ -861,7 +1182,8 @@ export default function SiteProgress() {
                                   className="w-24 text-right h-8 text-xs font-mono font-semibold"
                                   placeholder="0"
                                   value={state.qty_executed ?? ''}
-                                  onChange={e => handleInputChange(bItem.id, 'qty_executed', e.target.value)}
+                                  onChange={e => handleInputChange(rowId, 'qty_executed', e.target.value)}
+                                  disabled={isSelectedDateLocked}
                                 />
                               </td>
                               
@@ -906,7 +1228,8 @@ export default function SiteProgress() {
                                   className="w-16 text-right h-8 text-xs font-mono"
                                   placeholder="0"
                                   value={state.labor_count ?? ''}
-                                  onChange={e => handleInputChange(bItem.id, 'labor_count', e.target.value)}
+                                  onChange={e => handleInputChange(rowId, 'labor_count', e.target.value)}
+                                  disabled={isSelectedDateLocked}
                                 />
                               </td>
                               
@@ -917,7 +1240,8 @@ export default function SiteProgress() {
                                   className="w-40 h-8 text-xs font-sans"
                                   placeholder="Work done details..."
                                   value={state.description ?? ''}
-                                  onChange={e => handleInputChange(bItem.id, 'description', e.target.value)}
+                                  onChange={e => handleInputChange(rowId, 'description', e.target.value)}
+                                  disabled={isSelectedDateLocked}
                                 />
                               </td>
                               
@@ -928,7 +1252,8 @@ export default function SiteProgress() {
                                   className="w-40 h-8 text-xs font-sans text-destructive placeholder:text-destructive/40"
                                   placeholder="Add issue/delay details..."
                                   value={state.issues ?? ''}
-                                  onChange={e => handleInputChange(bItem.id, 'issues', e.target.value)}
+                                  onChange={e => handleInputChange(rowId, 'issues', e.target.value)}
+                                  disabled={isSelectedDateLocked}
                                 />
                               </td>
                               
@@ -937,8 +1262,9 @@ export default function SiteProgress() {
                                 <Button 
                                   variant="ghost" 
                                   size="icon" 
-                                  onClick={() => handleRemoveActivity(bItem.id)}
+                                  onClick={() => handleRemoveActivity(rowId)}
                                   className="w-7 h-7 hover:bg-destructive/10 text-destructive/80 hover:text-destructive"
+                                  disabled={isSelectedDateLocked}
                                 >
                                   <X className="w-3.5 h-3.5" />
                                 </Button>
@@ -1215,6 +1541,7 @@ export default function SiteProgress() {
           )}
         </div>
       )}
+      </SubProjectGate>
     </div>
   );
 }

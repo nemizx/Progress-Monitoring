@@ -14,6 +14,10 @@ import { Plus, MessageSquare, AlertTriangle, Calendar, PenTool, Wind, Shield, Fi
 import { format } from 'date-fns';
 import StatusBadge from '@/components/shared/StatusBadge';
 import EmptyState from '@/components/shared/EmptyState';
+import { useProjectSubProject } from '@/hooks/useProjectSubProject';
+import ProjectSubProjectSelector from '@/components/shared/ProjectSubProjectSelector';
+import SubProjectGate from '@/components/shared/SubProjectGate';
+import { filterActivitiesBySubProject } from '@/lib/subProjectScope';
 
 const CATEGORIES = {
   schedule_change: { label: 'Schedule Change', icon: Calendar, color: 'bg-amber-100 text-amber-700 border-amber-300' },
@@ -35,7 +39,11 @@ const POST_CATEGORIES = {
 };
 
 export default function ChangeComms() {
-  const [projectFilter, setProjectFilter] = useState('');
+  const {
+    projects, subProjects, wbsItems, projectId, subProjectId,
+    setProjectId, setSubProjectId, isReady,
+  } = useProjectSubProject({ fetchWbs: true });
+
   const [activeTab, setActiveTab] = useState('changes');
   const [showAddChange, setShowAddChange] = useState(false);
   const [showAddPost, setShowAddPost] = useState(false);
@@ -44,19 +52,25 @@ export default function ChangeComms() {
   const [postForm, setPostForm] = useState({ project_id: '', category: 'general', title: '', content: '', priority: 'normal', author_name: '' });
 
   const queryClient = useQueryClient();
-  const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: () => base44.entities.Project.list('-created_date', 100) });
-  const { data: changes = [] } = useQuery({
-    queryKey: ['changes', projectFilter],
-    queryFn: () => projectFilter ? base44.entities.ChangeEvent.filter({ project_id: projectFilter }, '-created_date', 200) : base44.entities.ChangeEvent.list('-created_date', 200),
+  const { data: allChanges = [] } = useQuery({
+    queryKey: ['changes', projectId],
+    queryFn: () => projectId ? base44.entities.ChangeEvent.filter({ project_id: projectId }, '-created_date', 200) : Promise.resolve([]),
+    enabled: !!projectId,
   });
-  const { data: posts = [] } = useQuery({
-    queryKey: ['collab-posts', projectFilter],
-    queryFn: () => projectFilter ? base44.entities.CollaborationPost.filter({ project_id: projectFilter }, '-created_date', 100) : base44.entities.CollaborationPost.list('-created_date', 100),
+  const { data: allPosts = [] } = useQuery({
+    queryKey: ['collab-posts', projectId],
+    queryFn: () => projectId ? base44.entities.CollaborationPost.filter({ project_id: projectId }, '-created_date', 100) : Promise.resolve([]),
+    enabled: !!projectId,
   });
-  const { data: activities = [] } = useQuery({
-    queryKey: ['schedule-activities', projectFilter],
-    queryFn: () => projectFilter ? base44.entities.ScheduleActivity.filter({ project_id: projectFilter }) : base44.entities.ScheduleActivity.list('order_index', 200),
+  const { data: allActivities = [] } = useQuery({
+    queryKey: ['schedule-activities', projectId],
+    queryFn: () => projectId ? base44.entities.ScheduleActivity.filter({ project_id: projectId }) : Promise.resolve([]),
+    enabled: !!projectId,
   });
+
+  const activities = isReady ? filterActivitiesBySubProject(allActivities, wbsItems, subProjectId) : [];
+  const changes = isReady ? allChanges : [];
+  const posts = isReady ? allPosts : [];
 
   const createChangeMutation = useMutation({
     mutationFn: (data) => base44.entities.ChangeEvent.create(data),
@@ -95,25 +109,27 @@ export default function ChangeComms() {
           <p className="text-sm text-muted-foreground mt-1">Change events, discussions, and team communication hub</p>
         </div>
         <div className="flex gap-2">
-          {activeTab === 'changes' && <Button className="gap-2" onClick={() => setShowAddChange(true)}><Plus className="w-4 h-4" /> Log Change</Button>}
-          {activeTab === 'feed' && <Button className="gap-2" onClick={() => setShowAddPost(true)}><Plus className="w-4 h-4" /> New Post</Button>}
+          {activeTab === 'changes' && <Button className="gap-2" disabled={!isReady} onClick={() => setShowAddChange(true)}><Plus className="w-4 h-4" /> Log Change</Button>}
+          {activeTab === 'feed' && <Button className="gap-2" disabled={!isReady} onClick={() => setShowAddPost(true)}><Plus className="w-4 h-4" /> New Post</Button>}
         </div>
       </div>
 
+      <ProjectSubProjectSelector
+        projects={projects}
+        subProjects={subProjects}
+        projectId={projectId}
+        subProjectId={subProjectId}
+        onProjectChange={setProjectId}
+        onSubProjectChange={setSubProjectId}
+      />
+
+      <SubProjectGate projectId={projectId} subProjectId={subProjectId} subProjects={subProjects}>
       {/* Summary Stats */}
       <div className="grid grid-cols-3 gap-4">
         <Card className="p-4"><div className="text-2xl font-bold">{openChanges}</div><div className="text-xs text-muted-foreground mt-1">Open Changes</div></Card>
         <Card className="p-4"><div className="text-2xl font-bold text-amber-600">{totalImpactDays}d</div><div className="text-xs text-muted-foreground mt-1">Total Schedule Impact</div></Card>
         <Card className="p-4"><div className="text-2xl font-bold">${totalImpactCost.toLocaleString()}</div><div className="text-xs text-muted-foreground mt-1">Cost Impact</div></Card>
       </div>
-
-      <Select value={projectFilter} onValueChange={setProjectFilter}>
-        <SelectTrigger className="w-52"><SelectValue placeholder="All projects" /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value={null}>All Projects</SelectItem>
-          {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-        </SelectContent>
-      </Select>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
@@ -217,6 +233,7 @@ export default function ChangeComms() {
           {filteredPosts.length === 0 && <EmptyState icon={MessageSquare} title="No posts yet" description="Share updates, report difficulties, and communicate changes." actionLabel="New Post" onAction={() => setShowAddPost(true)} />}
         </TabsContent>
       </Tabs>
+      </SubProjectGate>
 
       {/* Log Change Dialog */}
       <Dialog open={showAddChange} onOpenChange={setShowAddChange}>

@@ -16,6 +16,8 @@ import {
   Search, Link2, Unlink, Coins, TrendingUp, HelpCircle
 } from 'lucide-react';
 import { formatCurrencyINR, formatCompactCurrencyINR } from '@/lib/formatters';
+import ProjectSubProjectSelector from '@/components/shared/ProjectSubProjectSelector';
+import SubProjectGate from '@/components/shared/SubProjectGate';
 
 // Fuzzy similarity logic helper based on word overlap
 const computeNameSimilarity = (s1, s2) => {
@@ -54,12 +56,7 @@ export default function CostControls() {
     queryFn: () => base44.entities.Project.list('-created_date', 100)
   });
 
-  // Auto-select first project
-  useEffect(() => {
-    if (projects.length > 0 && !projectId) {
-      setProjectId(projects[0].id);
-    }
-  }, [projects, projectId]);
+  // Auto-select first project — removed; user must pick project then sub-project
 
   const { data: subProjects = [], isLoading: loadingSubProjects } = useQuery({
     queryKey: ['subprojects', projectId],
@@ -281,14 +278,9 @@ export default function CostControls() {
     return sum + (totalUnits * (parseFloat(boq.rate_per_unit) || 0) * (parseFloat(boq.quantity_per_scope) || 1));
   }, 0);
 
-  // Set default subproject filter when subprojects load
-  useEffect(() => {
-    if (subProjects.length > 0 && !selectedSubProjectId) {
-      setSelectedSubProjectId(subProjects[0].id);
-    }
-  }, [subProjects, selectedSubProjectId]);
+  // Set default subproject filter — removed; user must select sub-project
 
-  // Selected subproject metadata
+  const isScopeReady = !!projectId && !!selectedSubProjectId;
   const activeSubProject = subProjects.find(sp => sp.id === selectedSubProjectId);
   const flatsInActiveSubProject = flats.filter(f => f.sub_project_id === selectedSubProjectId);
   
@@ -360,23 +352,20 @@ export default function CostControls() {
             Advanced cost validation ecosystem: flat-wise BOQs, automated L3 floor budgets, and locked cost controls.
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Label className="text-xs uppercase font-bold text-muted-foreground whitespace-nowrap">Active Project:</Label>
-          <Select value={projectId} onValueChange={(val) => {
-            setProjectId(val);
-            setSelectedSubProjectId('');
-          }}>
-            <SelectTrigger className="w-56 bg-card border border-border">
-              <SelectValue placeholder="Select Project" />
-            </SelectTrigger>
-            <SelectContent>
-              {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+        <ProjectSubProjectSelector
+          projects={projects}
+          subProjects={subProjects}
+          projectId={projectId}
+          subProjectId={selectedSubProjectId}
+          onProjectChange={(val) => { setProjectId(val); setSelectedSubProjectId(''); }}
+          onSubProjectChange={setSelectedSubProjectId}
+        />
       </div>
 
-      {/* KPI summaries */}
+      {!projectId ? (
+        <SubProjectGate projectId={projectId} subProjectId={selectedSubProjectId} subProjects={subProjects} />
+      ) : (
+      <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="border-l-4 border-l-primary shadow-sm">
           <CardContent className="p-4 flex items-center justify-between">
@@ -430,13 +419,13 @@ export default function CostControls() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="bg-muted p-1 rounded-xl">
           <TabsTrigger value="subprojects" className="rounded-lg text-sm font-medium">Sub-Projects & Flats</TabsTrigger>
-          <TabsTrigger value="boq" className="rounded-lg text-sm font-medium">MEP BOQ baseline</TabsTrigger>
-          <TabsTrigger value="l3gen" className="rounded-lg text-sm font-medium flex items-center gap-1">
+          <TabsTrigger value="boq" disabled={!isScopeReady} className="rounded-lg text-sm font-medium">MEP BOQ baseline</TabsTrigger>
+          <TabsTrigger value="l3gen" disabled={!isScopeReady} className="rounded-lg text-sm font-medium flex items-center gap-1">
             L3 Budget Gen
             <Sparkles className="w-3 h-3 text-amber-500" />
           </TabsTrigger>
-          <TabsTrigger value="scheduler" className="rounded-lg text-sm font-medium">Schedule alignment</TabsTrigger>
-          <TabsTrigger value="controls" className="rounded-lg text-sm font-medium">Cost Controls & locks</TabsTrigger>
+          <TabsTrigger value="scheduler" disabled={!isScopeReady} className="rounded-lg text-sm font-medium">Schedule alignment</TabsTrigger>
+          <TabsTrigger value="controls" disabled={!isScopeReady} className="rounded-lg text-sm font-medium">Cost Controls & locks</TabsTrigger>
         </TabsList>
 
         {/* Tab 1: Sub-projects and flats */}
@@ -648,7 +637,7 @@ export default function CostControls() {
                   </table>
                 </div>
               )}
-            </Card>
+            </CardContent>
           </Card>
         </TabsContent>
 
@@ -860,7 +849,7 @@ export default function CostControls() {
                   </div>
                 </div>
               )}
-            </Card>
+            </CardContent>
           </Card>
         </TabsContent>
 
@@ -973,6 +962,8 @@ export default function CostControls() {
           </div>
         </TabsContent>
       </Tabs>
+      </>
+      )}
 
       {/* SubProject Creation Modal */}
       <Dialog open={showSubProjectModal} onOpenChange={setShowSubProjectModal}>
