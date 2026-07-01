@@ -6,11 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ChevronDown, ChevronRight, Plus, Pencil, Trash2, Layers, BookTemplate, Download, Loader2, Building2, Upload, FileSpreadsheet } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Pencil, Trash2, Layers, BookTemplate, Download, Loader2, Building2, Upload, FileSpreadsheet, Search, SlidersHorizontal, X, ChevronsUpDown, Check } from 'lucide-react';
 import EmptyState from '@/components/shared/EmptyState';
 import { formatCompactCurrencyINR } from '@/lib/formatters';
 import { compareWbsIds, getNextChildWbsId, getNextL1WbsId } from '@/lib/wbsUtils';
@@ -114,6 +116,16 @@ export default function WBSManagement() {
   const [parsingUpload, setParsingUpload] = useState(false);
   const [confirmingUpload, setConfirmingUpload] = useState(false);
 
+  // Filter options state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterProgress, setFilterProgress] = useState('all');
+  const [filterLevelLabel, setFilterLevelLabel] = useState('all');
+  const [filterWbsLevel, setFilterWbsLevel] = useState('all');
+  const [minBudget, setMinBudget] = useState('');
+  const [maxBudget, setMaxBudget] = useState('');
+  const [showFiltersPanel, setShowFiltersPanel] = useState(false);
+  const [levelPickerOpen, setLevelPickerOpen] = useState(false);
+
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const queryClient = useQueryClient();
@@ -141,8 +153,7 @@ export default function WBSManagement() {
     queryKey: ['wbs', projectFilter, subProjectFilter],
     queryFn: () => base44.entities.WBSItem.filter(
       { project_id: projectFilter, sub_project_id: subProjectFilter },
-      'order_index',
-      500
+      'order_index'
     ),
     enabled: wbsReady,
   });
@@ -250,6 +261,127 @@ export default function WBSManagement() {
   );
   const hasL1Data = l1L2Items.length > 0;
   const hasL3Data = l3Items.length > 0;
+
+  // Floor levels (level labels) extracted dynamically
+  const availableLevelLabels = useMemo(() => {
+    const labels = new Set();
+    wbsItems.forEach((item) => {
+      const lbl = String(item.level_label || '').trim();
+      if (lbl) {
+        labels.add(lbl);
+      }
+    });
+    return Array.from(labels).sort();
+  }, [wbsItems]);
+
+  // Check if filtering is currently active
+  const isFiltering = useMemo(() => {
+    return (
+      searchQuery.trim() !== '' ||
+      filterProgress !== 'all' ||
+      filterLevelLabel !== 'all' ||
+      filterWbsLevel !== 'all' ||
+      minBudget !== '' ||
+      maxBudget !== ''
+    );
+  }, [searchQuery, filterProgress, filterLevelLabel, filterWbsLevel, minBudget, maxBudget]);
+
+  // Filter matching predicate
+  const isItemMatch = (item) => {
+    // 1. Search Query
+    if (searchQuery.trim() !== '') {
+      const query = searchQuery.toLowerCase().trim();
+      const matchText = [
+        item.code,
+        item.title,
+        item.description,
+        item.activity_id,
+        item.activity_code,
+        item.level_label,
+        item.unit
+      ].join(' ').toLowerCase();
+      if (!matchText.includes(query)) return false;
+    }
+
+    // 2. Progress
+    if (filterProgress !== 'all') {
+      const prog = parseNumber(item.progress);
+      if (filterProgress === 'not_started' && prog > 0) return false;
+      if (filterProgress === 'in_progress' && (prog === 0 || prog === 100)) return false;
+      if (filterProgress === 'completed' && prog < 100) return false;
+    }
+
+    // 3. Level Label (floor level)
+    if (filterLevelLabel !== 'all') {
+      if (String(item.level_label || '').trim().toLowerCase() !== filterLevelLabel.toLowerCase()) return false;
+    }
+
+    // 4. WBS Level
+    if (filterWbsLevel !== 'all') {
+      if (String(item.level) !== filterWbsLevel) return false;
+    }
+
+    // 5. Budget Range
+    const budget = parseNumber(item.budget_amount);
+    if (minBudget !== '') {
+      const minVal = parseFloat(minBudget);
+      if (!isNaN(minVal) && budget < minVal) return false;
+    }
+    if (maxBudget !== '') {
+      const maxVal = parseFloat(maxBudget);
+      if (!isNaN(maxVal) && budget > maxVal) return false;
+    }
+
+    return true;
+  };
+
+  // Memoized set of WBS Item IDs that should be visible (matches + their parents)
+  const visibleWbsItemIds = useMemo(() => {
+    if (!isFiltering) {
+      return new Set(wbsItems.map(item => item.id));
+    }
+
+    const visibleIds = new Set();
+    const matches = wbsItems.filter(isItemMatch);
+
+    // For each matching item, add its ID and all its parent/ancestor IDs
+    matches.forEach(item => {
+      visibleIds.add(item.id);
+      
+      // Traverse up parent chain
+      let current = item;
+      while (current.parent_id) {
+        visibleIds.add(current.parent_id);
+        const parent = wbsItems.find(p => p.id === current.parent_id);
+        if (!parent) break;
+        current = parent;
+      }
+    });
+
+    return visibleIds;
+  }, [wbsItems, isFiltering, searchQuery, filterProgress, filterLevelLabel, filterWbsLevel, minBudget, maxBudget]);
+
+  const clearAllFilters = () => {
+    setSearchQuery('');
+    setFilterProgress('all');
+    setFilterLevelLabel('all');
+    setFilterWbsLevel('all');
+    setMinBudget('');
+    setMaxBudget('');
+  };
+
+  // Filtered lists for the render views
+  const filteredL1L2Items = useMemo(() => {
+    return l1L2Items.filter(item => visibleWbsItemIds.has(item.id));
+  }, [l1L2Items, visibleWbsItemIds]);
+
+  const filteredL1Items = useMemo(() => {
+    return filteredL1L2Items.filter((w) => Number(w.level) === 1 || !w.parent_id);
+  }, [filteredL1L2Items]);
+
+  const filteredL3Items = useMemo(() => {
+    return l3Items.filter(isItemMatch);
+  }, [l3Items, searchQuery, filterProgress, filterLevelLabel, filterWbsLevel, minBudget, maxBudget]);
 
   useEffect(() => {
     if (!hasL3Data && wbsViewTab === 'l3') {
@@ -407,118 +539,233 @@ export default function WBSManagement() {
     }
 
     const sheet = workbook.Sheets[sheetName];
-    const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-    if (rawRows.length === 0) {
+    const rawGrid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    if (rawGrid.length === 0) {
       return { rows: [], errors: ['The selected sheet is empty.'] };
     }
 
-    const templateByCode = new Map(sortedTemplateItems.map((item) => [item.wbs_id, item]));
-    const rows = [];
-    const errors = [];
-    let lastSheetWbsCode = '';
-    let lastSheetWbsName = '';
+    // Check if the spreadsheet is in the new format by searching for 'parent wbs id' in any row
+    const headerRowIndex = rawGrid.findIndex(row => 
+      row && row.some(cell => String(cell).trim().toLowerCase() === 'parent wbs id')
+    );
 
-    rawRows.forEach((rawRow, index) => {
-      const rowNumber = index + 2;
-      const rawWbsCode = String(getRowValue(rawRow, HEADER_ALIASES.code)).trim();
-      const rawWbsName = String(getRowValue(rawRow, HEADER_ALIASES.wbsName)).trim();
-      const rawLevel = String(getRowValue(rawRow, HEADER_ALIASES.level)).trim();
-      const activityTitle = String(getRowValue(rawRow, HEADER_ALIASES.activityTitle)).trim();
-      const activityId = String(getRowValue(rawRow, HEADER_ALIASES.activityId)).trim();
-      const activityDescription = String(getRowValue(rawRow, HEADER_ALIASES.description)).trim();
-      const hasActivityData = !!(activityId || activityTitle);
+    if (headerRowIndex !== -1) {
+      // Parse the new format!
+      const headers = rawGrid[headerRowIndex].map(h => String(h || '').trim());
+      
+      const parentWbsIdIndex = headers.findIndex(h => h.toLowerCase() === 'parent wbs id');
+      const parentWbsNameIndex = headers.findIndex(h => h.toLowerCase() === 'parent wbs name');
+      const activityDescriptionIndex = headers.findIndex(h => h.toLowerCase() === 'activity description');
+      const rateIndex = headers.findIndex(h => h.toLowerCase() === 'rate');
+      const unitIndex = headers.findIndex(h => h.toLowerCase() === 'unit');
 
-      let code = rawWbsCode;
-      let shouldUsePreviousWbs = false;
-      if (selectedUploadType === 'l3') {
-        code = activityId || rawWbsCode;
-      } else {
-        // For L1/L2, continuation rows usually keep WBS ID/Name blank.
-        // In that case, reuse the latest non-empty WBS ID + Name from the sheet.
-        if (!rawWbsCode && !rawWbsName && hasActivityData) {
-          if (!lastSheetWbsCode || !lastSheetWbsName) {
-            errors.push(`Row ${rowNumber}: WBS ID and WBS Name are blank; no previous WBS group found.`);
-            return;
+      if (parentWbsIdIndex === -1 || parentWbsNameIndex === -1 || activityDescriptionIndex === -1 || rateIndex === -1 || unitIndex === -1) {
+        return { rows: [], errors: ['Invalid columns in the new WBS Template format. Required: "Parent WBS ID", "Parent WBS name", "Activity Description", "Rate", "Unit".'] };
+      }
+
+      // Detect level columns: all non-empty columns after "Unit"
+      const levelColumns = [];
+      for (let i = unitIndex + 1; i < headers.length; i++) {
+        const h = headers[i];
+        if (h !== undefined && h !== null && String(h).trim() !== '') {
+          levelColumns.push({ index: i, name: String(h).trim() });
+        }
+      }
+
+      if (levelColumns.length === 0) {
+        return { rows: [], errors: ['No levels found after the "Unit" column in the new WBS Template format.'] };
+      }
+
+      const rows = [];
+      const errors = [];
+      
+      // Sub-head counter Map for generating Activity IDs by row priority
+      const subHeadCounters = new Map();
+
+      // Loop through the data rows
+      for (let r = headerRowIndex + 1; r < rawGrid.length; r++) {
+        const row = rawGrid[r];
+        if (!row) continue;
+        const rowNumber = r + 1;
+
+        const subHeadId = String(row[parentWbsIdIndex] ?? '').trim();
+        const subHeadName = String(row[parentWbsNameIndex] ?? '').trim();
+        const activityDesc = String(row[activityDescriptionIndex] ?? '').trim();
+        
+        // Skip empty rows
+        if (!subHeadId && !subHeadName && !activityDesc) {
+          continue;
+        }
+
+        if (!subHeadId) {
+          errors.push(`Row ${rowNumber}: Missing "Parent WBS ID".`);
+          continue;
+        }
+
+        // Collect level-wise quantities
+        const levelQties = [];
+        levelColumns.forEach(lvl => {
+          const qtyVal = row[lvl.index];
+          if (qtyVal !== undefined && qtyVal !== null && String(qtyVal).trim() !== '') {
+            levelQties.push({ levelName: lvl.name, qty: parseNumber(qtyVal) });
           }
-          code = lastSheetWbsCode;
-          shouldUsePreviousWbs = true;
+        });
+
+        // Skip activity if no level quantities are defined
+        if (levelQties.length === 0) {
+          continue;
+        }
+
+        // Generate Activity ID by row priority under this sub-head
+        let counter = subHeadCounters.get(subHeadId) || 1;
+        const activityId = `${subHeadId}.${counter}`;
+        subHeadCounters.set(subHeadId, counter + 1);
+
+        const rate = parseNumber(row[rateIndex]);
+        const unit = String(row[unitIndex] ?? '').trim();
+
+        // Split into separate rows for each level that has a quantity
+        levelQties.forEach((lvl, lvlIdx) => {
+          const activityName = `${lvl.levelName}-${activityDesc}`;
+          const budgetAmount = lvl.qty * rate;
+
+          rows.push({
+            temp_id: `upload_${Date.now()}_act_${activityId}_lvl_${lvl.levelName}_${lvlIdx}`,
+            code: selectedUploadType === 'l3' ? activityId : subHeadId,
+            wbs_name: subHeadName || `WBS ${subHeadId}`,
+            level_label: lvl.levelName,
+            activity_name: activityName,
+            title: activityName,
+            activity_id: activityId,
+            activity_description: activityDesc,
+            description: activityDesc,
+            total_qty: lvl.qty,
+            planned_quantity: lvl.qty,
+            actual_quantity: 0,
+            unit: unit,
+            lumsum_rate: rate,
+            total_days: 1, // Default total_days to 1
+            budget_amount: budgetAmount,
+            source_upload_type: selectedUploadType === 'l3' ? 'l3' : 'l1_activity'
+          });
+        });
+      }
+
+      rows.sort((a, b) => compareWbsIds(a.code, b.code));
+      return { rows, errors };
+    } else {
+      // Fallback to the previous format!
+      const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      if (rawRows.length === 0) {
+        return { rows: [], errors: ['The selected sheet is empty.'] };
+      }
+
+      const templateByCode = new Map(sortedTemplateItems.map((item) => [item.wbs_id, item]));
+      const rows = [];
+      const errors = [];
+      let lastSheetWbsCode = '';
+      let lastSheetWbsName = '';
+
+      rawRows.forEach((rawRow, index) => {
+        const rowNumber = index + 2;
+        const rawWbsCode = String(getRowValue(rawRow, HEADER_ALIASES.code)).trim();
+        const rawWbsName = String(getRowValue(rawRow, HEADER_ALIASES.wbsName)).trim();
+        const rawLevel = String(getRowValue(rawRow, HEADER_ALIASES.level)).trim();
+        const activityTitle = String(getRowValue(rawRow, HEADER_ALIASES.activityTitle)).trim();
+        const activityId = String(getRowValue(rawRow, HEADER_ALIASES.activityId)).trim();
+        const activityDescription = String(getRowValue(rawRow, HEADER_ALIASES.description)).trim();
+        const hasActivityData = !!(activityId || activityTitle);
+
+        let code = rawWbsCode;
+        let shouldUsePreviousWbs = false;
+        if (selectedUploadType === 'l3') {
+          code = activityId || rawWbsCode;
         } else {
-          code = rawWbsCode || getParentCode(activityId) || activityId;
+          if (!rawWbsCode && !rawWbsName && hasActivityData) {
+            if (!lastSheetWbsCode || !lastSheetWbsName) {
+              errors.push(`Row ${rowNumber}: WBS ID and WBS Name are blank; no previous WBS group found.`);
+              return;
+            }
+            code = lastSheetWbsCode;
+            shouldUsePreviousWbs = true;
+          } else {
+            code = rawWbsCode || getParentCode(activityId) || activityId;
+          }
         }
-      }
 
-      if (!code) {
-        errors.push(`Row ${rowNumber}: Missing WBS ID and Activity ID.`);
-        return;
-      }
-
-      const level = getWbsLevel(code);
-      if (!uploadConfig.allowedLevels.has(level)) {
-        errors.push(`Row ${rowNumber}: WBS ${code} is level ${level}. Upload type ${uploadConfig.label} accepts ${Array.from(uploadConfig.allowedLevels).map((v) => `L${v}`).join(', ')}.`);
-        return;
-      }
-
-      const templateItem = templateByCode.get(code);
-      const resolvedWbsName = String(
-        (shouldUsePreviousWbs ? lastSheetWbsName : '') ||
-        rawWbsName ||
-        templateItem?.title ||
-        ''
-      ).trim();
-      const resolvedActivityName = String(
-        activityTitle ||
-        getRowValue(rawRow, HEADER_ALIASES.activityTitle) ||
-        ''
-      ).trim();
-      const title = String(
-        selectedUploadType === 'l3'
-          ? (resolvedActivityName || resolvedWbsName || templateItem?.title || activityId || `WBS ${code}`)
-          : (resolvedWbsName || resolvedActivityName || templateItem?.title || activityId || `WBS ${code}`)
-      ).trim();
-      const plannedQty = parseNumber(getRowValue(rawRow, HEADER_ALIASES.plannedQty));
-      const actualQty = parseNumber(getRowValue(rawRow, HEADER_ALIASES.actualQty));
-      const explicitBudget = parseNumber(getRowValue(rawRow, HEADER_ALIASES.budget));
-      const unitRate = parseNumber(getRowValue(rawRow, HEADER_ALIASES.rate));
-      const totalDays = parseNumber(getRowValue(rawRow, HEADER_ALIASES.totalDays));
-      const budgetAmount = explicitBudget || (plannedQty > 0 && unitRate > 0 ? plannedQty * unitRate : 0);
-      const description = activityDescription || templateItem?.description || '';
-
-      if (!title) {
-        errors.push(`Row ${rowNumber}: Missing activity/title for WBS ${code}.`);
-        return;
-      }
-
-      if (selectedUploadType === 'l1') {
-        if (rawWbsCode) lastSheetWbsCode = rawWbsCode;
-        if (rawWbsName) {
-          lastSheetWbsName = rawWbsName;
-        } else if (rawWbsCode && resolvedWbsName) {
-          lastSheetWbsName = resolvedWbsName;
+        if (!code) {
+          errors.push(`Row ${rowNumber}: Missing WBS ID and Activity ID.`);
+          return;
         }
-      }
 
-      rows.push({
-        temp_id: `upload_${Date.now()}_${index}`,
-        code,
-        wbs_name: resolvedWbsName || title,
-        level_label: rawLevel || `L${level}`,
-        activity_name: resolvedActivityName || title,
-        title,
-        activity_id: activityId,
-        activity_description: description,
-        description,
-        total_qty: plannedQty,
-        planned_quantity: plannedQty,
-        actual_quantity: actualQty,
-        unit: String(getRowValue(rawRow, HEADER_ALIASES.unit)).trim(),
-        lumsum_rate: unitRate,
-        total_days: totalDays,
-        budget_amount: budgetAmount,
+        const level = getWbsLevel(code);
+        if (!uploadConfig.allowedLevels.has(level)) {
+          errors.push(`Row ${rowNumber}: WBS ${code} is level ${level}. Upload type ${uploadConfig.label} accepts ${Array.from(uploadConfig.allowedLevels).map((v) => `L${v}`).join(', ')}.`);
+          return;
+        }
+
+        const templateItem = templateByCode.get(code);
+        const resolvedWbsName = String(
+          (shouldUsePreviousWbs ? lastSheetWbsName : '') ||
+          rawWbsName ||
+          templateItem?.title ||
+          ''
+        ).trim();
+        const resolvedActivityName = String(
+          activityTitle ||
+          getRowValue(rawRow, HEADER_ALIASES.activityTitle) ||
+          ''
+        ).trim();
+        const title = String(
+          selectedUploadType === 'l3'
+            ? (resolvedActivityName || resolvedWbsName || templateItem?.title || activityId || `WBS ${code}`)
+            : (resolvedWbsName || resolvedActivityName || templateItem?.title || activityId || `WBS ${code}`)
+        ).trim();
+        const plannedQty = parseNumber(getRowValue(rawRow, HEADER_ALIASES.plannedQty));
+        const actualQty = parseNumber(getRowValue(rawRow, HEADER_ALIASES.actualQty));
+        const explicitBudget = parseNumber(getRowValue(rawRow, HEADER_ALIASES.budget));
+        const unitRate = parseNumber(getRowValue(rawRow, HEADER_ALIASES.rate));
+        const totalDays = parseNumber(getRowValue(rawRow, HEADER_ALIASES.totalDays));
+        const budgetAmount = explicitBudget || (plannedQty > 0 && unitRate > 0 ? plannedQty * unitRate : 0);
+        const description = activityDescription || templateItem?.description || '';
+
+        if (!title) {
+          errors.push(`Row ${rowNumber}: Missing activity/title for WBS ${code}.`);
+          return;
+        }
+
+        if (selectedUploadType === 'l1') {
+          if (rawWbsCode) lastSheetWbsCode = rawWbsCode;
+          if (rawWbsName) {
+            lastSheetWbsName = rawWbsName;
+          } else if (rawWbsCode && resolvedWbsName) {
+            lastSheetWbsName = resolvedWbsName;
+          }
+        }
+
+        rows.push({
+          temp_id: `upload_${Date.now()}_${index}`,
+          code,
+          wbs_name: resolvedWbsName || title,
+          level_label: rawLevel || `L${level}`,
+          activity_name: resolvedActivityName || title,
+          title,
+          activity_id: activityId,
+          activity_description: description,
+          description,
+          total_qty: plannedQty,
+          planned_quantity: plannedQty,
+          actual_quantity: actualQty,
+          unit: String(getRowValue(rawRow, HEADER_ALIASES.unit)).trim(),
+          lumsum_rate: unitRate,
+          total_days: totalDays,
+          budget_amount: budgetAmount,
+        });
       });
-    });
 
-    rows.sort((a, b) => compareWbsIds(a.code, b.code));
-    return { rows, errors };
+      rows.sort((a, b) => compareWbsIds(a.code, b.code));
+      return { rows, errors };
+    }
   };
 
   const parseSelectedUploadFile = async (nextFile = uploadFile, nextUploadType = uploadType) => {
@@ -668,16 +915,10 @@ export default function WBSManagement() {
     try {
       const currentItems = await base44.entities.WBSItem.filter(
         { project_id: projectFilter, sub_project_id: subProjectFilter },
-        'order_index',
-        500
+        'order_index'
       );
 
       const existingByCode = new Map(currentItems.map((item) => [item.code, item]));
-      const existingByActivityId = new Map(
-        currentItems
-          .filter((item) => Number(item.level) === 3 && item.activity_id)
-          .map((item) => [String(item.activity_id).toLowerCase(), item])
-      );
       const templateByCode = new Map(sortedTemplateItems.map((item) => [item.wbs_id, item]));
       const codeToId = new Map(currentItems.map((item) => [item.code, item.id]));
       const activityRows = uploadType === 'l1'
@@ -711,7 +952,10 @@ export default function WBSManagement() {
         });
       } else {
         normalizedRows.forEach((row) => {
-          desiredByCode.set(row.code, {
+          const resolvedActivityId = row.activity_id || row.code;
+          const resolvedLevelLabel = row.level_label || `L${row.level || 3}`;
+          const computedActivityCode = makeActivityCode(row, resolvedActivityId, resolvedLevelLabel);
+          desiredByCode.set(computedActivityCode.toLowerCase(), {
             ...row,
             source_upload_type: 'l3',
           });
@@ -722,7 +966,8 @@ export default function WBSManagement() {
       Array.from(desiredByCode.values()).forEach((row) => {
         let parentCode = getParentCode(row.code);
         while (parentCode) {
-          if (!existingByCode.has(parentCode) && !desiredByCode.has(parentCode)) {
+          const desiredHasParent = Array.from(desiredByCode.values()).some(r => r.code === parentCode);
+          if (!existingByCode.has(parentCode) && !desiredHasParent) {
             requiredAncestorCodes.add(parentCode);
           }
           parentCode = getParentCode(parentCode);
@@ -761,23 +1006,24 @@ export default function WBSManagement() {
       let created = 0;
       let updated = 0;
 
-      for (let index = 0; index < orderedRows.length; index += 1) {
-        const row = orderedRows[index];
+      // 1. Separate orderedRows into parent items (levels 1 & 2) and child items (level 3)
+      const parentRows = orderedRows.filter((row) => getWbsLevel(row.code) <= 2);
+      const level3RowsFromOrdered = orderedRows.filter((row) => getWbsLevel(row.code) === 3);
+
+      // 2. Process parents sequentially
+      for (let index = 0; index < parentRows.length; index += 1) {
+        const row = parentRows[index];
         const level = getWbsLevel(row.code);
         const parentCode = getParentCode(row.code);
         const parentId = parentCode ? codeToId.get(parentCode) || null : null;
         const existing = existingByCode.get(row.code);
-        const resolvedActivityId = Number(level) === 3 ? (row.activity_id || row.code) : '';
-        const resolvedLevelLabel = row.level_label || (Number(level) === 3 ? `L${level}` : '');
 
         const payload = {
           project_id: projectFilter,
           sub_project_id: subProjectFilter,
           code: row.code,
-          activity_id: Number(level) === 3 ? resolvedActivityId : null,
-          activity_code: Number(level) === 3
-            ? makeActivityCode(row, resolvedActivityId, resolvedLevelLabel)
-            : null,
+          activity_id: '',
+          activity_code: null,
           title: row.title,
           description: row.description || '',
           level,
@@ -788,7 +1034,7 @@ export default function WBSManagement() {
           lumsum_rate: row.lumsum_rate || 0,
           total_days: row.total_days || 0,
           level_label: row.level_label || existing?.level_label || '',
-          source_upload_type: row.source_upload_type || (uploadType === 'l3' ? 'l3' : 'l1'),
+          source_upload_type: row.source_upload_type || 'l1',
           progress: existing ? parseNumber(existing.progress) : 0,
           budget_amount: row.budget_amount,
           order_index: index,
@@ -801,81 +1047,158 @@ export default function WBSManagement() {
         } else {
           savedItem = await base44.entities.WBSItem.create(payload);
           created += 1;
+          currentItems.push(savedItem);
         }
 
         codeToId.set(row.code, savedItem.id);
         existingByCode.set(row.code, savedItem);
-
-        if (Number(level) === 3 && row.activity_id) {
-          const match = activityByCode.get(String(row.activity_id).toLowerCase()) || activities.find((act) => act.id === row.activity_id);
-          if (match && match.wbs_item_id !== savedItem.id) {
-            await base44.entities.ScheduleActivity.update(match.id, { wbs_item_id: savedItem.id });
-          }
-        }
       }
 
+      // 3. Collect level 3 tasks (WBS items and/or activities) to process in parallel batches
       let activityCreated = 0;
       let activityUpdated = 0;
       let activityDeleted = 0;
       const consumedActivityCodes = new Set();
 
-      for (let index = 0; index < activityRows.length; index += 1) {
-        const row = activityRows[index];
-        const parentCode = uploadType === 'l3' ? getParentCode(row.code) : row.code;
-        const parentId = parentCode ? codeToId.get(parentCode) : null;
-        if (!parentId) {
-          continue;
-        }
+      const l3ToSave = [];
+      level3RowsFromOrdered.forEach((row, index) => {
+        l3ToSave.push({ row, index, isActivityRow: false });
+      });
+      activityRows.forEach((row, index) => {
+        l3ToSave.push({ row, index, isActivityRow: true });
+      });
 
-        const activityCode = (uploadType === 'l3' ? row.code : row.activity_id) || `${parentCode}.${index + 1}`;
-        const resolvedActivityId = row.activity_id || activityCode;
-        const resolvedLevelLabel = row.level_label || `L${row.level || 3}`;
-        const normalizedActivityId = String(row.activity_id || activityCode).toLowerCase();
-        const existingActivityByCode = existingByCode.get(activityCode);
-        const existingActivity = existingActivityByCode || existingByActivityId.get(normalizedActivityId);
+      // Process in parallel batches of size 40
+      const batchSize = 40;
+      for (let i = 0; i < l3ToSave.length; i += batchSize) {
+        const batch = l3ToSave.slice(i, i + batchSize);
+        await Promise.all(
+          batch.map(async ({ row, index, isActivityRow }) => {
+            if (isActivityRow) {
+              const parentCode = uploadType === 'l3' ? getParentCode(row.code) : row.code;
+              const parentId = parentCode ? codeToId.get(parentCode) : null;
+              if (!parentId) return;
 
-        const activityPayload = {
-          project_id: projectFilter,
-          sub_project_id: subProjectFilter,
-          code: activityCode,
-          activity_id: resolvedActivityId,
-          activity_code: makeActivityCode(row, resolvedActivityId, resolvedLevelLabel),
-          title: row.activity_name || row.title || activityCode,
-          description: row.activity_description || row.description || '',
-          level: 3,
-          parent_id: parentId,
-          planned_quantity: row.total_qty,
-          actual_quantity: row.actual_quantity,
-          unit: row.unit || '',
-          lumsum_rate: row.lumsum_rate || 0,
-          total_days: row.total_days || 0,
-          level_label: row.level_label || existingActivity?.level_label || '',
-          progress: existingActivity ? parseNumber(existingActivity.progress) : 0,
-          budget_amount: row.budget_amount,
-          order_index: orderedRows.length + index,
-          source_upload_type: uploadType === 'l3' ? 'l3' : 'l1_activity',
-        };
+              const activityCode = (uploadType === 'l3' ? row.code : row.activity_id) || `${parentCode}.${index + 1}`;
+              const resolvedActivityId = row.activity_id || activityCode;
+              const resolvedLevelLabel = row.level_label || `L${row.level || 3}`;
+              const computedActivityCode = makeActivityCode(row, resolvedActivityId, resolvedLevelLabel);
 
-        let savedActivity;
-        if (existingActivity) {
-          savedActivity = await base44.entities.WBSItem.update(existingActivity.id, activityPayload);
-          activityUpdated += 1;
-        } else {
-          savedActivity = await base44.entities.WBSItem.create(activityPayload);
-          activityCreated += 1;
-        }
+              const existingActivity = currentItems.find(item => 
+                item.activity_code && 
+                item.activity_code.toLowerCase() === computedActivityCode.toLowerCase()
+              ) || (row.activity_id ? currentItems.find(item => 
+                Number(item.level) === 3 && 
+                item.activity_id && 
+                item.activity_id.toLowerCase() === row.activity_id.toLowerCase() && 
+                String(item.level_label || '').toLowerCase() === resolvedLevelLabel.toLowerCase()
+              ) : null);
 
-        consumedActivityCodes.add(savedActivity.code);
-        codeToId.set(savedActivity.code, savedActivity.id);
-        existingByCode.set(savedActivity.code, savedActivity);
-        existingByActivityId.set(String(savedActivity.activity_id || '').toLowerCase(), savedActivity);
+              const activityPayload = {
+                project_id: projectFilter,
+                sub_project_id: subProjectFilter,
+                code: activityCode,
+                activity_id: resolvedActivityId,
+                activity_code: computedActivityCode,
+                title: row.activity_name || row.title || activityCode,
+                description: row.activity_description || row.description || '',
+                level: 3,
+                parent_id: parentId,
+                planned_quantity: row.total_qty,
+                actual_quantity: row.actual_quantity,
+                unit: row.unit || '',
+                lumsum_rate: row.lumsum_rate || 0,
+                total_days: row.total_days || 0,
+                level_label: row.level_label || existingActivity?.level_label || '',
+                progress: existingActivity ? parseNumber(existingActivity.progress) : 0,
+                budget_amount: row.budget_amount,
+                order_index: parentRows.length + index,
+                source_upload_type: uploadType === 'l3' ? 'l3' : 'l1_activity',
+              };
 
-        const match = activityByCode.get(String(savedActivity.activity_id || '').toLowerCase()) || activities.find((act) => act.id === savedActivity.activity_id);
-        if (match && match.wbs_item_id !== savedActivity.id) {
-          await base44.entities.ScheduleActivity.update(match.id, { wbs_item_id: savedActivity.id });
-        }
+              let savedActivity;
+              if (existingActivity) {
+                savedActivity = await base44.entities.WBSItem.update(existingActivity.id, activityPayload);
+                activityUpdated += 1;
+              } else {
+                savedActivity = await base44.entities.WBSItem.create(activityPayload);
+                activityCreated += 1;
+                currentItems.push(savedActivity);
+              }
+
+              consumedActivityCodes.add(savedActivity.code);
+              codeToId.set(savedActivity.code, savedActivity.id);
+              existingByCode.set(savedActivity.code, savedActivity);
+
+              const match = activityByCode.get(String(savedActivity.activity_id || '').toLowerCase()) || activities.find((act) => act.id === savedActivity.activity_id);
+              if (match && match.wbs_item_id !== savedActivity.id) {
+                await base44.entities.ScheduleActivity.update(match.id, { wbs_item_id: savedActivity.id });
+              }
+            } else {
+              const parentCode = getParentCode(row.code);
+              const parentId = parentCode ? codeToId.get(parentCode) || null : null;
+              
+              const resolvedActivityId = row.activity_id || row.code;
+              const resolvedLevelLabel = row.level_label || `L3`;
+              const computedActivityCode = makeActivityCode(row, resolvedActivityId, resolvedLevelLabel);
+
+              let existing = currentItems.find(item => 
+                item.activity_code && 
+                item.activity_code.toLowerCase() === computedActivityCode.toLowerCase()
+              ) || (resolvedActivityId ? currentItems.find(item => 
+                Number(item.level) === 3 && 
+                item.activity_id && 
+                item.activity_id.toLowerCase() === resolvedActivityId.toLowerCase() && 
+                String(item.level_label || '').toLowerCase() === resolvedLevelLabel.toLowerCase()
+              ) : null);
+
+              const payload = {
+                project_id: projectFilter,
+                sub_project_id: subProjectFilter,
+                code: row.code,
+                activity_id: resolvedActivityId,
+                activity_code: computedActivityCode,
+                title: row.title,
+                description: row.description || '',
+                level: 3,
+                parent_id: parentId,
+                planned_quantity: row.planned_quantity,
+                actual_quantity: row.actual_quantity,
+                unit: row.unit || '',
+                lumsum_rate: row.lumsum_rate || 0,
+                total_days: row.total_days || 0,
+                level_label: row.level_label || existing?.level_label || '',
+                source_upload_type: row.source_upload_type || 'l3',
+                progress: existing ? parseNumber(existing.progress) : 0,
+                budget_amount: row.budget_amount,
+                order_index: parentRows.length + index,
+              };
+
+              let savedItem;
+              if (existing) {
+                savedItem = await base44.entities.WBSItem.update(existing.id, payload);
+                updated += 1;
+              } else {
+                savedItem = await base44.entities.WBSItem.create(payload);
+                created += 1;
+                currentItems.push(savedItem);
+              }
+
+              codeToId.set(row.code, savedItem.id);
+              existingByCode.set(row.code, savedItem);
+
+              if (row.activity_id) {
+                const match = activityByCode.get(String(row.activity_id).toLowerCase()) || activities.find((act) => act.id === row.activity_id);
+                if (match && match.wbs_item_id !== savedItem.id) {
+                  await base44.entities.ScheduleActivity.update(match.id, { wbs_item_id: savedItem.id });
+                }
+              }
+            }
+          })
+        );
       }
 
+      // 4. Delete stale L1 activities sequentially
       if (uploadType === 'l1') {
         const staleL1Activities = currentItems.filter(
           (item) => Number(item.level) === 3 && item.source_upload_type === 'l1_activity' && !consumedActivityCodes.has(item.code)
@@ -984,10 +1307,11 @@ export default function WBSManagement() {
     const isHead = Number(item.level) === 1 || !item.parent_id;
     const isSubHead = Number(item.level) === 2;
     const isForcedExpandedSubHead = isSubHead && expandActivitiesFromHead;
-    const isExp = Boolean(expanded[item.id] || isForcedExpandedSubHead);
-    const activityRows = isSubHead ? (l1ActivitiesByParent[item.id] || []) : [];
+    const isExp = Boolean(expanded[item.id] || isForcedExpandedSubHead || isFiltering);
+    const rawActivityRows = isSubHead ? (l1ActivitiesByParent[item.id] || []) : [];
+    const activityRows = isFiltering ? rawActivityRows.filter(isItemMatch) : rawActivityRows;
     const hasExpandableContent = children.length > 0 || activityRows.length > 0;
-    const canToggleRow = hasExpandableContent && !(isSubHead && expandActivitiesFromHead);
+    const canToggleRow = hasExpandableContent && !(isSubHead && expandActivitiesFromHead) && !isFiltering;
     const displayBudget = isHead
       ? getHeadBudget(item)
       : isSubHead
@@ -1400,62 +1724,250 @@ export default function WBSManagement() {
               onAction={() => openUploadDialog('l1')}
             />
           ) : (
-            <Tabs value={wbsViewTab} onValueChange={setWbsViewTab} className="space-y-4">
-              <TabsList>
-                <TabsTrigger value="l1">L1 / L2 WBS</TabsTrigger>
-                <TabsTrigger value="l3" disabled={!hasL3Data}>L3 WBS</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="l1">
-                <Card>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm font-sans">
-                      <thead>
-                        <tr className="border-b bg-muted/30">
-                          <th className="text-left p-3 font-semibold">WBS ID / Name</th>
-                          <th className="text-right p-3 font-semibold">Budget</th>
-                          <th className="text-left p-3 font-semibold">Progress</th>
-                          <th className="p-3"></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {l1Items.map((item) => renderRow(item, l1L2Items, 0))}
-                      </tbody>
-                    </table>
+            <div className="space-y-4">
+              {/* Premium Collapsible Multi-Feature Filter Card */}
+              <div className="bg-card border rounded-xl p-5 shadow-sm space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <SlidersHorizontal className="w-5 h-5 text-primary" />
+                    <h3 className="font-semibold text-base">Filter WBS Items</h3>
+                    {isFiltering && (
+                      <Badge className="bg-primary/10 text-primary border-none hover:bg-primary/15 font-sans text-xs px-2 py-0.5">
+                        Active
+                      </Badge>
+                    )}
                   </div>
-                </Card>
-              </TabsContent>
+                  {isFiltering && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-xs gap-1 text-muted-foreground hover:text-foreground font-sans px-2"
+                      onClick={clearAllFilters}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      Clear Filters
+                    </Button>
+                  )}
+                </div>
 
-              <TabsContent value="l3">
-                {!hasL3Data ? (
-                  <EmptyState
-                    icon={FileSpreadsheet}
-                    title="L3 WBS not uploaded"
-                    description="Upload L3 activity rows to enable this tab for detailed activity-level WBS."
-                    actionLabel="Upload L3 WBS"
-                    onAction={() => openUploadDialog('l3')}
-                  />
-                ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="relative">
+                    <Label className="text-xs text-muted-foreground mb-1 block font-sans">Search Query</Label>
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search code, title, details..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-9 h-9 text-sm font-sans"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label className="text-xs text-muted-foreground mb-1 block font-sans">Progress Status</Label>
+                    <Select value={filterProgress} onValueChange={setFilterProgress}>
+                      <SelectTrigger className="h-9 text-sm font-sans"><SelectValue /></SelectTrigger>
+                      <SelectContent className="font-sans text-sm">
+                        <SelectItem value="all">All Progress</SelectItem>
+                        <SelectItem value="not_started">Not Started (0%)</SelectItem>
+                        <SelectItem value="in_progress">In Progress (1-99%)</SelectItem>
+                        <SelectItem value="completed">Completed (100%)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex flex-col">
+                    <Label className="text-xs text-muted-foreground mb-1 block font-sans">Floor / Level</Label>
+                    <Popover open={levelPickerOpen} onOpenChange={setLevelPickerOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={levelPickerOpen}
+                          className="w-full h-9 justify-between font-normal font-sans bg-background border-input text-sm text-left px-3"
+                        >
+                          <span className="truncate">
+                            {filterLevelLabel === 'all' ? 'All Levels' : filterLevelLabel}
+                          </span>
+                          <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50 shrink-0" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[200px] p-0 font-sans" align="start">
+                        <Command>
+                          <CommandInput placeholder="Search floor/level..." className="h-9 font-sans text-xs" />
+                          <CommandList className="max-h-[250px] overflow-y-auto">
+                            <CommandEmpty className="py-2 text-center text-xs text-muted-foreground">No levels found.</CommandEmpty>
+                            <CommandGroup>
+                              <CommandItem
+                                value="all"
+                                onSelect={() => {
+                                  setFilterLevelLabel('all');
+                                  setLevelPickerOpen(false);
+                                }}
+                                className="flex items-center justify-between text-xs cursor-pointer py-1.5"
+                              >
+                                <span>All Levels</span>
+                                {filterLevelLabel === 'all' && <Check className="h-3.5 w-3.5 text-primary" />}
+                              </CommandItem>
+                              {availableLevelLabels.map((lbl) => (
+                                <CommandItem
+                                  key={lbl}
+                                  value={lbl}
+                                  onSelect={() => {
+                                    setFilterLevelLabel(lbl);
+                                    setLevelPickerOpen(false);
+                                  }}
+                                  className="flex items-center justify-between text-xs cursor-pointer py-1.5"
+                                >
+                                  <span>{lbl}</span>
+                                  {filterLevelLabel === lbl && <Check className="h-3.5 w-3.5 text-primary" />}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+
+                  <div>
+                    <Label className="text-xs text-muted-foreground mb-1 block font-sans">WBS Level</Label>
+                    <Select value={filterWbsLevel} onValueChange={setFilterWbsLevel}>
+                      <SelectTrigger className="h-9 text-sm font-sans"><SelectValue /></SelectTrigger>
+                      <SelectContent className="font-sans text-sm">
+                        <SelectItem value="all">All Levels (L1-L3)</SelectItem>
+                        <SelectItem value="1">Level 1 (Category)</SelectItem>
+                        <SelectItem value="2">Level 2 (Sub-Category)</SelectItem>
+                        <SelectItem value="3">Level 3 (Activity)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowFiltersPanel(!showFiltersPanel)}
+                    className="text-xs font-semibold text-primary hover:underline flex items-center gap-1 focus:outline-none font-sans"
+                  >
+                    {showFiltersPanel ? 'Hide Budget Settings' : 'Set Budget Settings'}
+                  </button>
+                </div>
+
+                {showFiltersPanel && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-dashed">
+                    <div>
+                      <Label className="text-xs text-muted-foreground mb-1 block font-sans">Min Budget (₹)</Label>
+                      <Input
+                        type="number"
+                        placeholder="e.g. 10000"
+                        value={minBudget}
+                        onChange={(e) => setMinBudget(e.target.value)}
+                        className="h-9 text-sm font-sans"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground mb-1 block font-sans">Max Budget (₹)</Label>
+                      <Input
+                        type="number"
+                        placeholder="e.g. 500000"
+                        value={maxBudget}
+                        onChange={(e) => setMaxBudget(e.target.value)}
+                        className="h-9 text-sm font-sans"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <Tabs value={wbsViewTab} onValueChange={setWbsViewTab} className="space-y-4">
+                <TabsList className="font-sans">
+                  <TabsTrigger value="l1" className="gap-2">
+                    L1 / L2 WBS
+                    {isFiltering && (
+                      <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded font-semibold">
+                        {filteredL1L2Items.length}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger value="l3" disabled={!hasL3Data} className="gap-2">
+                    L3 WBS
+                    {isFiltering && hasL3Data && (
+                      <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded font-semibold">
+                        {filteredL3Items.length}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="l1">
                   <Card>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm font-sans">
                         <thead>
                           <tr className="border-b bg-muted/30">
-                            <th className="text-left p-3 font-semibold">WBS ID / Activity</th>
+                            <th className="text-left p-3 font-semibold">WBS ID / Name</th>
                             <th className="text-right p-3 font-semibold">Budget</th>
                             <th className="text-left p-3 font-semibold">Progress</th>
-                            <th className="text-right p-3 font-semibold">Actions</th>
+                            <th className="p-3"></th>
                           </tr>
                         </thead>
                         <tbody>
-                          {l3Items.map((item) => renderL3Row(item))}
+                          {filteredL1Items.length === 0 ? (
+                            <tr>
+                              <td colSpan={4} className="p-8 text-center text-muted-foreground font-sans">
+                                No matching categories or sub-items found.
+                              </td>
+                            </tr>
+                          ) : (
+                            filteredL1Items.map((item) => renderRow(item, filteredL1L2Items, 0))
+                          )}
                         </tbody>
                       </table>
                     </div>
                   </Card>
-                )}
-              </TabsContent>
-            </Tabs>
+                </TabsContent>
+
+                <TabsContent value="l3">
+                  {!hasL3Data ? (
+                    <EmptyState
+                      icon={FileSpreadsheet}
+                      title="L3 WBS not uploaded"
+                      description="Upload L3 activity rows to enable this tab for detailed activity-level WBS."
+                      actionLabel="Upload L3 WBS"
+                      onAction={() => openUploadDialog('l3')}
+                    />
+                  ) : (
+                    <Card>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm font-sans">
+                          <thead>
+                            <tr className="border-b bg-muted/30">
+                              <th className="text-left p-3 font-semibold">WBS ID / Activity</th>
+                              <th className="text-right p-3 font-semibold">Budget</th>
+                              <th className="text-left p-3 font-semibold">Progress</th>
+                              <th className="text-right p-3 font-semibold">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredL3Items.length === 0 ? (
+                              <tr>
+                                <td colSpan={4} className="p-8 text-center text-muted-foreground font-sans">
+                                  No matching activities found for current filter settings.
+                                </td>
+                              </tr>
+                            ) : (
+                              filteredL3Items.map((item) => renderL3Row(item))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </Card>
+                  )}
+                </TabsContent>
+              </Tabs>
+            </div>
           )}
             </>
           )}

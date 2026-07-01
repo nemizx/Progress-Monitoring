@@ -74,7 +74,7 @@ entityNames.forEach(name => {
       const res = await apiFetch(url, { headers: getHeaders() });
       return handleResponse(res);
     },
-    
+
     filter: async (criteria, sortField, limit) => {
       let url = `/api/entities/${name}/filter`;
       const params = [];
