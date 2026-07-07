@@ -39,3 +39,26 @@ export function formatDateIndian(isoDate) {
   const yyyy = d.getFullYear();
   return `${dd}-${mm}-${yyyy}`;
 }
+
+/** Normalize API/DB date values to YYYY-MM-DD for reliable comparisons. */
+export function normalizeDateKey(value) {
+  if (value == null || value === '') return '';
+  if (typeof value === 'string') {
+    const isoPrefix = value.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (isoPrefix) {
+      if (value.length === 10) return isoPrefix[1];
+      const d = new Date(value);
+      if (!Number.isNaN(d.getTime())) {
+        const offset = d.getTimezoneOffset();
+        const localDate = new Date(d.getTime() - offset * 60 * 1000);
+        return localDate.toISOString().split('T')[0];
+      }
+      return isoPrefix[1];
+    }
+  }
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value).slice(0, 10);
+  const offset = d.getTimezoneOffset();
+  const localDate = new Date(d.getTime() - offset * 60 * 1000);
+  return localDate.toISOString().split('T')[0];
+}

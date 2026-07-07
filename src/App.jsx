@@ -26,6 +26,8 @@ import ChangeComms from '@/pages/ChangeComms';
 import Notifications from '@/pages/Notifications';
 import AdminPanel from '@/pages/AdminPanel';
 import LaborTracking from '@/pages/LaborTracking';
+import TechnicalStaff from '@/pages/TechnicalStaff';
+import Contractors from '@/pages/Contractors';
 
 const PUBLIC_AUTH_PATHS = new Set(['/login', '/register', '/forgot-password', '/reset-password']);
 
@@ -65,6 +67,8 @@ const AuthenticatedApp = () => {
           <Route path="/wbs" element={<WBSManagement />} />
           <Route path="/progress" element={<SiteProgress />} />
           <Route path="/attendance" element={<LaborTracking />} />
+          <Route path="/technical-staff" element={<TechnicalStaff />} />
+          <Route path="/contractors" element={<Contractors />} />
           <Route path="/reports" element={<Reports />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/budget" element={<BudgetCost />} />

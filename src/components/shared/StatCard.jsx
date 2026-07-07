@@ -4,15 +4,15 @@ import { cn } from '@/lib/utils';
 
 export default function StatCard({ title, value, subtitle, icon: Icon, trend, className }) {
   return (
-    <Card className={cn("p-5 relative overflow-hidden group hover:shadow-lg transition-shadow duration-300", className)}>
+    <Card className={cn("p-3 relative overflow-hidden group hover:shadow-md transition-all duration-300", className)}>
       <div className="flex items-start justify-between">
-        <div className="space-y-1">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{title}</p>
-          <p className="text-2xl font-bold font-heading tracking-tight">{value}</p>
-          {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+        <div className="space-y-0.5">
+          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">{title}</p>
+          <p className="text-xl font-bold font-heading tracking-tight">{value}</p>
+          {subtitle && <p className="text-[10px] text-muted-foreground">{subtitle}</p>}
           {trend && (
             <p className={cn(
-              "text-xs font-semibold",
+              "text-[10px] font-semibold",
               trend > 0 ? "text-emerald-600" : "text-red-500"
             )}>
               {trend > 0 ? '↑' : '↓'} {Math.abs(trend)}% vs last week
@@ -20,12 +20,12 @@ export default function StatCard({ title, value, subtitle, icon: Icon, trend, cl
           )}
         </div>
         {Icon && (
-          <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center shrink-0">
-            <Icon className="w-5 h-5 text-accent" />
+          <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center shrink-0">
+            <Icon className="w-4 h-4 text-accent" />
           </div>
         )}
       </div>
-      <div className="absolute -bottom-4 -right-4 w-24 h-24 rounded-full bg-accent/5 group-hover:bg-accent/10 transition-colors duration-500" />
+      <div className="absolute -bottom-3 -right-3 w-16 h-16 rounded-full bg-accent/5 group-hover:bg-accent/10 transition-colors duration-500" />
     </Card>
   );
 }

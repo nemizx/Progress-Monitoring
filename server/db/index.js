@@ -3,6 +3,9 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// Return DATE columns as YYYY-MM-DD strings (avoid timezone shifts via JS Date).
+pg.types.setTypeParser(pg.types.builtins.DATE, (value) => value);
+
 const { Pool } = pg;
 
 // Use DATABASE_URL if available, otherwise fallback to individual config

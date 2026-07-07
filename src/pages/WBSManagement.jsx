@@ -1275,7 +1275,9 @@ export default function WBSManagement() {
   };
 
   const totalBudget = l1Items.reduce((sum, head) => sum + getHeadBudget(head), 0);
-  const avgProgress = wbsItems.length > 0 ? Math.round(wbsItems.reduce((s, w) => s + (w.progress || 0), 0) / wbsItems.length) : 0;
+  const avgProgress = wbsItems.length > 0
+    ? Math.round(wbsItems.reduce((sum, item) => sum + parseNumber(item.progress), 0) / wbsItems.length)
+    : 0;
 
   const selectedProject = projects.find(p => p.id === projectFilter);
   const selectedSubProject = subProjects.find(sp => sp.id === subProjectFilter);

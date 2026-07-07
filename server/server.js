@@ -78,7 +78,18 @@ const tableMap = {
   'User': 'users',
   'SubProject': 'sub_projects',
   'ProjectFlat': 'project_flats',
-  'MepBoq': 'mep_boqs'
+  'MepBoq': 'mep_boqs',
+  'TechnicalStaff': 'technical_staff',
+  'TechnicalStaffAttendance': 'technical_staff_attendance',
+  'Contractor': 'contractors',
+  'ContractorLabour': 'contractor_labours',
+  'MachineryDetail': 'machinery_details',
+  'MaterialStatus': 'material_status',
+  'DaysReport': 'days_reports',
+  'StatusReport': 'status_reports',
+  'SpecialSiteVisit': 'special_site_visits',
+  'CriticalIssue': 'critical_issues',
+  'NextDaysPlan': 'next_days_plans'
 };
 
 const TABLES_WITH_CREATED_BY = new Set(['projects']);
@@ -89,6 +100,24 @@ const formatValue = (val) => {
     return JSON.stringify(val);
   }
   return val;
+};
+
+const getNextVendorCode = async (client) => {
+  const res = await client.query(`
+    SELECT vendor_code 
+    FROM contractors 
+    WHERE vendor_code ~ '^V-\\d+$' 
+    ORDER BY CAST(SUBSTRING(vendor_code FROM 3) AS INTEGER) DESC 
+    LIMIT 1
+  `);
+  if (res.rows.length === 0) {
+    return 'V-001';
+  }
+  const lastCode = res.rows[0].vendor_code;
+  const num = parseInt(lastCode.substring(2), 10);
+  const nextNum = num + 1;
+  const padded = String(nextNum).padStart(3, '0');
+  return `V-${padded}`;
 };
 
 // --- Budget Rollup Helper (adapted for DB) ---
@@ -482,6 +511,10 @@ app.post('/api/entities/:entity', authenticateToken, async (req, res) => {
       data.id = `${prefix}_${Math.random().toString(36).substring(2, 11)}`;
     }
     
+    if (entity === 'Contractor' && !data.vendor_code) {
+      data.vendor_code = await getNextVendorCode(db);
+    }
+    
     // Inject created_by_id only for tables that have this column
     if (TABLES_WITH_CREATED_BY.has(tableName) && !data.created_by_id) {
       data.created_by_id = req.user.id;
@@ -694,6 +727,10 @@ app.post('/api/entities/:entity/bulk', authenticateToken, async (req, res) => {
       if (!item.id) {
         const prefix = entity.toLowerCase().substring(0, 4);
         item.id = `${prefix}_${Math.random().toString(36).substring(2, 11)}`;
+      }
+      
+      if (entity === 'Contractor' && !item.vendor_code) {
+        item.vendor_code = await getNextVendorCode(db);
       }
       
       if (!item.created_by_id && TABLES_WITH_CREATED_BY.has(tableName)) {
@@ -1028,6 +1065,196 @@ async function ensureExtendedTables() {
   await db.query(`
     ALTER TABLE progress_entries
     ADD COLUMN IF NOT EXISTS wbs_item_id VARCHAR(50) REFERENCES wbs_items(id) ON DELETE SET NULL
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS technical_staff (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      designation VARCHAR(255) NOT NULL,
+      remark TEXT,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS technical_staff_attendance (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      technical_staff_id VARCHAR(50) REFERENCES technical_staff(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      status VARCHAR(50) DEFAULT 'present',
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (technical_staff_id, date, sub_project_id)
+    )
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS contractors (
+      id VARCHAR(50) PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      contact_person VARCHAR(255),
+      phone VARCHAR(50),
+      email VARCHAR(255),
+      trade VARCHAR(100),
+      gst_number VARCHAR(50),
+      address TEXT,
+      remark TEXT,
+      vendor_code VARCHAR(50),
+      type_of_work VARCHAR(255),
+      vendor_category VARCHAR(100),
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await db.query(`
+    ALTER TABLE contractors
+    DROP COLUMN IF EXISTS project_id,
+    ADD COLUMN IF NOT EXISTS vendor_code VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS type_of_work VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS vendor_category VARCHAR(100)
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS machinery_details (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      machinery_name VARCHAR(255) NOT NULL,
+      nos NUMERIC(12, 2) DEFAULT 0,
+      till_date_hours NUMERIC(12, 2) DEFAULT 0,
+      todays_hours NUMERIC(12, 2) DEFAULT 0,
+      cumulative_hours NUMERIC(12, 2) DEFAULT 0,
+      rate NUMERIC(12, 2) DEFAULT 0,
+      till_date_amount NUMERIC(12, 2) DEFAULT 0,
+      todays_amount NUMERIC(12, 2) DEFAULT 0,
+      cumulative_amount NUMERIC(12, 2) DEFAULT 0,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS days_reports (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      description TEXT NOT NULL,
+      remark TEXT,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS status_reports (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      description TEXT NOT NULL,
+      remark TEXT,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS special_site_visits (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      firm_name VARCHAR(255) NOT NULL,
+      visitor_name VARCHAR(255) NOT NULL,
+      purpose TEXT NOT NULL,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS critical_issues (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      description TEXT NOT NULL,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS next_days_plans (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      description TEXT NOT NULL,
+      unit VARCHAR(50),
+      quantity NUMERIC(12, 2),
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS contractor_labours (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      contractor_id VARCHAR(50) REFERENCES contractors(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      unit VARCHAR(50),
+      carpenter NUMERIC(12, 2) DEFAULT 0,
+      barbender NUMERIC(12, 2) DEFAULT 0,
+      mason NUMERIC(12, 2) DEFAULT 0,
+      carpenter_helper NUMERIC(12, 2) DEFAULT 0,
+      barbender_helper NUMERIC(12, 2) DEFAULT 0,
+      mc NUMERIC(12, 2) DEFAULT 0,
+      fc NUMERIC(12, 2) DEFAULT 0,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (contractor_id, date, sub_project_id)
+    )
+  `);
+
+  // Migrate existing tables at startup
+  const targetTables = [
+    'technical_staff_attendance',
+    'machinery_details',
+    'days_reports',
+    'status_reports',
+    'special_site_visits',
+    'critical_issues',
+    'next_days_plans'
+  ];
+
+  for (const table of targetTables) {
+    await db.query(`
+      ALTER TABLE ${table}
+      ADD COLUMN IF NOT EXISTS sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE
+    `);
+  }
+
+  for (const table of targetTables) {
+    await db.query(`
+      UPDATE ${table} t
+      SET sub_project_id = (SELECT id FROM sub_projects sp WHERE sp.project_id = t.project_id LIMIT 1)
+      WHERE t.sub_project_id IS NULL
+    `);
+  }
+
+  // Update unique constraint on technical_staff_attendance
+  await db.query(`
+    ALTER TABLE technical_staff_attendance
+    DROP CONSTRAINT IF EXISTS technical_staff_attendance_technical_staff_id_date_key
+  `);
+  await db.query(`
+    ALTER TABLE technical_staff_attendance
+    DROP CONSTRAINT IF EXISTS technical_staff_attendance_staff_date_sub_project_key
+  `);
+  await db.query(`
+    ALTER TABLE technical_staff_attendance
+    ADD CONSTRAINT technical_staff_attendance_staff_date_sub_project_key UNIQUE (technical_staff_id, date, sub_project_id)
   `);
 }
 

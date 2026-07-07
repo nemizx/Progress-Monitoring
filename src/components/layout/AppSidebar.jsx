@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, FolderKanban, CalendarClock, Network,
   ClipboardList, BarChart3, MessageSquare, Bell,
-  IndianRupee, Shield, ChevronLeft, ChevronRight, HardHat, LogOut
+  IndianRupee, Shield, ChevronLeft, ChevronRight, HardHat, LogOut, Users, Building2
 } from 'lucide-react';
 import { base44 } from '@/api/base44Client';
 import { cn } from '@/lib/utils';
@@ -13,6 +13,8 @@ import { useQuery } from '@tanstack/react-query';
 const navStructure = [
   { type: 'link', path: '/', label: 'Dashboard', icon: LayoutDashboard },
   { type: 'link', path: '/progress', label: 'Progress', icon: ClipboardList },
+  { type: 'link', path: '/technical-staff', label: 'Technical Staff', icon: Users },
+  { type: 'link', path: '/contractors', label: 'Contractors', icon: Building2 },
   { type: 'group', label: 'Schedule', icon: CalendarClock, children: [
     { path: '/scheduler', label: 'Schedule Builder' },
     { path: '/schedule-monitor', label: 'Schedule Monitor' },

@@ -87,6 +87,221 @@ async function runNonDestructiveMigrations(client) {
     ALTER TABLE progress_entries
     ADD COLUMN IF NOT EXISTS wbs_item_id VARCHAR(50) REFERENCES wbs_items(id) ON DELETE SET NULL
   `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS technical_staff (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      designation VARCHAR(255) NOT NULL,
+      remark TEXT,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS technical_staff_attendance (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      technical_staff_id VARCHAR(50) REFERENCES technical_staff(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      status VARCHAR(50) DEFAULT 'present',
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (technical_staff_id, date, sub_project_id)
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS contractors (
+      id VARCHAR(50) PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      contact_person VARCHAR(255),
+      phone VARCHAR(50),
+      email VARCHAR(255),
+      trade VARCHAR(100),
+      gst_number VARCHAR(50),
+      address TEXT,
+      remark TEXT,
+      vendor_code VARCHAR(50),
+      type_of_work VARCHAR(255),
+      vendor_category VARCHAR(100),
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await client.query(`
+    ALTER TABLE contractors
+    DROP COLUMN IF EXISTS project_id,
+    ADD COLUMN IF NOT EXISTS vendor_code VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS type_of_work VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS vendor_category VARCHAR(100)
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS machinery_details (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      machinery_name VARCHAR(255) NOT NULL,
+      nos NUMERIC(12, 2) DEFAULT 0,
+      till_date_hours NUMERIC(12, 2) DEFAULT 0,
+      todays_hours NUMERIC(12, 2) DEFAULT 0,
+      cumulative_hours NUMERIC(12, 2) DEFAULT 0,
+      rate NUMERIC(12, 2) DEFAULT 0,
+      till_date_amount NUMERIC(12, 2) DEFAULT 0,
+      todays_amount NUMERIC(12, 2) DEFAULT 0,
+      cumulative_amount NUMERIC(12, 2) DEFAULT 0,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS material_status (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      description VARCHAR(255) NOT NULL,
+      unit VARCHAR(50),
+      till_date_rec NUMERIC(12, 2) DEFAULT 0,
+      today_rec NUMERIC(12, 2) DEFAULT 0,
+      total_received NUMERIC(12, 2) DEFAULT 0,
+      till_date_consumed NUMERIC(12, 2) DEFAULT 0,
+      today_consumed NUMERIC(12, 2) DEFAULT 0,
+      total_consumed NUMERIC(12, 2) DEFAULT 0,
+      balance NUMERIC(12, 2) DEFAULT 0,
+      rate NUMERIC(12, 2) DEFAULT 0,
+      till_date_amount NUMERIC(12, 2) DEFAULT 0,
+      today_amount NUMERIC(12, 2) DEFAULT 0,
+      cumulative_amount NUMERIC(12, 2) DEFAULT 0,
+      remarks TEXT,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS days_reports (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      description TEXT NOT NULL,
+      remark TEXT,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS status_reports (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      description TEXT NOT NULL,
+      remark TEXT,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS special_site_visits (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      firm_name VARCHAR(255) NOT NULL,
+      visitor_name VARCHAR(255) NOT NULL,
+      purpose TEXT NOT NULL,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS critical_issues (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      description TEXT NOT NULL,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS next_days_plans (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      description TEXT NOT NULL,
+      unit VARCHAR(50),
+      quantity NUMERIC(12, 2),
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS contractor_labours (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      contractor_id VARCHAR(50) REFERENCES contractors(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      unit VARCHAR(50),
+      carpenter NUMERIC(12, 2) DEFAULT 0,
+      barbender NUMERIC(12, 2) DEFAULT 0,
+      mason NUMERIC(12, 2) DEFAULT 0,
+      carpenter_helper NUMERIC(12, 2) DEFAULT 0,
+      barbender_helper NUMERIC(12, 2) DEFAULT 0,
+      mc NUMERIC(12, 2) DEFAULT 0,
+      fc NUMERIC(12, 2) DEFAULT 0,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (contractor_id, date, sub_project_id)
+    )
+  `);
+
+  // Migrate existing tables
+  const targetTables = [
+    'technical_staff_attendance',
+    'machinery_details',
+    'material_status',
+    'days_reports',
+    'status_reports',
+    'special_site_visits',
+    'critical_issues',
+    'next_days_plans'
+  ];
+
+  for (const table of targetTables) {
+    await client.query(`
+      ALTER TABLE ${table}
+      ADD COLUMN IF NOT EXISTS sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE
+    `);
+  }
+
+  for (const table of targetTables) {
+    await client.query(`
+      UPDATE ${table} t
+      SET sub_project_id = (SELECT id FROM sub_projects sp WHERE sp.project_id = t.project_id LIMIT 1)
+      WHERE t.sub_project_id IS NULL
+    `);
+  }
+
+  // Update unique constraint on technical_staff_attendance
+  await client.query(`
+    ALTER TABLE technical_staff_attendance
+    DROP CONSTRAINT IF EXISTS technical_staff_attendance_technical_staff_id_date_key
+  `);
+  await client.query(`
+    ALTER TABLE technical_staff_attendance
+    DROP CONSTRAINT IF EXISTS technical_staff_attendance_staff_date_sub_project_key
+  `);
+  await client.query(`
+    ALTER TABLE technical_staff_attendance
+    ADD CONSTRAINT technical_staff_attendance_staff_date_sub_project_key UNIQUE (technical_staff_id, date, sub_project_id)
+  `);
 }
 
 async function getExistingSchemaTables(client) {

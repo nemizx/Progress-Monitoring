@@ -58,7 +58,18 @@ const entityNames = [
   'User',
   'SubProject',
   'ProjectFlat',
-  'MepBoq'
+  'MepBoq',
+  'TechnicalStaff',
+  'TechnicalStaffAttendance',
+  'Contractor',
+  'ContractorLabour',
+  'MachineryDetail',
+  'MaterialStatus',
+  'DaysReport',
+  'StatusReport',
+  'SpecialSiteVisit',
+  'CriticalIssue',
+  'NextDaysPlan'
 ];
 
 const entities = {};

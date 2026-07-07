@@ -12,11 +12,21 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import { ClipboardList, CheckCircle2, Clock, AlertTriangle, Calendar, Check, Save, X, ChevronsUpDown } from 'lucide-react';
 import EmptyState from '@/components/shared/EmptyState';
-import { formatCompactCurrencyINR, formatCurrencyINR } from '@/lib/formatters';
+import { formatCompactCurrencyINR, formatCurrencyINR, normalizeDateKey } from '@/lib/formatters';
 import { useAuth } from '@/lib/AuthContext';
 import { useProjectSubProject } from '@/hooks/useProjectSubProject';
 import ProjectSubProjectSelector from '@/components/shared/ProjectSubProjectSelector';
 import SubProjectGate from '@/components/shared/SubProjectGate';
+import TechnicalStaffAttendancePanel from '@/components/progress/TechnicalStaffAttendancePanel';
+import ContractorLabourPanel from '@/components/progress/ContractorLabourPanel';
+import MaterialStatusPanel from '@/components/progress/MaterialStatusPanel';
+import MachineriesDetailsPanel from '@/components/progress/MachineriesDetailsPanel';
+import DaysReportPanel from '@/components/progress/DaysReportPanel';
+import StatusReportPanel from '@/components/progress/StatusReportPanel';
+import SpecialSiteVisitsPanel from '@/components/progress/SpecialSiteVisitsPanel';
+import CriticalIssuesPanel from '@/components/progress/CriticalIssuesPanel';
+import NextDaysPlansPanel from '@/components/progress/NextDaysPlansPanel';
+import DprReviewDialog from '@/components/progress/DprReviewDialog';
 import { filterBudgetBySubProject, filterProgressBySubProject, filterWbsBySubProject } from '@/lib/subProjectScope';
 
 const weatherIcons = { clear: '☀️', cloudy: '⛅', rainy: '🌧️', stormy: '⛈️', hot: '🌡️' };
@@ -47,8 +57,9 @@ export default function SiteProgress() {
 
   const [typeFilter, setTypeFilter] = useState('');
   const [activeTab, setActiveTab] = useState('sheet'); // 'sheet', 'wpr', 'mpr', 'history'
+  const [sheetSubTab, setSheetSubTab] = useState('dpr'); // 'dpr', 'staff-attendance'
   const [dprState, setDprState] = useState({});
-  const [activeBudgetIds, setActiveBudgetIds] = useState([]);
+  const [manualRowIds, setManualRowIds] = useState([]);
   const [weatherCondition, setWeatherCondition] = useState('clear');
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weatherInfo, setWeatherInfo] = useState('');
@@ -56,12 +67,37 @@ export default function SiteProgress() {
   const [weatherManuallyEdited, setWeatherManuallyEdited] = useState(false);
   const [submittedBy, setSubmittedBy] = useState('Supervisor');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showReviewDialog, setShowReviewDialog] = useState(false);
   const [loadedScope, setLoadedScope] = useState(null);
   const [lockedScopes, setLockedScopes] = useState({});
   
   const [activityPickerOpen, setActivityPickerOpen] = useState(false);
   const [selectedActivityId, setSelectedActivityId] = useState('');
   const weatherManualRef = useRef(false);
+  const contractorRef = useRef(null);
+  const staffRef = useRef(null);
+  const materialRef = useRef(null);
+  const machineryRef = useRef(null);
+  const daysReportRef = useRef(null);
+  const statusReportRef = useRef(null);
+  const siteVisitsRef = useRef(null);
+  const criticalIssuesRef = useRef(null);
+  const nextDaysPlanRef = useRef(null);
+
+  const dprPanelRefs = useMemo(
+    () => [
+      staffRef,
+      contractorRef,
+      materialRef,
+      machineryRef,
+      daysReportRef,
+      statusReportRef,
+      siteVisitsRef,
+      criticalIssuesRef,
+      nextDaysPlanRef,
+    ],
+    []
+  );
 
   const queryClient = useQueryClient();
 
@@ -359,19 +395,71 @@ export default function SiteProgress() {
     () =>
       entries.filter(
         (entry) =>
-          entry.date === selectedReportDate &&
+          normalizeDateKey(entry.date) === selectedReportDate &&
           (entry.report_type === 'daily' || !entry.report_type) &&
           !entry._is_aggregated
       ),
     [entries, selectedReportDate]
   );
   const isScopeLockedLocally = scopeKey ? Boolean(lockedScopes[scopeKey]) : false;
-  const isSelectedDateLocked = isScopeLockedLocally || dprEntriesForSelectedDate.length > 0;
+  const isSelectedDateLocked =
+    dprEntriesForSelectedDate.length > 0 || (isScopeLockedLocally && !entriesLoading);
+
+  useEffect(() => {
+    if (!scopeKey || entriesLoading) return;
+    if (lockedScopes[scopeKey] && dprEntriesForSelectedDate.length === 0) {
+      setLockedScopes((prev) => {
+        if (!prev[scopeKey]) return prev;
+        const next = { ...prev };
+        delete next[scopeKey];
+        return next;
+      });
+    }
+  }, [scopeKey, entriesLoading, dprEntriesForSelectedDate.length, lockedScopes]);
 
   useEffect(() => {
     setSelectedActivityId('');
     setActivityPickerOpen(false);
+    setManualRowIds([]);
+    setLoadedScope(null);
   }, [scopeKey]);
+
+  const entryRowIds = useMemo(() => {
+    if (!isReady) return [];
+    return [
+      ...new Set(
+        dprEntriesForSelectedDate
+          .map((entry) => {
+            if (entry.budget_item_id) {
+              const budgetRowId = worksheetRowByBudgetId.get(entry.budget_item_id)?.row_id;
+              if (budgetRowId) return budgetRowId;
+            }
+            if (entry.wbs_item_id) {
+              const wbsRowId = worksheetRowByWbsId.get(entry.wbs_item_id)?.row_id;
+              if (wbsRowId) return wbsRowId;
+            }
+            const entryActivityKey = getEntryActivityKey(entry);
+            if (entryActivityKey) {
+              return worksheetRowByActivityId.get(entryActivityKey)?.row_id || null;
+            }
+            return null;
+          })
+          .filter(Boolean)
+      ),
+    ];
+  }, [
+    isReady,
+    dprEntriesForSelectedDate,
+    worksheetRowByBudgetId,
+    worksheetRowByWbsId,
+    worksheetRowByActivityId,
+    getEntryActivityKey,
+  ]);
+
+  const activeBudgetIds = useMemo(
+    () => [...new Set([...entryRowIds, ...manualRowIds])],
+    [entryRowIds, manualRowIds]
+  );
 
   useEffect(() => {
     weatherManualRef.current = false;
@@ -408,6 +496,7 @@ export default function SiteProgress() {
           latitude: String(place.latitude),
           longitude: String(place.longitude),
           timezone: 'auto',
+          current_weather: 'true',
           daily: 'weather_code,temperature_2m_max',
           start_date: selectedReportDate,
           end_date: selectedReportDate,
@@ -418,8 +507,16 @@ export default function SiteProgress() {
           throw new Error('Could not fetch weather forecast.');
         }
         const weatherJson = await weatherRes.json();
-        const weatherCode = weatherJson?.daily?.weather_code?.[0];
-        const maxTemp = weatherJson?.daily?.temperature_2m_max?.[0];
+        
+        const isTodaySelected = selectedReportDate === getLocalDateString();
+        let weatherCode = weatherJson?.daily?.weather_code?.[0];
+        let maxTemp = weatherJson?.daily?.temperature_2m_max?.[0];
+
+        if (isTodaySelected && weatherJson?.current_weather) {
+          weatherCode = weatherJson.current_weather.weathercode;
+          maxTemp = weatherJson.current_weather.temperature;
+        }
+
         const mappedWeather = mapForecastToWeatherCondition(weatherCode, maxTemp);
 
         if (cancelled || weatherManualRef.current) return;
@@ -441,40 +538,6 @@ export default function SiteProgress() {
     };
   }, [isReady, selectedProject?.location, selectedReportDate, weatherManuallyEdited]);
 
-  // Pre-populate active line items for selected DPR date
-  useEffect(() => {
-    if (!isReady) {
-      setActiveBudgetIds([]);
-      return;
-    }
-    const selectedDateItemIds = dprEntriesForSelectedDate
-      .map((entry) => {
-        if (entry.budget_item_id) {
-          const budgetRowId = worksheetRowByBudgetId.get(entry.budget_item_id)?.row_id;
-          if (budgetRowId) return budgetRowId;
-        }
-        if (entry.wbs_item_id) {
-          const wbsRowId = worksheetRowByWbsId.get(entry.wbs_item_id)?.row_id;
-          if (wbsRowId) return wbsRowId;
-        }
-        const entryActivityKey = getEntryActivityKey(entry);
-        if (entryActivityKey) {
-          return worksheetRowByActivityId.get(entryActivityKey)?.row_id || null;
-        }
-        return null;
-      })
-      .filter(Boolean);
-    setActiveBudgetIds([...new Set(selectedDateItemIds)]);
-  }, [
-    scopeKey,
-    dprEntriesForSelectedDate,
-    isReady,
-    worksheetRowByBudgetId,
-    worksheetRowByWbsId,
-    worksheetRowByActivityId,
-    getEntryActivityKey,
-  ]);
-
   // Sync state for tabular DPR sheet fields
   useEffect(() => {
     if (!isReady) {
@@ -482,7 +545,7 @@ export default function SiteProgress() {
       setLoadedScope(null);
       return;
     }
-
+    
     setDprState((prev) => {
       const next = {};
 
@@ -500,6 +563,10 @@ export default function SiteProgress() {
               : selectedDateEntry
                 ? String(selectedDateEntry.quantity_done ?? '')
                 : '',
+          tomorrow_qty:
+            prevRow.tomorrow_qty !== undefined && prevRow.tomorrow_qty !== ''
+              ? prevRow.tomorrow_qty
+              : '',
           labor_count:
             prevRow.labor_count !== undefined && prevRow.labor_count !== ''
               ? prevRow.labor_count
@@ -543,11 +610,12 @@ export default function SiteProgress() {
 
     const row = worksheetRowById.get(id);
     
-    setActiveBudgetIds(prev => [...prev, id]);
+    setManualRowIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
     setDprState(prev => ({
       ...prev,
       [id]: prev[id] || {
         qty_executed: '',
+        tomorrow_qty: '',
         labor_count: '',
         description: '',
         issues: '',
@@ -566,7 +634,7 @@ export default function SiteProgress() {
         queryClient.invalidateQueries({ queryKey: ['progress'] });
       }
     }
-    setActiveBudgetIds(prev => prev.filter(id => id !== bItemId));
+    setManualRowIds((prev) => prev.filter((rowId) => rowId !== bItemId));
     setDprState(prev => {
       const updated = { ...prev };
       delete updated[bItemId];
@@ -574,7 +642,7 @@ export default function SiteProgress() {
     });
   };
 
-  const handleSaveDpr = async () => {
+  const handleSaveDpr = () => {
     if (isSelectedDateLocked) {
       toast({
         title: 'Date Locked',
@@ -583,103 +651,119 @@ export default function SiteProgress() {
       });
       return;
     }
-    if (activeBudgetIds.length === 0) {
-      toast({
-        title: 'No Activity Selected',
-        description: 'Add at least one activity before saving DPR.',
-        variant: 'destructive',
-      });
-      return;
+
+    for (const panelRef of dprPanelRefs) {
+      const error = panelRef.current?.validate?.();
+      if (error) {
+        toast({
+          title: 'Validation Error',
+          description: error,
+          variant: 'destructive',
+        });
+        return;
+      }
     }
 
+    setShowReviewDialog(true);
+  };
+
+  const persistWorksheetDpr = async () => {
+    let savedCount = 0;
+    let deletedCount = 0;
+    const persistedEntryIds = {};
+
+    for (const rowId of activeBudgetIds) {
+      const state = dprState[rowId];
+      const row = worksheetRowById.get(rowId);
+      if (!row || !state) continue;
+
+      const hasValue = state.qty_executed !== '' || state.tomorrow_qty !== '' || state.labor_count !== '' || state.description !== '' || state.issues !== '';
+
+      if (hasValue) {
+        const payload = {
+          project_id: projectId,
+          budget_item_id: row.budget_item_id_ref || null,
+          date: selectedReportDate,
+          report_type: 'daily',
+          submitted_by: submittedBy || 'Supervisor',
+          work_done_description: state.description || `Completed ${state.qty_executed} ${row.unit} of ${row.title}`,
+          quantity_done: parseFloat(state.qty_executed) || 0,
+          unit: row.unit,
+          labor_count: parseFloat(state.labor_count) || 0,
+          issues_reported: state.issues || '',
+          weather_condition: weatherCondition,
+          status: 'approved',
+          value_of_work_done: (parseFloat(state.qty_executed) || 0) * (parseFloat(row.cost_per_unit) || 0),
+          milestone_id: row.milestone_id || null,
+        };
+        const resolvedWbsItemId = state.wbs_item_id || row.wbs_item_id || '';
+        if (!row.budget_item_id_ref && resolvedWbsItemId) {
+          payload.wbs_item_id = resolvedWbsItemId;
+        }
+
+        if (state.entry_id) {
+          const updatedEntry = await base44.entities.ProgressEntry.update(state.entry_id, payload);
+          persistedEntryIds[rowId] = updatedEntry?.id || state.entry_id;
+        } else {
+          const createdEntry = await base44.entities.ProgressEntry.create(payload);
+          persistedEntryIds[rowId] = createdEntry?.id || null;
+        }
+        savedCount += 1;
+      } else if (state.entry_id) {
+        await base44.entities.ProgressEntry.delete(state.entry_id);
+        deletedCount += 1;
+      }
+    }
+
+    if (Object.keys(persistedEntryIds).length > 0) {
+      setDprState((prev) => {
+        const next = { ...prev };
+        Object.entries(persistedEntryIds).forEach(([rowId, entryId]) => {
+          if (next[rowId]) {
+            next[rowId] = { ...next[rowId], entry_id: entryId };
+          }
+        });
+        return next;
+      });
+    }
+
+    queryClient.invalidateQueries({ queryKey: ['progress'] });
+    queryClient.invalidateQueries({ queryKey: ['budgetItems'] });
+    queryClient.invalidateQueries({ queryKey: ['milestones'] });
+    queryClient.invalidateQueries({ queryKey: ['wbs'] });
+
+    if (savedCount > 0 && scopeKey) {
+      setLockedScopes((prev) => ({ ...prev, [scopeKey]: true }));
+    }
+
+    setLoadedScope(null);
+    return { savedCount, deletedCount };
+  };
+
+  const handleConfirmSubmitDpr = async () => {
     setIsSubmitting(true);
     try {
-      let savedCount = 0;
-      let deletedCount = 0;
-      const persistedEntryIds = {};
+      const { savedCount, deletedCount } = await persistWorksheetDpr();
 
-      for (const rowId of activeBudgetIds) {
-        const state = dprState[rowId];
-        const row = worksheetRowById.get(rowId);
-        if (!row || !state) continue;
-
-        const hasValue = state.qty_executed !== '' || state.labor_count !== '' || state.description !== '' || state.issues !== '';
-
-        if (hasValue) {
-          const payload = {
-            project_id: projectId,
-            budget_item_id: row.budget_item_id_ref || null,
-            date: selectedReportDate,
-            report_type: 'daily',
-            submitted_by: submittedBy || 'Supervisor',
-            work_done_description: state.description || `Completed ${state.qty_executed} ${row.unit} of ${row.title}`,
-            quantity_done: parseFloat(state.qty_executed) || 0,
-            unit: row.unit,
-            labor_count: parseFloat(state.labor_count) || 0,
-            issues_reported: state.issues || '',
-            weather_condition: weatherCondition,
-            status: 'approved',
-            value_of_work_done: (parseFloat(state.qty_executed) || 0) * (parseFloat(row.cost_per_unit) || 0),
-            milestone_id: row.milestone_id || null,
-          };
-          const resolvedWbsItemId = state.wbs_item_id || row.wbs_item_id || '';
-          // Only send wbs_item_id for WBS-only rows; older DBs may not have this column yet.
-          if (!row.budget_item_id_ref && resolvedWbsItemId) {
-            payload.wbs_item_id = resolvedWbsItemId;
-          }
-
-          if (state.entry_id) {
-            const updatedEntry = await base44.entities.ProgressEntry.update(state.entry_id, payload);
-            persistedEntryIds[rowId] = updatedEntry?.id || state.entry_id;
-          } else {
-            const createdEntry = await base44.entities.ProgressEntry.create(payload);
-            persistedEntryIds[rowId] = createdEntry?.id || null;
-          }
-          savedCount += 1;
-        } else if (state.entry_id) {
-          await base44.entities.ProgressEntry.delete(state.entry_id);
-          deletedCount += 1;
+      for (const panelRef of dprPanelRefs) {
+        if (panelRef.current?.save) {
+          await panelRef.current.save();
         }
       }
 
-      if (Object.keys(persistedEntryIds).length > 0) {
-        setDprState((prev) => {
-          const next = { ...prev };
-          Object.entries(persistedEntryIds).forEach(([rowId, entryId]) => {
-            if (next[rowId]) {
-              next[rowId] = {
-                ...next[rowId],
-                entry_id: entryId,
-              };
-            }
-          });
-          return next;
-        });
-      }
-
-      queryClient.invalidateQueries({ queryKey: ['progress'] });
-      queryClient.invalidateQueries({ queryKey: ['budgetItems'] });
-      queryClient.invalidateQueries({ queryKey: ['milestones'] });
-      queryClient.invalidateQueries({ queryKey: ['wbs'] });
-
-      if (savedCount > 0 && scopeKey) {
-        setLockedScopes((prev) => ({
-          ...prev,
-          [scopeKey]: true,
-        }));
-      }
-      
-      setLoadedScope(null); // force clean sync on re-fetch
+      setShowReviewDialog(false);
+      const detailParts = [];
+      if (savedCount > 0) detailParts.push(`${savedCount} worksheet row${savedCount === 1 ? '' : 's'}`);
+      if (deletedCount > 0) detailParts.push(`${deletedCount} removed`);
       toast({
-        title: 'DPR Saved',
-        description: `Saved ${savedCount} row${savedCount === 1 ? '' : 's'}${deletedCount ? `, removed ${deletedCount}` : ''}.`,
+        title: 'DPR Submitted',
+        description: detailParts.length ? `All sections saved (${detailParts.join(', ')}).` : 'All sections saved successfully.',
       });
     } catch (e) {
       console.error('Error saving DPR:', e);
-      const msg = e?.message || 'Unable to save DPR. Please check backend logs.';
       toast({
         title: 'Failed to Save DPR',
-        description: msg,
+        description: e?.message || 'Unable to save DPR. Please check backend logs.',
         variant: 'destructive',
       });
     } finally {
@@ -690,7 +774,7 @@ export default function SiteProgress() {
   const isRowModified = (rowId) => {
     const state = dprState[rowId];
     if (!state) return false;
-
+    
     const row = worksheetRowById.get(rowId);
     if (!row) return false;
 
@@ -710,8 +794,11 @@ export default function SiteProgress() {
 
     const currentWBS = state.wbs_item_id || '';
     const dbWBS = selectedDateEntry ? selectedDateEntry.wbs_item_id || '' : '';
+
+    const currentTomorrow = state.tomorrow_qty === '' ? '' : String(state.tomorrow_qty);
+    const hasTomorrowChange = currentTomorrow !== '';
     
-    return currentQty !== dbQty || currentLabor !== dbLabor || currentDesc !== dbDesc || currentIssues !== dbIssues || currentWBS !== dbWBS;
+    return currentQty !== dbQty || currentLabor !== dbLabor || currentDesc !== dbDesc || currentIssues !== dbIssues || currentWBS !== dbWBS || hasTomorrowChange;
   };
 
   const deleteMutation = useMutation({
@@ -735,11 +822,80 @@ export default function SiteProgress() {
     .filter(Boolean);
   const modifiedCount = activeBudgetIds.filter(id => isRowModified(id)).length;
 
+  const getWorksheetReviewSection = useCallback(() => ({
+    title: 'A. DPR Worksheet',
+    columns: [
+      {
+        key: 'activity',
+        label: 'Activity',
+        render: (r) => (
+          <div>
+            {r.code && <div className="font-mono text-[10px] text-muted-foreground">{r.code}</div>}
+            <div className="font-semibold">{r.title}</div>
+          </div>
+        ),
+      },
+      { key: 'unit', label: 'Unit' },
+      { key: 'total_qty', label: 'Total Qty' },
+      { key: 'today_qty', label: 'Today Qty' },
+      { key: 'cumulative_qty', label: 'Cumulative Qty' },
+      { key: 'percent_comp', label: '% Comp.' },
+      { key: 'today_vowd', label: "Today's VOWD", render: (r) => formatCurrencyINR(r.today_vowd) },
+      { key: 'cumulative_vowd', label: 'Cumulative VOWD', render: (r) => formatCurrencyINR(r.cumulative_vowd) },
+      { key: 'tomorrow_qty', label: 'QTY Plan Tomorrow' },
+      { key: 'tomorrow_vowd', label: 'VOWD Plan Tomorrow', render: (r) => formatCurrencyINR(r.tomorrow_vowd) },
+    ],
+    rows: activeBudgetItems.map((row) => {
+      const state = dprState[row.row_id] || {};
+      const itemProgress = entries.filter(
+        (e) => rowMatchesEntry(row, e) && (e.report_type === 'daily' || !e.report_type) && !e._is_aggregated
+      );
+      const qtyBefore = itemProgress
+        .filter((e) => normalizeDateKey(e.date) < selectedReportDate)
+        .reduce((sum, e) => sum + (parseFloat(e.quantity_done) || 0), 0);
+      const todayQty = state.qty_executed === '' ? 0 : parseFloat(state.qty_executed) || 0;
+      const tomorrowQty = state.tomorrow_qty === '' ? 0 : parseFloat(state.tomorrow_qty) || 0;
+      const cumulativeQty = qtyBefore + todayQty;
+      const rate = parseFloat(row.cost_per_unit) || 0;
+      const totalQty = parseFloat(row.quantity) || 0;
+      return {
+        code: row.code || '',
+        title: row.title,
+        unit: row.unit || '—',
+        total_qty: totalQty,
+        today_qty: todayQty || '—',
+        cumulative_qty: cumulativeQty,
+        percent_comp: totalQty > 0 ? `${((cumulativeQty / totalQty) * 100).toFixed(1)}%` : '0%',
+        today_vowd: todayQty * rate,
+        cumulative_vowd: cumulativeQty * rate,
+        tomorrow_qty: tomorrowQty || '—',
+        tomorrow_vowd: tomorrowQty * rate,
+      };
+    }).filter((row) => row.today_qty !== '—' || row.tomorrow_qty !== '—'),
+  }), [activeBudgetItems, dprState, entries, rowMatchesEntry, selectedReportDate]);
+
+  const reviewSections = useMemo(() => {
+    const sections = [getWorksheetReviewSection()];
+    dprPanelRefs.forEach((panelRef) => {
+      const data = panelRef.current?.getReviewData?.();
+      if (data) sections.push(data);
+    });
+    sections.push({
+      title: 'J. Weather Report',
+      columns: [{ key: 'condition', label: 'Condition' }],
+      rows: [{ condition: weatherCondition.charAt(0).toUpperCase() + weatherCondition.slice(1) }],
+    });
+    return sections;
+  }, [getWorksheetReviewSection, dprPanelRefs, weatherCondition, showReviewDialog]);
+
   // Aggregated data generator helpers for WPR/MPR
   const buildAggregatedData = (start, end) => {
     const data = [];
     const scopedEntries = entries.filter(
-      (e) => e.date >= start && e.date <= end && (e.report_type === 'daily' || !e.report_type) && !e._is_aggregated
+      (e) => {
+        const entryDate = normalizeDateKey(e.date);
+        return entryDate >= start && entryDate <= end && (e.report_type === 'daily' || !e.report_type) && !e._is_aggregated;
+      }
     );
     
     const grouped = {};
@@ -905,28 +1061,141 @@ export default function SiteProgress() {
         <div className="space-y-4">
           {isReady ? (
             <>
-              {/* DPR context card */}
-              <div className="flex flex-wrap gap-4 items-center bg-card border rounded-xl p-4 shadow-sm">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/10 p-2 rounded-lg text-primary">
-                    <Calendar className="w-5 h-5" />
+              <div className="flex gap-1 overflow-x-auto pb-1">
+                <button
+                  type="button"
+                  onClick={() => setSheetSubTab('dpr')}
+                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
+                    sheetSubTab === 'dpr'
+                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
+                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
+                  }`}
+                >
+                  DPR Worksheet
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSheetSubTab('contractor')}
+                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
+                    sheetSubTab === 'contractor'
+                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
+                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
+                  }`}
+                >
+                  Labour Details
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSheetSubTab('staff-attendance')}
+                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
+                    sheetSubTab === 'staff-attendance'
+                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
+                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
+                  }`}
+                >
+                  Technical Staff Attendance
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSheetSubTab('material-status')}
+                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
+                    sheetSubTab === 'material-status'
+                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
+                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
+                  }`}
+                >
+                  Material Status
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSheetSubTab('machinery-details')}
+                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
+                    sheetSubTab === 'machinery-details'
+                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
+                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
+                  }`}
+                >
+                  Machineries Details
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSheetSubTab('days-report')}
+                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
+                    sheetSubTab === 'days-report'
+                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
+                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
+                  }`}
+                >
+                  Day's Report
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSheetSubTab('status-report')}
+                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
+                    sheetSubTab === 'status-report'
+                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
+                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
+                  }`}
+                >
+                  Status Report
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSheetSubTab('special-site-visits')}
+                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
+                    sheetSubTab === 'special-site-visits'
+                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
+                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
+                  }`}
+                >
+                  Special Site Visits
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSheetSubTab('critical-issues')}
+                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
+                    sheetSubTab === 'critical-issues'
+                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
+                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
+                  }`}
+                >
+                  Critical Issues
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSheetSubTab('next-days-plan')}
+                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
+                    sheetSubTab === 'next-days-plan'
+                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
+                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
+                  }`}
+                >
+                  Next Day's Plan
+                </button>
+              </div>
+
+              {/* DPR context card — shared across DPR Worksheet and Technical Staff Attendance */}
+              <div className="flex flex-wrap gap-x-4 gap-y-2 items-center bg-card border rounded-xl py-2 px-3 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <div className="bg-primary/10 p-1.5 rounded-lg text-primary">
+                    <Calendar className="w-4 h-4" />
                   </div>
                   <div>
-                    <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Reporting Date</p>
+                    <p className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider mb-0.5">Reporting Date</p>
                     <Input
                       type="date"
                       value={selectedReportDate}
                       onChange={(event) => setSelectedReportDate(event.target.value)}
-                      className="h-9 w-40 font-semibold"
+                      className="h-8 w-36 text-xs font-semibold px-2 py-1"
                     />
-                    <p className="text-[11px] text-muted-foreground mt-1">{formattedSelectedDate}</p>
+                    <p className="text-[9px] text-muted-foreground mt-0.5 leading-none">{formattedSelectedDate}</p>
                   </div>
                 </div>
-                
-                <div className="h-8 w-px bg-border hidden md:block" />
-                
-                <div className="flex flex-col gap-1">
-                  <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Weather</span>
+
+                <div className="h-6 w-px bg-border hidden md:block" />
+
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Weather</span>
                   <Select
                     value={weatherCondition}
                     onValueChange={(value) => {
@@ -936,62 +1205,171 @@ export default function SiteProgress() {
                     }}
                     disabled={isSelectedDateLocked}
                   >
-                    <SelectTrigger className="w-36 h-9">
+                    <SelectTrigger className="w-32 h-8 text-xs px-2">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       {Object.entries(weatherIcons).map(([key, icon]) => (
-                        <SelectItem key={key} value={key}>{icon} {key.charAt(0).toUpperCase() + key.slice(1)}</SelectItem>
+                        <SelectItem key={key} value={key} className="text-xs">{icon} {key.charAt(0).toUpperCase() + key.slice(1)}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                  <p className="text-[9px] text-muted-foreground mt-0.5 leading-none">
                     {weatherLoading
-                      ? 'Fetching weather from project location...'
+                      ? 'Fetching weather...'
                       : weatherError
                         ? weatherError
                         : weatherInfo
-                          ? `Auto-filled from ${weatherInfo} (editable)`
+                          ? `Auto-filled (${weatherInfo})`
                           : 'Weather is editable.'}
                   </p>
                 </div>
-                
-                <div className="h-8 w-px bg-border hidden md:block" />
-                
-                <div className="flex flex-col gap-1">
-                  <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Submitted By</span>
-                  <Input 
+
+                <div className="h-6 w-px bg-border hidden md:block" />
+
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Submitted By</span>
+                  <Input
                     value={submittedBy}
                     onChange={e => setSubmittedBy(e.target.value)}
-                    className="h-9 w-40 font-semibold"
+                    className="h-8 w-36 text-xs font-semibold px-2 py-1"
                     placeholder="Name..."
                     disabled={isSelectedDateLocked}
                   />
+                  <p className="text-[9px] opacity-0 mt-0.5 leading-none">&nbsp;</p>
                 </div>
-                
-                <div className="ml-auto flex items-center gap-3">
-                  {!isSelectedDateLocked && modifiedCount > 0 && (
-                    <Badge variant="outline" className="bg-amber-500/10 text-amber-700 border-amber-500/20 text-xs px-2.5 py-1 font-bold">
-                      ⚠️ {modifiedCount} unsaved row{modifiedCount > 1 ? 's' : ''}
+
+                <div className="ml-auto flex items-center gap-2">
+                  {sheetSubTab === 'dpr' && !isSelectedDateLocked && modifiedCount > 0 && (
+                    <Badge variant="outline" className="bg-amber-500/10 text-amber-700 border-amber-500/20 text-[10px] px-2 py-0.5 font-bold">
+                      ⚠️ {modifiedCount} unsaved
                     </Badge>
                   )}
-                  <Button 
-                    onClick={handleSaveDpr} 
-                    disabled={isSubmitting || !isReady || isSelectedDateLocked} 
-                    className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold h-10 px-5 shadow-sm transition-colors"
+                  <Button
+                    onClick={handleSaveDpr}
+                    disabled={isSubmitting || !isReady || isSelectedDateLocked}
+                    className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold h-10 px-5 text-sm shadow-sm transition-colors"
                   >
                     <Save className="w-4 h-4" />
-                    {isSelectedDateLocked ? 'Date Locked' : (isSubmitting ? 'Saving DPR...' : 'Save DPR')}
+                    {isSelectedDateLocked ? 'Date Locked' : 'Save DPR'}
                   </Button>
                 </div>
               </div>
 
               {isSelectedDateLocked && (
-                <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
-                  DPR is already filled for this date. This date is locked and cannot be submitted again.
+                <div className="flex items-center gap-3 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>
+                    DPR is already submitted for <span className="font-semibold">{selectedReportDate}</span>.
+                    {dprEntriesForSelectedDate.length > 0 && (
+                      <span className="ml-1 text-emerald-700 font-semibold">
+                        {dprEntriesForSelectedDate.length} progress entr{dprEntriesForSelectedDate.length === 1 ? 'y' : 'ies'} recorded.
+                      </span>
+                    )}
+                    {' '}This date is locked and cannot be changed.
+                  </span>
                 </div>
               )}
 
+              <div className={sheetSubTab === 'contractor' ? '' : 'hidden'}>
+                <ContractorLabourPanel
+                  ref={contractorRef}
+                  projectId={projectId}
+                  subProjectId={subProjectId}
+                  selectedDate={selectedReportDate}
+                  isDateLocked={isSelectedDateLocked}
+                />
+              </div>
+              <div className={sheetSubTab === 'staff-attendance' ? '' : 'hidden'}>
+                <TechnicalStaffAttendancePanel
+                  ref={staffRef}
+                  projectId={projectId}
+                  subProjectId={subProjectId}
+                  selectedDate={selectedReportDate}
+                  isDateLocked={isSelectedDateLocked}
+                />
+              </div>
+              <div className={sheetSubTab === 'material-status' ? '' : 'hidden'}>
+                <MaterialStatusPanel
+                  ref={materialRef}
+                  projectId={projectId}
+                  subProjectId={subProjectId}
+                  selectedDate={selectedReportDate}
+                  isDateLocked={isSelectedDateLocked}
+                />
+              </div>
+              <div className={sheetSubTab === 'machinery-details' ? '' : 'hidden'}>
+                <MachineriesDetailsPanel
+                  ref={machineryRef}
+                  projectId={projectId}
+                  subProjectId={subProjectId}
+                  selectedDate={selectedReportDate}
+                  isDateLocked={isSelectedDateLocked}
+                />
+              </div>
+              <div className={sheetSubTab === 'days-report' ? '' : 'hidden'}>
+                <DaysReportPanel
+                  ref={daysReportRef}
+                  projectId={projectId}
+                  subProjectId={subProjectId}
+                  selectedDate={selectedReportDate}
+                  isDateLocked={isSelectedDateLocked}
+                />
+              </div>
+              <div className={sheetSubTab === 'status-report' ? '' : 'hidden'}>
+                <StatusReportPanel
+                  ref={statusReportRef}
+                  projectId={projectId}
+                  subProjectId={subProjectId}
+                  selectedDate={selectedReportDate}
+                  isDateLocked={isSelectedDateLocked}
+                />
+              </div>
+              <div className={sheetSubTab === 'special-site-visits' ? '' : 'hidden'}>
+                <SpecialSiteVisitsPanel
+                  ref={siteVisitsRef}
+                  projectId={projectId}
+                  subProjectId={subProjectId}
+                  selectedDate={selectedReportDate}
+                  isDateLocked={isSelectedDateLocked}
+                />
+              </div>
+              <div className={sheetSubTab === 'critical-issues' ? '' : 'hidden'}>
+                <CriticalIssuesPanel
+                  ref={criticalIssuesRef}
+                  projectId={projectId}
+                  subProjectId={subProjectId}
+                  selectedDate={selectedReportDate}
+                  isDateLocked={isSelectedDateLocked}
+                />
+              </div>
+              <div className={sheetSubTab === 'next-days-plan' ? '' : 'hidden'}>
+                <NextDaysPlansPanel
+                  ref={nextDaysPlanRef}
+                  projectId={projectId}
+                  subProjectId={subProjectId}
+                  selectedDate={selectedReportDate}
+                  isDateLocked={isSelectedDateLocked}
+                />
+              </div>
+
+              <DprReviewDialog
+                open={showReviewDialog}
+                onOpenChange={setShowReviewDialog}
+                meta={{
+                  date: selectedReportDate,
+                  projectName: selectedProject?.name,
+                  subProjectName: selectedSubProject?.name,
+                  submittedBy,
+                  weather: weatherCondition,
+                }}
+                sections={reviewSections}
+                onConfirm={handleConfirmSubmitDpr}
+                isSubmitting={isSubmitting}
+              />
+
+              {sheetSubTab === 'dpr' && (
+                <>
               {/* Searchable Activity Selector */}
               <div className="bg-card border rounded-xl p-4 shadow-sm space-y-3">
                 <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Add Activity to Worksheet</div>
@@ -1055,7 +1433,7 @@ export default function SiteProgress() {
                     </Popover>
                   </div>
 
-                  <Button
+                  <Button 
                     type="button"
                     onClick={() => {
                       if (!selectedActivityOption) return;
@@ -1065,7 +1443,7 @@ export default function SiteProgress() {
                     disabled={addActivityDisabled}
                     className={`font-semibold h-9 px-6 gap-1.5 ${
                       addActivityDisabled
-                        ? 'bg-muted text-muted-foreground'
+                        ? 'bg-muted text-muted-foreground' 
                         : 'bg-primary hover:bg-primary/95 text-white'
                     }`}
                   >
@@ -1077,6 +1455,91 @@ export default function SiteProgress() {
               {/* Sheet Table */}
               {entriesLoading ? (
                 <div className="text-center py-12 text-muted-foreground text-sm font-sans">Loading worksheets...</div>
+              ) : activeBudgetItems.length === 0 && isSelectedDateLocked && dprEntriesForSelectedDate.length > 0 ? (
+                /* Fallback read-only view: date is locked, entries exist in DB but can't map to WBS rows */
+                <Card className="overflow-hidden border shadow-sm">
+                  <CardHeader className="pb-2 bg-emerald-50/60 border-b">
+                    <CardTitle className="text-sm font-semibold text-emerald-800 flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4" />
+                      Submitted DPR Entries for {selectedReportDate}
+                    </CardTitle>
+                  </CardHeader>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm font-sans border-collapse">
+                      <thead>
+                        <tr className="border-b bg-muted/40">
+                          <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">#</th>
+                          <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Activity / Description</th>
+                          <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Qty Done</th>
+                          <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Unit</th>
+                          <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Labourers</th>
+                          <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Value (VOWD)</th>
+                          <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Work Description</th>
+                          <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Issues</th>
+                          <th className="text-center p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dprEntriesForSelectedDate.map((entry, idx) => {
+                          const linkedBudget = allBudgetItems.find(b => b.id === entry.budget_item_id);
+                          const linkedWbs = allWbsItems.find(w => w.id === (entry.wbs_item_id || linkedBudget?.wbs_item_id));
+                          const activityTitle = linkedBudget?.title || linkedWbs?.title || linkedWbs?.name || entry.work_done_description || `Entry #${idx + 1}`;
+                          const activityCode = linkedBudget?.code || linkedWbs?.activity_code || linkedWbs?.code || '';
+                          return (
+                            <tr key={entry.id} className="border-b hover:bg-muted/10 transition-colors">
+                              <td className="p-3 text-xs text-muted-foreground font-mono">{idx + 1}</td>
+                              <td className="p-3">
+                                <p className="font-semibold text-xs text-foreground">{activityTitle}</p>
+                                {activityCode && <p className="text-[10px] text-muted-foreground font-mono mt-0.5">{activityCode}</p>}
+                              </td>
+                              <td className="p-3 text-right font-mono text-xs font-bold text-foreground">
+                                {Number(entry.quantity_done || 0).toLocaleString()}
+                              </td>
+                              <td className="p-3 text-xs text-muted-foreground">{entry.unit || '—'}</td>
+                              <td className="p-3 text-right font-mono text-xs">{entry.labor_count || 0}</td>
+                              <td className="p-3 text-right font-mono text-xs font-semibold text-emerald-700">
+                                {fmtFull(parseFloat(entry.value_of_work_done) || 0)}
+                              </td>
+                              <td className="p-3 text-xs text-muted-foreground max-w-[180px] truncate" title={entry.work_done_description}>
+                                {entry.work_done_description || '—'}
+                              </td>
+                              <td className="p-3 text-xs text-destructive max-w-[150px] truncate" title={entry.issues_reported}>
+                                {entry.issues_reported || '—'}
+                              </td>
+                              <td className="p-3 text-center">
+                                <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                                  entry.status === 'approved'
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : entry.status === 'submitted'
+                                      ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                      : 'bg-muted text-muted-foreground border-border'
+                                }`}>
+                                  {entry.status === 'approved' && <CheckCircle2 className="w-3 h-3" />}
+                                  {entry.status || 'draft'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot className="bg-muted/20 border-t">
+                        <tr>
+                          <td colSpan={2} className="p-3 text-xs font-bold text-muted-foreground">TOTAL</td>
+                          <td className="p-3 text-right font-mono text-xs font-bold">
+                            {dprEntriesForSelectedDate.reduce((s, e) => s + (parseFloat(e.quantity_done) || 0), 0).toLocaleString()}
+                          </td>
+                          <td colSpan={2} className="p-3 text-right font-mono text-xs font-semibold">
+                            {dprEntriesForSelectedDate.reduce((s, e) => s + (parseFloat(e.labor_count) || 0), 0)} labourers
+                          </td>
+                          <td className="p-3 text-right font-mono text-xs font-bold text-emerald-700">
+                            {fmtFull(dprEntriesForSelectedDate.reduce((s, e) => s + (parseFloat(e.value_of_work_done) || 0), 0))}
+                          </td>
+                          <td colSpan={3} />
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </Card>
               ) : activeBudgetItems.length === 0 ? (
                 <div className="border border-dashed rounded-xl p-12 text-center text-muted-foreground bg-muted/5 font-sans">
                   <ClipboardList className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
@@ -1088,180 +1551,142 @@ export default function SiteProgress() {
               ) : (
                 <Card className="overflow-hidden border shadow-sm">
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm font-sans border-collapse">
+                    <table className="w-full text-sm font-sans border-collapse min-w-[1200px]">
                       <thead>
-                        <tr className="border-b bg-muted/50">
-                          <th className="sticky left-0 bg-muted z-20 text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider border-r shadow-[2px_0_5px_rgba(0,0,0,0.02)] w-[320px] min-w-[320px]">Line Item</th>
-                          <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Qty Pending</th>
-                          <th className="text-center p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider w-32">Qty Executed</th>
-                          <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Prog Before</th>
-                          <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Prog After</th>
-                          <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Budget Pending</th>
-                          <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Budget Consumed</th>
-                          <th className="text-center p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider w-24">Labourers</th>
-                          <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Work Description</th>
-                          <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Issues</th>
-                          <th className="p-3 w-12 border-l"></th>
+                        <tr className="border-b bg-[#D9E1F2]">
+                          <th className="sticky left-0 z-20 bg-[#D9E1F2] text-left p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r min-w-[260px]">
+                            Activity
+                          </th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-16">Unit</th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-24">Total Qty</th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-24">Today Qty</th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-28">Cumulative Completed Qty</th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-20">% Comp.</th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-28">Today&apos;s VOWD</th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-28">Cumulative VOWD</th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-28">QTY Plan for Tomorrow</th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-28">VOWD Plan for Tomorrow</th>
+                          <th className="p-2.5 w-10 border-l bg-[#D9E1F2]"></th>
                         </tr>
                       </thead>
                       <tbody>
-                        {activeBudgetItems.map(bItem => {
+                        {activeBudgetItems.map((bItem) => {
                           const rowId = bItem.row_id;
-                          
+
                           const itemProgress = entries.filter(
-                            e => rowMatchesEntry(bItem, e) &&
-                            (e.report_type === 'daily' || !e.report_type) && 
+                            (e) => rowMatchesEntry(bItem, e) &&
+                            (e.report_type === 'daily' || !e.report_type) &&
                             !e._is_aggregated
                           );
-                          
+
                           const qtyBefore = itemProgress
-                            .filter(e => e.date < selectedReportDate)
+                            .filter((e) => normalizeDateKey(e.date) < selectedReportDate)
                             .reduce((sum, e) => sum + (parseFloat(e.quantity_done) || 0), 0);
-                          
+
                           const state = dprState[rowId] || {};
-                          const qtyExecuted = parseFloat(state.qty_executed) || 0;
-                          
-                          const qtyPending = Math.max(0, bItem.quantity - qtyBefore);
-                          const progressBefore = bItem.quantity > 0 ? (qtyBefore / bItem.quantity) * 100 : 0;
-                          
-                          const qtyAfter = qtyBefore + qtyExecuted;
-                          const progressAfter = bItem.quantity > 0 ? (qtyAfter / bItem.quantity) * 100 : 0;
-                          
-                          const plannedBudget = bItem.quantity * bItem.cost_per_unit;
-                          const budgetConsumed = qtyAfter * bItem.cost_per_unit;
-                          const budgetPending = Math.max(0, plannedBudget - budgetConsumed);
-                          
-                          const isMilestone = milestones.some(m => m.id === bItem.milestone_id || m.title.toUpperCase().includes(bItem.title.toUpperCase()));
-                          const isComplete = progressAfter >= 100;
+                          const todayQty = state.qty_executed === '' ? 0 : parseFloat(state.qty_executed) || 0;
+                          const tomorrowQty = state.tomorrow_qty === '' ? 0 : parseFloat(state.tomorrow_qty) || 0;
+                          const cumulativeQty = qtyBefore + todayQty;
+                          const totalQty = parseFloat(bItem.quantity) || 0;
+                          const rate = parseFloat(bItem.cost_per_unit) || 0;
+                          const percentComp = totalQty > 0 ? (cumulativeQty / totalQty) * 100 : 0;
+                          const todayVowd = todayQty * rate;
+                          const cumulativeVowd = cumulativeQty * rate;
+                          const tomorrowVowd = tomorrowQty * rate;
+
+                          const isComplete = percentComp >= 100;
                           const isCarryForwardRow = bItem.is_l1_carry_forward;
-                          
                           const rowModified = isRowModified(rowId);
 
                           return (
-                            <tr 
-                              key={rowId} 
+                            <tr
+                              key={rowId}
                               className={`border-b hover:bg-muted/20 transition-colors ${
-                                rowModified 
-                                  ? 'bg-amber-500/5 hover:bg-amber-500/10' 
-                                  : isComplete 
-                                    ? 'bg-emerald-500/5 hover:bg-emerald-500/10' 
+                                rowModified
+                                  ? 'bg-amber-500/5 hover:bg-amber-500/10'
+                                  : isComplete
+                                    ? 'bg-emerald-500/5 hover:bg-emerald-500/10'
                                     : isCarryForwardRow
                                       ? 'bg-sky-500/5 hover:bg-sky-500/10'
                                       : ''
                               }`}
                             >
-                              {/* Sticky Line Item */}
-                              <td className={`sticky left-0 border-r shadow-[2px_0_5px_rgba(0,0,0,0.02)] z-10 p-3 text-xs font-medium transition-colors w-[320px] min-w-[320px] ${
-                                rowModified 
-                                  ? 'bg-amber-50/95 dark:bg-amber-950/20' 
-                                  : isComplete 
-                                    ? 'bg-emerald-50/95 dark:bg-emerald-950/20' 
+                              <td className={`sticky left-0 border-r z-10 p-2.5 text-xs transition-colors min-w-[260px] ${
+                                rowModified
+                                  ? 'bg-amber-50/95 dark:bg-amber-950/20'
+                                  : isComplete
+                                    ? 'bg-emerald-50/95 dark:bg-emerald-950/20'
                                     : isCarryForwardRow
                                       ? 'bg-sky-50/95 dark:bg-sky-950/20'
                                       : 'bg-card'
                               }`}>
-                                <p className="font-semibold text-foreground leading-normal">{bItem.title}</p>
-                                <p className="text-[9px] text-muted-foreground mt-0.5">{bItem.code}</p>
+                                {bItem.code && (
+                                  <p className="font-mono text-[10px] text-muted-foreground leading-tight">{bItem.code}</p>
+                                )}
+                                <p className="font-semibold text-foreground leading-snug mt-0.5">{bItem.title}</p>
                                 {isCarryForwardRow && (
                                   <p className="text-[10px] mt-1 inline-flex items-center rounded border border-sky-200 bg-sky-100 px-1.5 py-0.5 text-sky-700">
-                                    L1 carried to L3 (consumed {Number(bItem.carry_forward_consumed_qty || 0).toLocaleString()})
+                                    L1 carried (consumed {Number(bItem.carry_forward_consumed_qty || 0).toLocaleString()})
                                   </p>
                                 )}
                               </td>
 
-                              {/* Qty Pending */}
-                              <td className="p-3 text-right font-mono text-xs whitespace-nowrap font-medium text-slate-700">
-                                {[qtyPending.toLocaleString(), bItem.unit].filter(Boolean).join(' ')}
+                              <td className="p-2.5 text-center text-xs text-muted-foreground border-r">{bItem.unit || '—'}</td>
+
+                              <td className="p-2.5 text-right font-mono text-xs border-r">
+                                {totalQty.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                               </td>
-                              
-                              {/* Qty Executed Input */}
-                              <td className="p-3 text-center">
-                                <Input 
+
+                              <td className="p-2.5 text-center border-r">
+                                <Input
                                   type="number"
                                   step="any"
-                                  className="w-24 text-right h-8 text-xs font-mono font-semibold"
+                                  className="w-20 mx-auto text-right h-8 text-xs font-mono font-semibold"
                                   placeholder="0"
                                   value={state.qty_executed ?? ''}
-                                  onChange={e => handleInputChange(rowId, 'qty_executed', e.target.value)}
+                                  onChange={(e) => handleInputChange(rowId, 'qty_executed', e.target.value)}
                                   disabled={isSelectedDateLocked}
                                 />
                               </td>
-                              
-                              {/* Progress Before */}
-                              <td className="p-3 text-right font-mono text-xs text-muted-foreground whitespace-nowrap">
-                                {progressBefore.toFixed(1)}%
+
+                              <td className="p-2.5 text-right font-mono text-xs border-r">
+                                {cumulativeQty.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                               </td>
-                              
-                              {/* Progress After */}
-                              <td className="p-3 text-right font-mono text-xs whitespace-nowrap">
-                                <span className={
-                                  isComplete 
-                                    ? 'text-emerald-600 font-bold' 
-                                    : progressAfter > progressBefore 
-                                      ? 'text-blue-600 font-bold' 
-                                      : 'font-medium'
-                                }>
-                                  {progressAfter.toFixed(1)}%
+
+                              <td className="p-2.5 text-right font-mono text-xs border-r">
+                                <span className={isComplete ? 'text-emerald-600 font-bold' : ''}>
+                                  {percentComp.toFixed(1)}%
                                 </span>
-                                {isComplete && (
-                                  <div className="text-[8px] text-emerald-600 font-extrabold uppercase tracking-tight flex items-center justify-end gap-0.5 mt-0.5">
-                                    <Check className="w-2.5 h-2.5 stroke-[3]" /> Done
-                                    {isMilestone && <span className="bg-amber-100 text-amber-800 text-[8px] px-1 py-0.2 rounded font-extrabold ml-1 border border-amber-200">🏆 MS</span>}
-                                  </div>
-                                )}
                               </td>
-                              
-                              {/* Budget Pending */}
-                              <td className="p-3 text-right font-mono text-xs whitespace-nowrap text-slate-600">
-                                {fmtFull(budgetPending)}
+
+                              <td className="p-2.5 text-right font-mono text-xs border-r text-emerald-700">
+                                {fmtFull(todayVowd)}
                               </td>
-                              
-                              {/* Budget Consumed */}
-                              <td className="p-3 text-right font-mono text-xs whitespace-nowrap text-emerald-600 font-bold">
-                                {fmtFull(budgetConsumed)}
+
+                              <td className="p-2.5 text-right font-mono text-xs border-r font-semibold">
+                                {fmtFull(cumulativeVowd)}
                               </td>
-                              
-                              {/* Labourer Count Input */}
-                              <td className="p-3 text-center">
-                                <Input 
+
+                              <td className="p-2.5 text-center border-r">
+                                <Input
                                   type="number"
-                                  className="w-16 text-right h-8 text-xs font-mono"
+                                  step="any"
+                                  className="w-20 mx-auto text-right h-8 text-xs font-mono"
                                   placeholder="0"
-                                  value={state.labor_count ?? ''}
-                                  onChange={e => handleInputChange(rowId, 'labor_count', e.target.value)}
+                                  value={state.tomorrow_qty ?? ''}
+                                  onChange={(e) => handleInputChange(rowId, 'tomorrow_qty', e.target.value)}
                                   disabled={isSelectedDateLocked}
                                 />
                               </td>
-                              
-                              {/* Description Input */}
-                              <td className="p-3">
-                                <Input 
-                                  type="text"
-                                  className="w-40 h-8 text-xs font-sans"
-                                  placeholder="Work done details..."
-                                  value={state.description ?? ''}
-                                  onChange={e => handleInputChange(rowId, 'description', e.target.value)}
-                                  disabled={isSelectedDateLocked}
-                                />
+
+                              <td className="p-2.5 text-right font-mono text-xs border-r text-muted-foreground">
+                                {tomorrowQty > 0 ? fmtFull(tomorrowVowd) : '—'}
                               </td>
-                              
-                              {/* Issues Input */}
-                              <td className="p-3">
-                                <Input 
-                                  type="text"
-                                  className="w-40 h-8 text-xs font-sans text-destructive placeholder:text-destructive/40"
-                                  placeholder="Add issue/delay details..."
-                                  value={state.issues ?? ''}
-                                  onChange={e => handleInputChange(rowId, 'issues', e.target.value)}
-                                  disabled={isSelectedDateLocked}
-                                />
-                              </td>
-                              
-                              {/* Action: Remove row */}
-                              <td className="p-3 border-l text-center">
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon" 
+
+                              <td className="p-2.5 border-l text-center">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
                                   onClick={() => handleRemoveActivity(rowId)}
                                   className="w-7 h-7 hover:bg-destructive/10 text-destructive/80 hover:text-destructive"
                                   disabled={isSelectedDateLocked}
@@ -1276,6 +1701,8 @@ export default function SiteProgress() {
                     </table>
                   </div>
                 </Card>
+              )}
+              </>
               )}
             </>
           ) : (

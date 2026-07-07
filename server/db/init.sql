@@ -1,4 +1,11 @@
 -- Drop existing tables if they exist to allow clean reset
+DROP TABLE IF EXISTS next_days_plans CASCADE;
+DROP TABLE IF EXISTS critical_issues CASCADE;
+DROP TABLE IF EXISTS special_site_visits CASCADE;
+DROP TABLE IF EXISTS status_reports CASCADE;
+DROP TABLE IF EXISTS days_reports CASCADE;
+DROP TABLE IF EXISTS machinery_details CASCADE;
+DROP TABLE IF EXISTS material_status CASCADE;
 DROP TABLE IF EXISTS notifications CASCADE;
 DROP TABLE IF EXISTS collaboration_posts CASCADE;
 DROP TABLE IF EXISTS change_events CASCADE;
@@ -490,3 +497,107 @@ INSERT INTO schedule_tasks (id, project_id, name, description, phase, start_date
 INSERT INTO scheduling_rules (id, name, description, project_type, rule_type, condition, action, parameters, is_active, created_by) VALUES
 ('rule_1', 'Concrete Curing Buffer', 'Ensure suspended concrete slab pours have a minimum 7-day curing buffer before structural framing columns can be formed above.', 'Residential Building', 'buffer', 'concrete_slab_to_columns', 'insert_delay', '{"days":7}', true, 'Suresh Sharma'),
 ('rule_2', 'Shoring Inspection Gate', 'Deep excavation works cannot proceed past 5m depth without geotechnical validation of shoring sheet piling deflection.', 'Commercial Tower', 'constraint', 'excavation_depth_limit', 'hold_works', '{"depth_meters":5}', true, 'Suresh Sharma');
+
+-- 22. Machinery Details Table
+CREATE TABLE machinery_details (
+    id VARCHAR(50) PRIMARY KEY,
+    project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+    sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    machinery_name VARCHAR(255) NOT NULL,
+    nos NUMERIC(12, 2) DEFAULT 0,
+    till_date_hours NUMERIC(12, 2) DEFAULT 0,
+    todays_hours NUMERIC(12, 2) DEFAULT 0,
+    cumulative_hours NUMERIC(12, 2) DEFAULT 0,
+    rate NUMERIC(12, 2) DEFAULT 0,
+    till_date_amount NUMERIC(12, 2) DEFAULT 0,
+    todays_amount NUMERIC(12, 2) DEFAULT 0,
+    cumulative_amount NUMERIC(12, 2) DEFAULT 0,
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 22b. Material Status Table
+CREATE TABLE material_status (
+    id VARCHAR(50) PRIMARY KEY,
+    project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+    sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    description VARCHAR(255) NOT NULL,
+    unit VARCHAR(50),
+    till_date_rec NUMERIC(12, 2) DEFAULT 0,
+    today_rec NUMERIC(12, 2) DEFAULT 0,
+    total_received NUMERIC(12, 2) DEFAULT 0,
+    till_date_consumed NUMERIC(12, 2) DEFAULT 0,
+    today_consumed NUMERIC(12, 2) DEFAULT 0,
+    total_consumed NUMERIC(12, 2) DEFAULT 0,
+    balance NUMERIC(12, 2) DEFAULT 0,
+    rate NUMERIC(12, 2) DEFAULT 0,
+    till_date_amount NUMERIC(12, 2) DEFAULT 0,
+    today_amount NUMERIC(12, 2) DEFAULT 0,
+    cumulative_amount NUMERIC(12, 2) DEFAULT 0,
+    remarks TEXT,
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 23. Days Reports Table
+CREATE TABLE days_reports (
+    id VARCHAR(50) PRIMARY KEY,
+    project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+    sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    description TEXT NOT NULL,
+    remark TEXT,
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 24. Status Reports Table
+CREATE TABLE status_reports (
+    id VARCHAR(50) PRIMARY KEY,
+    project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+    sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    description TEXT NOT NULL,
+    remark TEXT,
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 25. Special Site Visits Table
+CREATE TABLE special_site_visits (
+    id VARCHAR(50) PRIMARY KEY,
+    project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+    sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    firm_name VARCHAR(255) NOT NULL,
+    visitor_name VARCHAR(255) NOT NULL,
+    purpose TEXT NOT NULL,
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 26. Critical Issues Table
+CREATE TABLE critical_issues (
+    id VARCHAR(50) PRIMARY KEY,
+    project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+    sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    description TEXT NOT NULL,
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 27. Next Day's Plan Table
+CREATE TABLE next_days_plans (
+    id VARCHAR(50) PRIMARY KEY,
+    project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+    sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    description TEXT NOT NULL,
+    unit VARCHAR(50),
+    quantity NUMERIC(12, 2),
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
