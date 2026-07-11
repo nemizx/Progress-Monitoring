@@ -297,18 +297,45 @@ export default function Reports() {
     });
   }, [wprWeekReports]);
 
-  const wprSummaryData = useMemo(() => {
-    if (!parsedWprReports.length) return [];
+  const wprMonthReports = useMemo(() => {
+    if (!selectedWprReportMonth) return [];
+    const monthWeeks = weeksList.filter(w => w.monthKey === selectedWprReportMonth);
+    const monthWeekIds = new Set(monthWeeks.map(w => w.id));
+    return allWprReports.filter(r => monthWeekIds.has(r.week_id));
+  }, [allWprReports, selectedWprReportMonth, weeksList]);
 
+  const parsedWprMonthReports = useMemo(() => {
+    return wprMonthReports.map(r => {
+      try {
+        return {
+          ...r,
+          parsedForm: JSON.parse(r.form_data || '{}')
+        };
+      } catch (e) {
+        return { ...r, parsedForm: {} };
+      }
+    });
+  }, [wprMonthReports]);
+
+  const formatWprDate = (dateStr) => {
+    if (!dateStr || dateStr === '—' || dateStr === '0') return dateStr || '—';
+    if (!dateStr.includes('-')) return dateStr;
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return dateStr;
+    const [y, m, d] = parts;
+    return `${d}/${m}/${y}`;
+  };
+
+  const getSummaryForReports = (reports) => {
     const sumField = (key, subKey) => {
-      return parsedWprReports.reduce((sum, r) => {
+      return reports.reduce((sum, r) => {
         const val = r.parsedForm?.[key]?.[subKey];
         return sum + (Number(val) || 0);
       }, 0);
     };
 
     const countSectionRows = (key, field = 'plan') => {
-      return parsedWprReports.reduce((sum, r) => {
+      return reports.reduce((sum, r) => {
         const rows = r.parsedForm?.[key] || [];
         return sum + rows.filter(row => row.name && String(row[field] || '').trim() !== '').length;
       }, 0);
@@ -316,7 +343,7 @@ export default function Reports() {
 
     const avgField = (key, subKey) => {
       let count = 0;
-      const sum = parsedWprReports.reduce((acc, r) => {
+      const sum = reports.reduce((acc, r) => {
         const val = r.parsedForm?.[key]?.[subKey];
         if (val !== undefined && val !== null && val !== '') {
           count++;
@@ -327,116 +354,173 @@ export default function Reports() {
       return count > 0 ? sum / count : 0;
     };
 
-    const data = [
-      {
-        id: 1,
-        name: 'Avg. No Of Labour Allocated',
-        unit: 'Nos',
-        plan: sumField('avgLabour', 'plan'),
-        achieved: sumField('avgLabour', 'achieved'),
+    const getAvgLabourField = (subKey) => {
+      const uniqueWeeks = new Set(reports.map(r => r.week_id));
+      if (!uniqueWeeks.size) return 0;
+      const total = sumField('avgLabour', subKey);
+      return Math.round(total / uniqueWeeks.size);
+    };
+
+    const getRatingField = (key, subKey, defaultVal) => {
+      const avg = avgField(key, subKey);
+      return avg > 0 ? Math.round(avg) : defaultVal;
+    };
+
+    const getTimelineDate = (subKey) => {
+      if (!reports.length) return '';
+      const validDates = reports
+        .map(r => r.parsedForm?.timelineMonthly?.[subKey])
+        .filter(Boolean);
+      return validDates.length ? validDates[validDates.length - 1] : '';
+    };
+
+    return {
+      avgLabour: {
+        plan: getAvgLabourField('plan'),
+        achieved: getAvgLabourField('achieved'),
       },
-      {
-        id: 2,
-        name: 'No. of Construction Milestones to Achieve: Building wise',
-        unit: 'Nos',
+      milestones: {
         plan: sumField('milestones', 'plan'),
         achieved: sumField('milestones', 'achieved'),
       },
-      {
-        id: 3,
-        name: 'Quality Rating',
-        unit: 'Rating',
-        plan: avgField('qualityRating', 'plan') || 10,
-        achieved: avgField('qualityRating', 'achieved'),
+      qualityRating: {
+        plan: getRatingField('qualityRating', 'plan', 10),
+        achieved: getRatingField('qualityRating', 'achieved', 0),
       },
-      {
-        id: 4,
-        name: 'Health and Safety Rating',
-        unit: 'Rating',
-        plan: avgField('healthSafetyRating', 'plan') || 10,
-        achieved: avgField('healthSafetyRating', 'achieved'),
+      healthSafetyRating: {
+        plan: getRatingField('healthSafetyRating', 'plan', 10),
+        achieved: getRatingField('healthSafetyRating', 'achieved', 0),
       },
-      {
-        id: 5,
-        name: 'No of Requisition Of Material',
-        unit: 'Nos',
+      materialRequisitions: {
         plan: countSectionRows('materialRequisitions', 'plan'),
         achieved: countSectionRows('materialRequisitions', 'achieved'),
       },
-      {
-        id: 6,
-        name: 'Bills to certify',
-        unit: 'Nos',
+      billsToCertify: {
         plan: countSectionRows('billsToCertify', 'plan'),
         achieved: countSectionRows('billsToCertify', 'achieved'),
       },
-      {
-        id: 7,
-        name: 'No. of leadership input / client inputs / consultant inputs to be adopted',
-        unit: 'Nos',
+      leadershipInputs: {
         plan: countSectionRows('leadershipInputs', 'plan'),
         achieved: countSectionRows('leadershipInputs', 'achieved'),
       },
-      {
-        id: 8,
-        name: 'Mock up Activity',
-        unit: 'Nos',
+      mockUpActivities: {
         plan: countSectionRows('mockUpActivities', 'plan'),
         achieved: countSectionRows('mockUpActivities', 'achieved'),
       },
-      {
-        id: 9,
-        name: 'Contractors to be Mobilized',
-        unit: 'Nos',
+      contractorsMobilized: {
         plan: countSectionRows('contractorsMobilized', 'plan'),
         achieved: countSectionRows('contractorsMobilized', 'achieved'),
       },
-      {
-        id: 10,
-        name: 'Contractor review meeting conducted',
-        unit: 'Nos',
+      contractorReviewMeeting: {
         plan: sumField('contractorReviewMeeting', 'plan'),
         achieved: sumField('contractorReviewMeeting', 'achieved'),
       },
-      {
-        id: 11,
-        name: 'Key Plan Activity',
-        unit: 'Nos',
+      keyPlanActivities: {
         plan: countSectionRows('keyPlanActivities', 'plan'),
         achieved: countSectionRows('keyPlanActivities', 'achieved'),
       },
-      {
-        id: 12,
-        name: 'Value of Work Done',
-        unit: 'INR',
+      valueOfWorkDone: {
         plan: sumField('valueOfWorkDone', 'plan'),
         achieved: sumField('valueOfWorkDone', 'achieved'),
-        isCurrency: true
       },
-      {
-        id: 13,
-        name: 'Work Methodology Details',
-        unit: 'Nos',
+      workMethodology: {
         plan: countSectionRows('workMethodology', 'plan'),
         achieved: countSectionRows('workMethodology', 'achieved'),
       },
-      {
-        id: 14,
-        name: 'Support Required / Decision On Details',
-        unit: 'Nos',
+      supportRequired: {
         plan: countSectionRows('supportRequired', 'plan'),
         achieved: countSectionRows('supportRequired', 'achieved'),
       },
+      timelineMonthly: {
+        startDate: getTimelineDate('startDate'),
+        endDate: getTimelineDate('endDate'),
+      }
+    };
+  };
+
+  const wprSummaryData = useMemo(() => {
+    if (!parsedWprReports.length) return [];
+
+    const monthly = getSummaryForReports(parsedWprMonthReports);
+    const weekly = getSummaryForReports(parsedWprReports);
+
+    const labels = [
+      { id: 1, name: '1. Avg.No Of Labour Allocated', unit: 'Nos', key: 'avgLabour' },
+      { id: 2, name: '2. No. of Construction Milestones to Achieve:Building wise', unit: 'Nos', key: 'milestones' },
+      { id: 3, name: '3. Quality Rating', unit: 'Rating', key: 'qualityRating' },
+      { id: 4, name: '4. Health And Safety Rating', unit: 'Rating', key: 'healthSafetyRating' },
+      { id: 5, name: '5. No. of Requisition of Material(Indent to raise considering material lead time)-(Kindly Refer the Annexure 1)', unit: 'Nos', key: 'materialRequisitions' },
+      { id: 6, name: '6. No. of Bills to be certified - (Contractors/Material)-(Kindly Refer the Annexure 2)', unit: 'Nos', key: 'billsToCertify' },
+      { id: 7, name: '7. No. of leadership input/client inputs/consultant inputs to be adopted- (Kindly Refer the Annexure 3)', unit: 'Nos', key: 'leadershipInputs' },
+      { id: 8, name: '8. Planned Mock up Activity Trainings Done-(Kindly Refer the Annexure 4)', unit: 'Nos', key: 'mockUpActivities' },
+      { id: 9, name: '9. No. of contractors to be mobilized after WO-(Kindly Refer the Annexure 5)', unit: 'Nos', key: 'contractorsMobilized' },
+      { id: 10, name: '10. Contractor review meeting conducted', unit: 'Nos', key: 'contractorReviewMeeting' },
+      { id: 11, name: '11. Upto 5 Key Activity Planned - Including Infra-(Kindly Refer the Annexure 6)', unit: 'Nos', key: 'keyPlanActivities' },
+      { id: 12, name: '12. Value of Work Done', unit: 'INR', key: 'valueOfWorkDone', isCurrency: true },
+      { id: 13, name: '13. No. of Work Methodology discussed-(Kindly Refer the Annexure 7)', unit: 'Nos', key: 'workMethodology' },
+      { id: 14, name: '14. Support Required/Decision On-(Kindly Refer the Annexure 8)', unit: 'Nos', key: 'supportRequired' },
+      { id: 15, name: '15. Timeline Monthly', unit: '—', key: 'timelineMonthly', isDate: true },
     ];
 
-    return data.map(item => {
-      const pct = calcPct(item.plan, item.achieved);
+    const calcWprRowPct = (plan, achieved) => {
+      const p = parseFloat(plan) || 0;
+      const a = parseFloat(achieved) || 0;
+      if (p === 0 && a === 0) return 0;
+      if (p === 0 && a > 0) return 100;
+      return Math.min(Math.round((a / p) * 100), 100);
+    };
+
+    return labels.map(label => {
+      let mPlan = 0;
+      let mAchieved = 0;
+      let wPlan = 0;
+      let wAchieved = 0;
+
+      if (label.isDate) {
+        mPlan = monthly.timelineMonthly?.startDate || '—';
+        mAchieved = monthly.timelineMonthly?.endDate || '—';
+        wPlan = '0';
+        wAchieved = '0';
+      } else {
+        mPlan = monthly[label.key]?.plan ?? 0;
+        mAchieved = monthly[label.key]?.achieved ?? 0;
+        wPlan = weekly[label.key]?.plan ?? 0;
+        wAchieved = weekly[label.key]?.achieved ?? 0;
+      }
+
+      const mPct = label.isDate ? null : calcWprRowPct(mPlan, mAchieved);
+      const wPct = label.isDate ? null : calcWprRowPct(wPlan, wAchieved);
+
       return {
-        ...item,
-        pct: pct !== null ? `${pct}%` : '—'
+        ...label,
+        monthlyPlan: mPlan,
+        monthlyAchieved: mAchieved,
+        monthlyPct: mPct !== null ? `${mPct}%` : '—',
+        weeklyPlan: wPlan,
+        weeklyAchieved: wAchieved,
+        weeklyPct: wPct !== null ? `${wPct}%` : '—',
+        rawMonthlyPct: mPct,
+        rawWeeklyPct: wPct,
       };
     });
-  }, [parsedWprReports]);
+  }, [parsedWprMonthReports, parsedWprReports, weeksList]);
+
+  const wprTotals = useMemo(() => {
+    if (!wprSummaryData.length) return { monthly: '0%', weekly: '0%' };
+    const activeRows = wprSummaryData.filter(r => !r.isDate);
+    if (!activeRows.length) return { monthly: '0%', weekly: '0%' };
+
+    const sumMonthly = activeRows.reduce((sum, r) => sum + (r.rawMonthlyPct || 0), 0);
+    const sumWeekly = activeRows.reduce((sum, r) => sum + (r.rawWeeklyPct || 0), 0);
+
+    const mAvg = (sumMonthly / activeRows.length).toFixed(2);
+    const wAvg = (sumWeekly / activeRows.length).toFixed(2);
+
+    return {
+      monthly: `${mAvg}%`,
+      weekly: `${wAvg}%`,
+    };
+  }, [wprSummaryData]);
 
   const wprDetailedSections = useMemo(() => {
     const sections = [
@@ -777,6 +861,7 @@ export default function Reports() {
         selectedWprReportWeek,
         weeksList,
         wprSummaryData,
+        wprTotals,
         wprDetailedSections,
       });
 
@@ -1504,34 +1589,79 @@ Format with markdown. Be specific, professional, and actionable.`;
                     </h4>
                     
                     <div className="overflow-x-auto border rounded-lg">
-                      <table className="w-full text-xs font-sans">
+                      <table className="w-full text-xs font-sans border-collapse">
                         <thead>
                           <tr className="bg-slate-100 border-b">
-                            <th className="p-2.5 text-center font-bold w-[60px] border-r">Sr. No</th>
-                            <th className="p-2.5 text-left font-bold border-r">Line Item / Parameter</th>
-                            <th className="p-2.5 text-center font-bold w-[80px] border-r">Unit</th>
-                            <th className="p-2.5 text-right font-bold w-[120px] border-r">Plan Qty</th>
-                            <th className="p-2.5 text-right font-bold w-[120px] border-r">Achieved Qty</th>
-                            <th className="p-2.5 text-right font-bold w-[100px]">% Completion</th>
+                            <th rowSpan={4} className="p-3 text-left font-bold border-r align-middle bg-slate-200/50 min-w-[200px]">Area of Review</th>
+                            <th rowSpan={4} className="p-3 text-center font-bold border-r align-middle bg-slate-200/50 min-w-[60px]">Unit</th>
+                            <th rowSpan={3} colSpan={3} className="p-3 text-center font-bold border-r align-middle bg-slate-200/50">Monthly</th>
+                            <th colSpan={3} className="p-2.5 text-center font-bold border-b bg-slate-200/50">
+                              {weeksList.find(w => w.id === selectedWprReportWeek) ? `Week ${weeksList.find(w => w.id === selectedWprReportWeek).weekNum}` : 'Weekly'}
+                            </th>
+                          </tr>
+                          <tr className="bg-slate-100 border-b">
+                            <th colSpan={2} className="p-1.5 text-center font-semibold border-r border-b text-[10px]">From</th>
+                            <th colSpan={1} className="p-1.5 text-center font-semibold border-b text-[10px]">To</th>
+                          </tr>
+                          <tr className="bg-slate-100 border-b">
+                            <th colSpan={2} className="p-1.5 text-center font-mono border-r border-b text-[10px] text-slate-600">
+                              {formatWprDate(weeksList.find(w => w.id === selectedWprReportWeek)?.startDate)}
+                            </th>
+                            <th colSpan={1} className="p-1.5 text-center font-mono border-b text-[10px] text-slate-600">
+                              {formatWprDate(weeksList.find(w => w.id === selectedWprReportWeek)?.endDate)}
+                            </th>
+                          </tr>
+                          <tr className="bg-slate-50 border-b text-[10px]">
+                            <th className="p-2 text-right font-bold border-r">Plan</th>
+                            <th className="p-2 text-right font-bold border-r">Achieved</th>
+                            <th className="p-2 text-right font-bold border-r">% Achieved</th>
+                            <th className="p-2 text-right font-bold border-r">Plan</th>
+                            <th className="p-2 text-right font-bold border-r">Achieved</th>
+                            <th className="p-2 text-right font-bold">% Achieved</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {wprSummaryData.map((item, index) => (
-                            <tr key={item.id} className="border-b hover:bg-slate-50/50">
-                              <td className="p-2.5 text-center text-muted-foreground border-r">{index + 1}</td>
-                              <td className="p-2.5 border-r font-semibold text-slate-700">{item.name}</td>
-                              <td className="p-2.5 border-r text-center font-medium text-slate-600">{item.unit}</td>
-                              <td className="p-2.5 border-r text-right font-mono font-medium text-slate-700">
-                                {item.isCurrency ? `Rs. ${Number(item.plan).toLocaleString('en-IN')}` : item.plan}
-                              </td>
-                              <td className="p-2.5 border-r text-right font-mono font-bold text-slate-900 bg-amber-50/5">
-                                {item.isCurrency ? `Rs. ${Number(item.achieved).toLocaleString('en-IN')}` : item.achieved}
-                              </td>
-                              <td className="p-2.5 text-right font-mono font-bold text-emerald-600 bg-emerald-50/5">
-                                {item.pct}
-                              </td>
-                            </tr>
-                          ))}
+                          {wprSummaryData.map((item) => {
+                            let mPlanDisplay = item.monthlyPlan;
+                            let mAchievedDisplay = item.monthlyAchieved;
+                            let wPlanDisplay = item.weeklyPlan;
+                            let wAchievedDisplay = item.weeklyAchieved;
+
+                            if (item.isDate) {
+                              mPlanDisplay = formatWprDate(mPlanDisplay);
+                              mAchievedDisplay = formatWprDate(mAchievedDisplay);
+                              wPlanDisplay = formatWprDate(wPlanDisplay);
+                              wAchievedDisplay = formatWprDate(wAchievedDisplay);
+                            } else if (item.isCurrency) {
+                              mPlanDisplay = mPlanDisplay ? `Rs. ${Number(mPlanDisplay).toLocaleString('en-IN')}` : '0';
+                              mAchievedDisplay = mAchievedDisplay ? `Rs. ${Number(mAchievedDisplay).toLocaleString('en-IN')}` : '0';
+                              wPlanDisplay = wPlanDisplay ? `Rs. ${Number(wPlanDisplay).toLocaleString('en-IN')}` : '0';
+                              wAchievedDisplay = wAchievedDisplay ? `Rs. ${Number(wAchievedDisplay).toLocaleString('en-IN')}` : '0';
+                            }
+
+                            return (
+                              <tr key={item.id} className="border-b hover:bg-slate-50/50">
+                                <td className="p-2.5 border-r font-semibold text-slate-700">{item.name}</td>
+                                <td className="p-2.5 border-r text-center font-medium text-slate-600">{item.unit}</td>
+                                <td className="p-2.5 border-r text-right font-mono text-slate-700">{mPlanDisplay}</td>
+                                <td className="p-2.5 border-r text-right font-mono font-semibold text-slate-800">{mAchievedDisplay}</td>
+                                <td className="p-2.5 border-r text-right font-mono font-bold text-emerald-600 bg-emerald-50/5">{item.monthlyPct}</td>
+                                <td className="p-2.5 border-r text-right font-mono text-slate-700">{wPlanDisplay}</td>
+                                <td className="p-2.5 border-r text-right font-mono font-semibold text-slate-800">{wAchievedDisplay}</td>
+                                <td className="p-2.5 text-right font-mono font-bold text-emerald-600 bg-emerald-50/5">{item.weeklyPct}</td>
+                              </tr>
+                            );
+                          })}
+                          <tr className="bg-slate-100 font-bold text-slate-800 text-[11px]">
+                            <td className="p-2.5 border-r">Total</td>
+                            <td className="p-2.5 border-r text-center">—</td>
+                            <td className="p-2.5 border-r text-right">—</td>
+                            <td className="p-2.5 border-r text-right">—</td>
+                            <td className="p-2.5 border-r text-right font-mono text-emerald-700">{wprTotals.monthly}</td>
+                            <td className="p-2.5 border-r text-right">—</td>
+                            <td className="p-2.5 border-r text-right">—</td>
+                            <td className="p-2.5 text-right font-mono text-emerald-700">{wprTotals.weekly}</td>
+                          </tr>
                         </tbody>
                       </table>
                     </div>

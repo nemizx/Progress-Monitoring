@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs';
 
-const COL_COUNT = 6;
-const COL_WIDTHS = [10, 60, 15, 20, 20, 20];
+const COL_COUNT = 8;
+const COL_WIDTHS = [60, 12, 15, 15, 15, 15, 15, 15];
 
 const BORDER_THIN = {
   top: { style: 'thin', color: { argb: 'FF000000' } },
@@ -207,6 +207,7 @@ export async function buildWprExcelWorkbook({
   selectedWprReportWeek,
   weeksList,
   wprSummaryData,
+  wprTotals,
   wprDetailedSections,
 }) {
   const workbook = new ExcelJS.Workbook();
@@ -221,6 +222,15 @@ export async function buildWprExcelWorkbook({
   const projectName = selectedProject?.name || 'Project';
   const weekObj = weeksList.find((w) => w.id === selectedWprReportWeek);
   const weekLabel = weekObj?.label || 'Selected Week';
+
+  const formatWprDate = (dateStr) => {
+    if (!dateStr || dateStr === '—' || dateStr === '0') return dateStr || '—';
+    if (!dateStr.includes('-')) return dateStr;
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return dateStr;
+    const [y, m, d] = parts;
+    return `${d}/${m}/${y}`;
+  };
 
   // --- Title Headers ---
   b.writeRow(['PLANEDGE MONITOR'], {
@@ -250,36 +260,107 @@ export async function buildWprExcelWorkbook({
   b.spacer(12);
 
   // --- Section A: Summary ---
-  b.sectionTitle('A. BUILDING WISE WEEKLY PROGRESS MONITORING REPORT (SUMMARY)');
-  const sumHdr = b.tableHeader(['Sr. No', 'Line Item / Parameter', 'Unit', 'Planned', 'Achieved', '% Comp.']);
+  b.sectionTitle('A. BUILDING WISE WEEKLY PROGRESS MONITORING REPORT (SUMMARY)', 8);
   
-  wprSummaryData.forEach((item, index) => {
-    const formattedPlan = item.isCurrency ? `Rs. ${num(item.plan).toLocaleString('en-IN')}` : item.plan;
-    const formattedAchieved = item.isCurrency ? `Rs. ${num(item.achieved).toLocaleString('en-IN')}` : item.achieved;
+  const startRow = b.row;
+  const weekNumStr = weekObj ? `Week ${weekObj.weekNum}` : 'Weekly';
+
+  // Row 1 of Header
+  b.writeRow(['Area of Review', 'Unit', 'Monthly', '', '', weekNumStr, '', ''], {
+    height: 24,
+    font: { bold: true, size: 10 },
+    fill: FILL_HEADER,
+    align: 'center',
+  });
+  // Row 2 of Header
+  b.writeRow(['', '', '', '', '', 'From', '', 'To'], {
+    height: 18,
+    font: { bold: true, size: 10 },
+    fill: FILL_HEADER,
+    align: 'center',
+  });
+  // Row 3 of Header
+  const formattedStart = formatWprDate(weekObj?.startDate || '—');
+  const formattedEnd = formatWprDate(weekObj?.endDate || '—');
+  b.writeRow(['', '', '', '', '', formattedStart, '', formattedEnd], {
+    height: 18,
+    font: { bold: true, size: 10 },
+    fill: FILL_HEADER,
+    align: 'center',
+  });
+  // Row 4 of Header
+  b.writeRow(['', '', 'Plan', 'Achieved', '% Achieved', 'Plan', 'Achieved', '% Achieved'], {
+    height: 18,
+    font: { bold: true, size: 10 },
+    fill: FILL_HEADER,
+    align: 'center',
+  });
+
+  // Merges for the Header
+  b.mergeRows(startRow, 1, startRow + 3, 1);     // Merge "Area of Review" vertically
+  b.mergeRows(startRow, 2, startRow + 3, 2);     // Merge "Unit" vertically
+  b.mergeRows(startRow, 3, startRow + 2, 5);     // Merge "Monthly" vertically and horizontally
+  b.mergeRows(startRow, 6, startRow, 8);         // Merge "Week X" horizontally
+  b.mergeRows(startRow + 1, 6, startRow + 1, 7); // Merge "From" horizontally
+  b.mergeRows(startRow + 2, 6, startRow + 2, 7); // Merge startDate horizontally
+
+  wprSummaryData.forEach((item) => {
+    let mPlan = item.monthlyPlan;
+    let mAchieved = item.monthlyAchieved;
+    let wPlan = item.weeklyPlan;
+    let wAchieved = item.weeklyAchieved;
+
+    if (item.isDate) {
+      mPlan = formatWprDate(mPlan);
+      mAchieved = formatWprDate(mAchieved);
+      wPlan = formatWprDate(wPlan);
+      wAchieved = formatWprDate(wAchieved);
+    } else if (item.isCurrency) {
+      mPlan = mPlan ? `Rs. ${num(mPlan).toLocaleString('en-IN')}` : '0';
+      mAchieved = mAchieved ? `Rs. ${num(mAchieved).toLocaleString('en-IN')}` : '0';
+      wPlan = wPlan ? `Rs. ${num(wPlan).toLocaleString('en-IN')}` : '0';
+      wAchieved = wAchieved ? `Rs. ${num(wAchieved).toLocaleString('en-IN')}` : '0';
+    }
+
     b.dataRow([
-      index + 1,
       item.name,
       item.unit,
-      formattedPlan,
-      formattedAchieved,
-      item.pct,
+      mPlan,
+      mAchieved,
+      item.monthlyPct,
+      wPlan,
+      wAchieved,
+      item.weeklyPct,
     ]);
   });
-  b.borderTable(sumHdr, b.row - 1);
+
+  // Write the Total row in Section A
+  const totRowIndex = b.subtotalRow([
+    'Total',
+    '—',
+    '—',
+    '—',
+    wprTotals.monthly,
+    '—',
+    '—',
+    wprTotals.weekly,
+  ]);
+
+  b.borderTable(startRow, totRowIndex, 1, 8);
   b.spacer(12);
 
   // --- Section B: Details ---
   wprDetailedSections.forEach((sec) => {
     if (!sec.subprojects || sec.subprojects.length === 0) return;
 
-    b.sectionTitle(sec.title);
-    const detailHdr = b.tableHeader(['Sr. No', `${sec.nameLabel} Details`, 'Plan', 'Achieved', '% Comp.', 'Remarks']);
+    b.sectionTitle(sec.title, 8);
+    const detailHdr = b.tableHeader(['Sr. No', `${sec.nameLabel} Details`, '', '', 'Plan', 'Achieved', '% Comp.', 'Remarks'], [[2, 4]], 8);
 
     let sectionPlanTotal = 0;
     let sectionAchievedTotal = 0;
 
     sec.subprojects.forEach((sub) => {
-      b.groupLabel(sub.subProjectName);
+      b.groupLabel(sub.subProjectName, 8);
 
       let subPlanTotal = 0;
       let subAchievedTotal = 0;
@@ -293,11 +374,13 @@ export async function buildWprExcelWorkbook({
         b.dataRow([
           idx + 1,
           r.name || '—',
+          '',
+          '',
           r.plan || '—',
           r.achieved || '—',
           r.pct !== null ? `${r.pct}%` : '—',
           r.remark || '—',
-        ]);
+        ], [[2, 4]], 'left', 8);
       });
 
       sectionPlanTotal += subPlanTotal;
@@ -307,23 +390,27 @@ export async function buildWprExcelWorkbook({
       b.subtotalRow([
         '',
         `${sub.subProjectName} Subtotal`,
+        '',
+        '',
         subPlanTotal,
         subAchievedTotal,
         `${subPct}%`,
         '',
-      ]);
+      ], [[2, 4]], 8);
     });
 
     const overallPct = sectionPlanTotal > 0 ? Math.min(Math.round((sectionAchievedTotal / sectionPlanTotal) * 100), 100) : 0;
     const totRow = b.subtotalRow([
       '',
       'Section Total',
+      '',
+      '',
       sectionPlanTotal,
       sectionAchievedTotal,
       `${overallPct}%`,
       '',
-    ]);
-    b.borderTable(detailHdr, totRow);
+    ], [[2, 4]], 8);
+    b.borderTable(detailHdr, totRow, 1, 8);
     b.spacer(12);
   });
 
