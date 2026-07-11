@@ -351,7 +351,7 @@ export async function buildWprExcelWorkbook({
 
   // --- Section B: Details ---
   wprDetailedSections.forEach((sec) => {
-    if (!sec.subprojects || sec.subprojects.length === 0) return;
+    if (!sec.rows || sec.rows.length === 0) return;
 
     b.sectionTitle(sec.title, 8);
     const detailHdr = b.tableHeader(['Sr. No', `${sec.nameLabel} Details`, '', '', 'Plan', 'Achieved', '% Comp.', 'Remarks'], [[2, 4]], 8);
@@ -359,50 +359,28 @@ export async function buildWprExcelWorkbook({
     let sectionPlanTotal = 0;
     let sectionAchievedTotal = 0;
 
-    sec.subprojects.forEach((sub) => {
-      b.groupLabel(sub.subProjectName, 8);
+    sec.rows.forEach((r, idx) => {
+      const planVal = num(r.plan);
+      const achievedVal = num(r.achieved);
+      sectionPlanTotal += planVal;
+      sectionAchievedTotal += achievedVal;
 
-      let subPlanTotal = 0;
-      let subAchievedTotal = 0;
-
-      sub.rows.forEach((r, idx) => {
-        const planVal = num(r.plan);
-        const achievedVal = num(r.achieved);
-        subPlanTotal += planVal;
-        subAchievedTotal += achievedVal;
-
-        b.dataRow([
-          idx + 1,
-          r.name || '—',
-          '',
-          '',
-          r.plan || '—',
-          r.achieved || '—',
-          r.pct !== null ? `${r.pct}%` : '—',
-          r.remark || '—',
-        ], [[2, 4]], 'left', 8);
-      });
-
-      sectionPlanTotal += subPlanTotal;
-      sectionAchievedTotal += subAchievedTotal;
-
-      const subPct = subPlanTotal > 0 ? Math.min(Math.round((subAchievedTotal / subPlanTotal) * 100), 100) : 0;
-      b.subtotalRow([
-        '',
-        `${sub.subProjectName} Subtotal`,
+      b.dataRow([
+        idx + 1,
+        r.name || '—',
         '',
         '',
-        subPlanTotal,
-        subAchievedTotal,
-        `${subPct}%`,
-        '',
-      ], [[2, 4]], 8);
+        r.plan || '—',
+        r.achieved || '—',
+        r.pct !== null ? `${r.pct}%` : '—',
+        r.remark || '—',
+      ], [[2, 4]], 'left', 8);
     });
 
     const overallPct = sectionPlanTotal > 0 ? Math.min(Math.round((sectionAchievedTotal / sectionPlanTotal) * 100), 100) : 0;
     const totRow = b.subtotalRow([
       '',
-      'Section Total',
+      'Total',
       '',
       '',
       sectionPlanTotal,

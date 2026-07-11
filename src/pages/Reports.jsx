@@ -535,28 +535,24 @@ export default function Reports() {
     ];
 
     return sections.map(sec => {
-      const subprojectRows = [];
+      const allRows = [];
       parsedWprReports.forEach(report => {
-        const sub = subProjects.find(s => s.id === report.sub_project_id);
         const rows = report.parsedForm?.[sec.key] || [];
         const validRows = rows.filter(r => r.name);
-        if (validRows.length) {
-          subprojectRows.push({
-            subProjectName: sub?.name || 'Unassigned Subproject',
-            rows: validRows.map(r => ({
-              ...r,
-              pct: calcPct(r.plan, r.achieved)
-            }))
+        validRows.forEach(r => {
+          allRows.push({
+            ...r,
+            pct: calcPct(r.plan, r.achieved)
           });
-        }
+        });
       });
 
       return {
         ...sec,
-        subprojects: subprojectRows
+        rows: allRows
       };
     });
-  }, [parsedWprReports, subProjects]);
+  }, [parsedWprReports]);
 
   // Helper date formatter
   const formatDateDMY = (dateStr) => {
@@ -1660,7 +1656,7 @@ Format with markdown. Be specific, professional, and actionable.`;
 
                 {/* 2. Detailed Cards Loop */}
                 {wprDetailedSections.map((sec) => {
-                  if (!sec.subprojects || sec.subprojects.length === 0) return null;
+                  if (!sec.rows || sec.rows.length === 0) return null;
 
                   return (
                     <Card key={sec.key} className="wpr-detail-card shadow-sm border p-6 bg-white">
@@ -1682,39 +1678,33 @@ Format with markdown. Be specific, professional, and actionable.`;
                               </tr>
                             </thead>
                             <tbody>
-                              {sec.subprojects.map((sub) => {
-                                const subPlanTotal = sub.rows.reduce((s, r) => s + (Number(r.plan) || 0), 0);
-                                const subAchievedTotal = sub.rows.reduce((s, r) => s + (Number(r.achieved) || 0), 0);
-                                const subPct = subPlanTotal > 0 ? Math.min(Math.round((subAchievedTotal / subPlanTotal) * 100), 100) : 0;
-
+                              {sec.rows.map((r, idx) => (
+                                <tr key={idx} className="border-b hover:bg-slate-50/50">
+                                  <td className="p-2.5 text-center text-muted-foreground border-r">{idx + 1}</td>
+                                  <td className="p-2.5 border-r font-medium text-slate-700">{r.name}</td>
+                                  <td className="p-2.5 border-r text-right font-mono">{r.plan || '—'}</td>
+                                  <td className="p-2.5 border-r text-right font-mono font-bold text-slate-900 bg-amber-50/5">{r.achieved || '—'}</td>
+                                  <td className="p-2.5 border-r text-right font-mono font-bold text-emerald-600 bg-emerald-50/5">
+                                    {r.pct !== null ? `${r.pct}%` : '—'}
+                                  </td>
+                                  <td className="p-2.5 text-slate-600">{r.remark || '—'}</td>
+                                </tr>
+                              ))}
+                              {(() => {
+                                const sectionPlanTotal = sec.rows.reduce((s, r) => s + (Number(r.plan) || 0), 0);
+                                const sectionAchievedTotal = sec.rows.reduce((s, r) => s + (Number(r.achieved) || 0), 0);
+                                const sectionPct = sectionPlanTotal > 0 ? Math.min(Math.round((sectionAchievedTotal / sectionPlanTotal) * 100), 100) : 0;
                                 return (
-                                  <React.Fragment key={sub.subProjectName}>
-                                    <tr className="bg-slate-50/80 font-bold border-b text-primary">
-                                      <td colSpan={6} className="p-2 pl-4 text-xs font-bold border-b">{sub.subProjectName}</td>
-                                    </tr>
-                                    {sub.rows.map((r, idx) => (
-                                      <tr key={idx} className="border-b hover:bg-slate-50/50">
-                                        <td className="p-2.5 text-center text-muted-foreground border-r">{idx + 1}</td>
-                                        <td className="p-2.5 border-r font-medium text-slate-700">{r.name}</td>
-                                        <td className="p-2.5 border-r text-right font-mono">{r.plan || '—'}</td>
-                                        <td className="p-2.5 border-r text-right font-mono font-bold text-slate-900 bg-amber-50/5">{r.achieved || '—'}</td>
-                                        <td className="p-2.5 border-r text-right font-mono font-bold text-emerald-600 bg-emerald-50/5">
-                                          {r.pct !== null ? `${r.pct}%` : '—'}
-                                        </td>
-                                        <td className="p-2.5 text-slate-600">{r.remark || '—'}</td>
-                                      </tr>
-                                    ))}
-                                    <tr className="bg-slate-100/50 font-bold border-b text-slate-700">
-                                      <td className="p-2 text-center border-r"></td>
-                                      <td className="p-2 border-r">{sub.subProjectName} Subtotal</td>
-                                      <td className="p-2 border-r text-right font-mono">{subPlanTotal}</td>
-                                      <td className="p-2 border-r text-right font-mono">{subAchievedTotal}</td>
-                                      <td className="p-2 border-r text-right font-mono text-emerald-700">{subPct}%</td>
-                                      <td className="p-2"></td>
-                                    </tr>
-                                  </React.Fragment>
+                                  <tr className="bg-slate-100/50 font-bold border-b text-slate-700">
+                                    <td className="p-2 text-center border-r"></td>
+                                    <td className="p-2 border-r">Total</td>
+                                    <td className="p-2 border-r text-right font-mono">{sectionPlanTotal}</td>
+                                    <td className="p-2 border-r text-right font-mono">{sectionAchievedTotal}</td>
+                                    <td className="p-2 border-r text-right font-mono text-emerald-700">{sectionPct}%</td>
+                                    <td className="p-2"></td>
+                                  </tr>
                                 );
-                              })}
+                              })()}
                             </tbody>
                           </table>
                         </div>
