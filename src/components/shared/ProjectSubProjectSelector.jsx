@@ -11,6 +11,7 @@ export default function ProjectSubProjectSelector({
   projectLabel = 'Project *',
   subProjectLabel = 'Sub Project *',
   className = '',
+  children,
 }) {
   return (
     <div className={`flex flex-col sm:flex-row gap-3 sm:items-end ${className}`}>
@@ -44,6 +45,7 @@ export default function ProjectSubProjectSelector({
           </SelectContent>
         </Select>
       </div>
+      {children}
     </div>
   );
 }

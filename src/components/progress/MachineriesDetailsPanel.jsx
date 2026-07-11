@@ -116,6 +116,31 @@ export default forwardRef(function MachineriesDetailsPanel({
     });
   }, [rows, allMachineryEntries, selectedDate]);
 
+  const machineryNameSuggestions = useMemo(() => {
+    const byKey = new Map();
+
+    allMachineryEntries.forEach((entry) => {
+      const machineryName = (entry.machinery_name || '').trim();
+      if (!machineryName) return;
+
+      const key = machineryName.toLowerCase();
+      const existing = byKey.get(key);
+
+      if (!existing || normalizeDateKey(entry.date) > normalizeDateKey(existing.lastDate)) {
+        byKey.set(key, {
+          machinery_name: machineryName,
+          nos: entry.nos !== null && entry.nos !== undefined ? String(entry.nos) : '',
+          rate: entry.rate !== null && entry.rate !== undefined ? String(entry.rate) : '',
+          lastDate: entry.date,
+        });
+      }
+    });
+
+    return Array.from(byKey.values()).sort((a, b) => a.machinery_name.localeCompare(b.machinery_name));
+  }, [allMachineryEntries]);
+
+  const suggestionListId = 'machinery-name-suggestions';
+
   // Aggregate stats for cards
   const stats = useMemo(() => {
     let totalMachines = 0;
@@ -181,7 +206,7 @@ export default forwardRef(function MachineriesDetailsPanel({
       { key: 'sr', label: 'Sr.' },
       { key: 'machinery_name', label: 'Machinery' },
       { key: 'nos', label: 'Nos' },
-      { key: 'todays_hours', label: 'Today Hours' },
+      { key: 'todays_hours', label: "Today's Total Hours" },
       { key: 'todays_amount', label: 'Today Amount', render: (r) => formatCurrencyINR(r.todays_amount) },
     ],
     rows: calculatedRows
@@ -234,6 +259,25 @@ export default forwardRef(function MachineriesDetailsPanel({
     setRows(prev => prev.map((row, i) => i === index ? { ...row, [field]: value } : row));
   };
 
+  const handleMachineryNameChange = (index, value) => {
+    handleUpdateField(index, 'machinery_name', value);
+
+    const match = machineryNameSuggestions.find(
+      (item) => item.machinery_name.toLowerCase() === value.trim().toLowerCase()
+    );
+    if (!match) return;
+
+    setRows((prev) => prev.map((row, i) => {
+      if (i !== index) return row;
+      return {
+        ...row,
+        machinery_name: match.machinery_name,
+        nos: row.nos?.trim() ? row.nos : match.nos,
+        rate: row.rate?.trim() ? row.rate : match.rate,
+      };
+    }));
+  };
+
   const isLoading = allLoading || dateLoading;
 
   if (isLoading) {
@@ -264,6 +308,14 @@ export default forwardRef(function MachineriesDetailsPanel({
 
         {/* Table Form Layout */}
         <Card className="overflow-hidden border shadow-sm">
+          <datalist id={suggestionListId}>
+            {machineryNameSuggestions.map((item) => (
+              <option key={item.machinery_name} value={item.machinery_name}>
+                {item.nos ? `Nos: ${item.nos}` : 'Previously used machinery'}
+                {item.rate ? ` | Rate: ${item.rate}` : ''}
+              </option>
+            ))}
+          </datalist>
           <div className="overflow-x-auto">
             <table className="w-full text-sm font-sans border-collapse min-w-[1200px]">
               <thead>
@@ -309,7 +361,7 @@ export default forwardRef(function MachineriesDetailsPanel({
                   </th>
                   <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[140px]">
                     <div className="flex items-center justify-end gap-1 select-none">
-                      <span>Todays Total Tour *</span>
+                      <span>Todays Total Hours *</span>
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
@@ -385,7 +437,7 @@ export default forwardRef(function MachineriesDetailsPanel({
                       </Tooltip>
                     </div>
                   </th>
-                <th className="text-center p-3 font-semibold text-xs text-muted-foreground uppercase w-[90px]">Actions</th>
+                <th className="text-center p-3 font-semibold text-xs text-muted-foreground uppercase w-[90px]">Add/Remove</th>
               </tr>
             </thead>
             <tbody>
@@ -395,12 +447,14 @@ export default forwardRef(function MachineriesDetailsPanel({
                   <td className="p-2.5">
                     <Input
                       type="text"
+                      list={machineryNameSuggestions.length > 0 ? suggestionListId : undefined}
                       value={row.machinery_name}
-                      onChange={e => handleUpdateField(index, 'machinery_name', e.target.value)}
+                      onChange={(e) => handleMachineryNameChange(index, e.target.value)}
                       placeholder="e.g. JCB, Hydra Crane, Transit Mixer"
                       disabled={isDateLocked}
                       className="h-8.5 text-xs bg-background"
                       required
+                      autoComplete="off"
                     />
                   </td>
 
@@ -428,7 +482,7 @@ export default forwardRef(function MachineriesDetailsPanel({
                     />
                   </td>
 
-                  {/* Todays Total Tour (input for todays hours) */}
+                  {/* Todays Total Hours */}
                   <td className="p-2.5">
                     <Input
                       type="number"

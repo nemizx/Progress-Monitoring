@@ -18,7 +18,6 @@ const createEmptyRow = () => ({
   id: `row_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
   name: '',
   designation: '',
-  remark: '',
 });
 
 export default forwardRef(function TechnicalStaffAttendancePanel({
@@ -128,7 +127,6 @@ export default forwardRef(function TechnicalStaffAttendancePanel({
       .map((row) => ({
         name: row.name.trim(),
         designation: row.designation.trim(),
-        remark: row.remark.trim(),
       }))
       .filter((row) => row.name && row.designation);
 
@@ -153,6 +151,12 @@ export default forwardRef(function TechnicalStaffAttendancePanel({
   const absentCount = staffMembers.filter((staff) => attendanceByStaffId.get(staff.id)?.status === 'absent').length;
   const unmarkedCount = staffMembers.length - presentCount - absentCount;
 
+  const formatAttendanceStatus = (status) => {
+    if (status === 'present') return 'Present';
+    if (status === 'absent') return 'Absent';
+    return 'Not marked';
+  };
+
   const getReviewData = useCallback(() => ({
     title: 'B. Technical Staff Attendance',
     columns: [
@@ -160,14 +164,12 @@ export default forwardRef(function TechnicalStaffAttendancePanel({
       { key: 'name', label: 'Name' },
       { key: 'designation', label: 'Designation' },
       { key: 'status', label: 'Attendance' },
-      { key: 'remark', label: 'Remark' },
     ],
     rows: staffMembers.map((staff, i) => ({
       sr: i + 1,
       name: staff.name,
       designation: staff.designation || '—',
-      status: attendanceByStaffId.get(staff.id)?.status || 'Unmarked',
-      remark: staff.remark || '—',
+      status: formatAttendanceStatus(attendanceByStaffId.get(staff.id)?.status),
     })),
   }), [staffMembers, attendanceByStaffId]);
 
@@ -245,7 +247,6 @@ export default forwardRef(function TechnicalStaffAttendancePanel({
               <tr className="border-b bg-muted/50">
                 <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase">Name</th>
                 <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase">Designation</th>
-                <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase">Remark</th>
                 <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase">Attendance</th>
               </tr>
             </thead>
@@ -258,9 +259,6 @@ export default forwardRef(function TechnicalStaffAttendancePanel({
                   <tr key={staff.id} className="border-b hover:bg-muted/20 transition-colors">
                     <td className="p-3 font-medium">{staff.name}</td>
                     <td className="p-3 text-muted-foreground">{staff.designation}</td>
-                    <td className="p-3 text-muted-foreground max-w-xs truncate" title={staff.remark}>
-                      {staff.remark || '—'}
-                    </td>
                     <td className="p-3">
                       <div className="flex items-center gap-2">
                         <Select
@@ -336,10 +334,9 @@ function AddStaffDialog({
         </DialogHeader>
 
         <form onSubmit={onSubmit} className="space-y-4 pt-2">
-          <div className="hidden md:grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto] gap-3 px-1">
+          <div className="hidden md:grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] gap-3 px-1">
             <Label className="text-xs font-semibold">Staff Name *</Label>
             <Label className="text-xs font-semibold">Designation *</Label>
-            <Label className="text-xs font-semibold">Remark</Label>
             <span />
           </div>
 
@@ -347,7 +344,7 @@ function AddStaffDialog({
             {staffRows.map((row, index) => (
               <div
                 key={row.id}
-                className="grid grid-cols-1 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto] gap-3 items-start border rounded-lg p-3 bg-muted/10"
+                className="grid grid-cols-1 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] gap-3 items-start border rounded-lg p-3 bg-muted/10"
               >
                 <div className="space-y-1.5">
                   <Label className="text-xs font-semibold md:hidden">Staff Name *</Label>
@@ -363,14 +360,6 @@ function AddStaffDialog({
                     placeholder="e.g. JE, Site Engineer"
                     value={row.designation}
                     onChange={(e) => updateRow(row.id, 'designation', e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold md:hidden">Remark</Label>
-                  <Input
-                    placeholder="Optional remark..."
-                    value={row.remark}
-                    onChange={(e) => updateRow(row.id, 'remark', e.target.value)}
                   />
                 </div>
                 <div className="flex items-center justify-end gap-1.5 pt-0 md:pt-1">

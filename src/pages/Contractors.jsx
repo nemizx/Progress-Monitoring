@@ -903,7 +903,7 @@ export default function Contractors() {
                       <th className="text-left p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap max-w-[160px]">Type of work</th>
                       <th className="text-left p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap w-[120px]">Vendor Category</th>
                       <th className="text-left p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap max-w-[140px]">Remark</th>
-                      <th className="text-right p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap w-[80px]">Actions</th>
+                      <th className="text-right p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap w-[80px]">Add/Remove</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">

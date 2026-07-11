@@ -69,7 +69,8 @@ const entityNames = [
   'StatusReport',
   'SpecialSiteVisit',
   'CriticalIssue',
-  'NextDaysPlan'
+  'NextDaysPlan',
+  'WprReport'
 ];
 
 const entities = {};

@@ -15,7 +15,6 @@ const createEmptyRow = () => ({
   id: `row_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
   name: '',
   designation: '',
-  remark: '',
 });
 
 export default function TechnicalStaff() {
@@ -95,7 +94,6 @@ export default function TechnicalStaff() {
       .map((row) => ({
         name: row.name.trim(),
         designation: row.designation.trim(),
-        remark: row.remark.trim(),
       }))
       .filter((row) => row.name && row.designation);
 
@@ -191,8 +189,7 @@ export default function TechnicalStaff() {
                 <tr className="border-b bg-muted/30">
                   <th className="text-left p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground">Name</th>
                   <th className="text-left p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground">Designation</th>
-                  <th className="text-left p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground">Remark</th>
-                  <th className="text-right p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground">Actions</th>
+                  <th className="text-right p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground">Add/Remove</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -204,13 +201,6 @@ export default function TechnicalStaff() {
                         <Briefcase className="w-3.5 h-3.5 opacity-60 text-primary" />
                         <span>{staff.designation}</span>
                       </div>
-                    </td>
-                    <td className="p-3.5 text-muted-foreground max-w-xs">
-                      {staff.remark ? (
-                        <span className="truncate block" title={staff.remark}>{staff.remark}</span>
-                      ) : (
-                        <span className="italic text-muted-foreground/55">No remark</span>
-                      )}
                     </td>
                     <td className="p-3.5 text-right">
                       <Button
@@ -246,10 +236,9 @@ export default function TechnicalStaff() {
           </DialogHeader>
 
           <form onSubmit={handleSubmitStaff} className="space-y-4 pt-2">
-            <div className="hidden md:grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto] gap-3 px-1">
+            <div className="hidden md:grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] gap-3 px-1">
               <Label className="text-xs font-semibold">Staff Name *</Label>
               <Label className="text-xs font-semibold">Designation *</Label>
-              <Label className="text-xs font-semibold">Remark</Label>
               <span />
             </div>
 
@@ -257,7 +246,7 @@ export default function TechnicalStaff() {
               {staffRows.map((row, index) => (
                 <div
                   key={row.id}
-                  className="grid grid-cols-1 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto] gap-3 items-start border rounded-lg p-3 bg-muted/10"
+                  className="grid grid-cols-1 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] gap-3 items-start border rounded-lg p-3 bg-muted/10"
                 >
                   <div className="space-y-1.5">
                     <Label className="text-xs font-semibold md:hidden">Staff Name *</Label>
@@ -273,14 +262,6 @@ export default function TechnicalStaff() {
                       placeholder="e.g. JE, Site Engineer"
                       value={row.designation}
                       onChange={(e) => updateRow(row.id, 'designation', e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold md:hidden">Remark</Label>
-                    <Input
-                      placeholder="Optional remark..."
-                      value={row.remark}
-                      onChange={(e) => updateRow(row.id, 'remark', e.target.value)}
                     />
                   </div>
                   <div className="flex items-center justify-end gap-1.5 pt-0 md:pt-1">

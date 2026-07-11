@@ -89,7 +89,8 @@ const tableMap = {
   'StatusReport': 'status_reports',
   'SpecialSiteVisit': 'special_site_visits',
   'CriticalIssue': 'critical_issues',
-  'NextDaysPlan': 'next_days_plans'
+  'NextDaysPlan': 'next_days_plans',
+  'WprReport': 'wpr_reports'
 };
 
 const TABLES_WITH_CREATED_BY = new Set(['projects']);
@@ -1214,6 +1215,24 @@ async function ensureExtendedTables() {
       created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE (contractor_id, date, sub_project_id)
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS wpr_reports (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+      week_id VARCHAR(100) NOT NULL,
+      week_start DATE NOT NULL,
+      week_end DATE NOT NULL,
+      status VARCHAR(50) DEFAULT 'draft',
+      form_data TEXT,
+      submitted_by VARCHAR(255),
+      submitted_at TIMESTAMP,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (project_id, sub_project_id, week_id)
     )
   `);
 

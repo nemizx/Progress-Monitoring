@@ -13,6 +13,7 @@ import {
   Calendar, Wrench, Clock, Coins, Package, HelpCircle, FileSpreadsheet
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import ContractorLabourTable from '@/components/progress/ContractorLabourTable';
 import ReactMarkdown from 'react-markdown';
 import StatCard from '@/components/shared/StatCard';
 import StatusBadge from '@/components/shared/StatusBadge';
@@ -436,8 +437,14 @@ export default function Reports() {
 
   // --- Dynamic Calculations for Technical Staff Details ---
   const technicalStaffData = useMemo(() => {
+    const formatAttendanceStatus = (status) => {
+      if (status === 'present') return 'Present';
+      if (status === 'absent') return 'Absent';
+      return 'Not marked';
+    };
+
     return staffAttendance
-      .filter((row) => row.status === 'present')
+      .filter((row) => row.status === 'present' || row.status === 'absent')
       .map((row, i) => {
       const matchedStaff = technicalStaff.find(s => s.id === row.technical_staff_id);
       return {
@@ -445,7 +452,7 @@ export default function Reports() {
         srNo: i + 1,
         name: matchedStaff?.name || 'Unknown Employee',
         designation: matchedStaff?.designation || 'Staff',
-        remarks: matchedStaff?.remark || ''
+        remarks: formatAttendanceStatus(row.status),
       };
     });
   }, [staffAttendance, technicalStaff]);
@@ -724,120 +731,93 @@ Format with markdown. Be specific, professional, and actionable.`;
               </CardContent>
             </Card>
 
-            {/* B & C: Technical Staff & Contractor Labours */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* B. Technical Staff Details */}
-              <Card className="shadow-sm border">
-                <CardHeader className="pb-3 border-b bg-muted/20">
-                  <CardTitle className="text-sm font-semibold">B. TECHNICAL STAFF DETAILS</CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-muted/40 border-b">
-                        <th className="p-2 text-center w-[60px] border-r">Sr. No</th>
-                        <th className="p-2 text-left border-r">Staff Name</th>
-                        <th className="p-2 text-left border-r">Designation</th>
-                        <th className="p-2 text-left">Remark</th>
+            {/* B. Technical Staff */}
+            <Card className="shadow-sm border">
+              <CardHeader className="pb-3 border-b bg-muted/20">
+                <CardTitle className="text-sm font-semibold">B. TECHNICAL STAFF DETAILS</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-muted/40 border-b">
+                      <th className="p-2 text-center w-[60px] border-r">Sr. No</th>
+                      <th className="p-2 text-left border-r">Staff Name</th>
+                      <th className="p-2 text-left border-r">Designation</th>
+                      <th className="p-2 text-left">Remark</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {technicalStaffData.map(s => (
+                      <tr key={s.id} className="border-b">
+                        <td className="p-2 text-center text-muted-foreground border-r">{s.srNo}</td>
+                        <td className="p-2 border-r font-semibold text-foreground">{s.name}</td>
+                        <td className="p-2 border-r text-muted-foreground">{s.designation}</td>
+                        <td className="p-2 text-muted-foreground">{s.remarks || '—'}</td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {technicalStaffData.map(s => (
-                        <tr key={s.id} className="border-b">
-                          <td className="p-2 text-center text-muted-foreground border-r">{s.srNo}</td>
-                          <td className="p-2 border-r font-semibold text-foreground">{s.name}</td>
-                          <td className="p-2 border-r text-muted-foreground">{s.designation}</td>
-                          <td className="p-2 text-muted-foreground">{s.remarks || '—'}</td>
-                        </tr>
-                      ))}
-                      {technicalStaffData.length === 0 && (
-                        <tr>
-                          <td colSpan={4} className="text-center p-6 text-muted-foreground">No technical staff attendance entries present for this date.</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </CardContent>
-              </Card>
+                    ))}
+                    {technicalStaffData.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="text-center p-6 text-muted-foreground">No technical staff attendance entries for this date.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
 
-              {/* C. Contractor Labour preview */}
-              <Card className="shadow-sm border">
-                <CardHeader className="pb-3 border-b bg-muted/20">
-                  <CardTitle className="text-sm font-semibold">C. BUILDING WISE MANPOWER DETAILS & ALLOCATION (Bifurcated)</CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs min-w-[700px]">
-                      <thead>
-                        <tr className="bg-muted/40 border-b">
-                          <th className="p-2 text-center w-[50px] border-r">Sr No</th>
-                          <th className="p-2 text-left border-r">Contractor</th>
-                          <th className="p-2 text-center w-[60px] border-r">Unit</th>
-                          <th className="p-2 text-center border-r" colSpan={3}>Skilled (C / B / M)</th>
-                          <th className="p-2 text-center border-r" colSpan={2}>Semi-Skilled (CH / BH)</th>
-                          <th className="p-2 text-center border-r" colSpan={2}>Unskilled (MC / FC)</th>
-                          <th className="p-2 text-right w-[80px]">Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(() => {
-                           const LabourRow = ({ l, idx }) => (
-                             <tr key={l.id} className="border-b">
-                               <td className="p-2 text-center text-muted-foreground border-r">{idx + 1}</td>
-                               <td className="p-2 border-r font-semibold">{l.contractor_name}</td>
-                               <td className="p-2 border-r text-center">{l.unit}</td>
-                               <td className="p-2 text-center font-mono">{l.carpenter}</td>
-                               <td className="p-2 text-center font-mono">{l.barbender}</td>
-                               <td className="p-2 text-center border-r font-mono">{l.mason}</td>
-                               <td className="p-2 text-center font-mono">{l.carpenter_helper}</td>
-                               <td className="p-2 text-center border-r font-mono">{l.barbender_helper}</td>
-                               <td className="p-2 text-center font-mono">{l.mc}</td>
-                               <td className="p-2 text-center border-r font-mono">{l.fc}</td>
-                               <td className="p-2 text-right font-bold text-slate-800 font-mono bg-muted/10">{l.total}</td>
-                             </tr>
-                           );
-                           const assignedIds = new Set(subProjects.map(s => s.id));
-                           const unassigned = contractorLabourData.filter(l => !l.sub_project_id || !assignedIds.has(l.sub_project_id));
-                           const subSections = subProjects
-                             .map(sub => ({ sub, items: contractorLabourData.filter(l => l.sub_project_id === sub.id) }))
-                             .filter(({ items }) => items.length > 0);
-                           if (contractorLabourData.length === 0) {
-                             return (
-                               <tr>
-                                 <td colSpan={11} className="text-center p-6 text-muted-foreground">No contractor labour entries logged for this date.</td>
-                               </tr>
-                             );
-                           }
-                           let ctr = 0;
-                           return (
-                             <>
-                               {subSections.map(({ sub, items }) => (
-                                 <React.Fragment key={sub.id}>
-                                   <tr className="bg-primary/5 font-semibold text-primary">
-                                     <td colSpan={11} className="p-1.5 pl-4 text-xs font-bold border-b">{sub.name}</td>
-                                   </tr>
-                                   {items.map(l => <LabourRow key={l.id} l={l} idx={++ctr} />)}
-                                 </React.Fragment>
-                               ))}
-                               {unassigned.length > 0 && (
-                                 <React.Fragment>
-                                   {subSections.length > 0 && (
-                                     <tr className="bg-muted/30 font-semibold text-muted-foreground">
-                                       <td colSpan={11} className="p-1.5 pl-4 text-xs font-bold border-b">Other / Unassigned</td>
-                                     </tr>
-                                   )}
-                                   {unassigned.map(l => <LabourRow key={l.id} l={l} idx={++ctr} />)}
-                                 </React.Fragment>
-                               )}
-                             </>
-                           );
-                         })()}
-                      </tbody>
-                    </table>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+            {/* C. Contractor Labour preview */}
+            <Card className="shadow-sm border overflow-hidden">
+              <CardHeader className="pb-3 border-b bg-muted/20">
+                <CardTitle className="text-sm font-semibold">C. BUILDING WISE MANPOWER DETAILS & ALLOCATION (Bifurcated)</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                {(() => {
+                  const assignedIds = new Set(subProjects.map((s) => s.id));
+                  const unassigned = contractorLabourData.filter(
+                    (l) => !l.sub_project_id || !assignedIds.has(l.sub_project_id)
+                  );
+                  const subSections = subProjects
+                    .map((sub) => ({
+                      sub,
+                      items: contractorLabourData.filter((l) => l.sub_project_id === sub.id),
+                    }))
+                    .filter(({ items }) => items.length > 0);
+
+                  if (contractorLabourData.length === 0) {
+                    return (
+                      <p className="text-xs text-muted-foreground p-6 text-center">
+                        No contractor labour entries logged for this date.
+                      </p>
+                    );
+                  }
+
+                  const tableRows = [];
+                  let ctr = 0;
+                  subSections.forEach(({ sub, items }) => {
+                    tableRows.push({ _groupLabel: sub.name });
+                    items.forEach((l) => {
+                      tableRows.push({ ...l, sr: ++ctr });
+                    });
+                  });
+                  if (unassigned.length > 0) {
+                    if (subSections.length > 0) {
+                      tableRows.push({ _groupLabel: 'Other / Unassigned' });
+                    }
+                    unassigned.forEach((l) => {
+                      tableRows.push({ ...l, sr: ++ctr });
+                    });
+                  }
+
+                  return (
+                    <ContractorLabourTable
+                      rows={tableRows}
+                      showGroupLabels
+                      emptyMessage="No contractor labour entries logged for this date."
+                    />
+                  );
+                })()}
+              </CardContent>
+            </Card>
 
             {/* D. Material Status preview */}
             <Card className="shadow-sm border">

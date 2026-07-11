@@ -128,7 +128,29 @@ export default forwardRef(function MaterialStatusPanel({
     });
   }, [rows, allMaterialEntries, selectedDate]);
 
-  // Aggregate stats for cards
+  const materialDescriptionSuggestions = useMemo(() => {
+    const byKey = new Map();
+
+    allMaterialEntries.forEach((entry) => {
+      const description = (entry.description || '').trim();
+      if (!description) return;
+
+      const key = description.toLowerCase();
+      const existing = byKey.get(key);
+
+      if (!existing || normalizeDateKey(entry.date) > normalizeDateKey(existing.lastDate)) {
+        byKey.set(key, {
+          description,
+          unit: entry.unit || '',
+          lastDate: entry.date,
+        });
+      }
+    });
+
+    return Array.from(byKey.values()).sort((a, b) => a.description.localeCompare(b.description));
+  }, [allMaterialEntries]);
+
+  const suggestionListId = 'material-description-suggestions';
   const stats = useMemo(() => {
     let totalReceivedValueToday = 0;
     let totalConsumedValueToday = 0;
@@ -257,6 +279,24 @@ export default forwardRef(function MaterialStatusPanel({
     setRows(prev => prev.map((row, i) => i === index ? { ...row, [field]: value } : row));
   };
 
+  const handleDescriptionChange = (index, value) => {
+    handleUpdateField(index, 'description', value);
+
+    const match = materialDescriptionSuggestions.find(
+      (item) => item.description.toLowerCase() === value.trim().toLowerCase()
+    );
+    if (!match) return;
+
+    setRows((prev) => prev.map((row, i) => {
+      if (i !== index) return row;
+      return {
+        ...row,
+        description: match.description,
+        unit: row.unit?.trim() ? row.unit : match.unit,
+      };
+    }));
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -284,6 +324,13 @@ export default forwardRef(function MaterialStatusPanel({
 
         {/* Table Form Layout */}
         <Card className="overflow-hidden border shadow-sm">
+          <datalist id={suggestionListId}>
+            {materialDescriptionSuggestions.map((item) => (
+              <option key={item.description} value={item.description}>
+                {item.unit ? `${item.unit}` : 'Previously used material'}
+              </option>
+            ))}
+          </datalist>
           <div className="overflow-x-auto">
             <table className="w-full text-sm font-sans border-collapse min-w-[1500px]">
               <thead>
@@ -320,7 +367,7 @@ export default forwardRef(function MaterialStatusPanel({
 
                   {/* Remarks & Actions */}
                   <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase w-[180px]">Remarks</th>
-                  <th className="text-center p-3 font-semibold text-xs text-muted-foreground uppercase w-[90px]">Actions</th>
+                  <th className="text-center p-3 font-semibold text-xs text-muted-foreground uppercase w-[90px]">Add/Remove</th>
                 </tr>
               </thead>
               <tbody>
@@ -333,12 +380,14 @@ export default forwardRef(function MaterialStatusPanel({
                     <td className="p-2 border-r">
                       <Input
                         type="text"
+                        list={materialDescriptionSuggestions.length > 0 ? suggestionListId : undefined}
                         value={row.description}
-                        onChange={e => handleUpdateField(index, 'description', e.target.value)}
+                        onChange={(e) => handleDescriptionChange(index, e.target.value)}
                         placeholder="e.g. Cement, TMT Steel, Sand"
                         disabled={isDateLocked}
                         className="h-8 text-xs bg-background"
                         required
+                        autoComplete="off"
                       />
                     </td>
 

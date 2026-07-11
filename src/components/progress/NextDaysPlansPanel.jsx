@@ -5,8 +5,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, Plus, Minus, ClipboardList, HelpCircle } from 'lucide-react';
-import StatCard from '@/components/shared/StatCard';
+import { Loader2, Plus, Minus, HelpCircle } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { useDprPanelRef } from '@/components/progress/useDprPanelRef';
 
@@ -156,8 +155,6 @@ export default forwardRef(function NextDaysPlansPanel({
     );
   }
 
-  const validEntriesCount = rows.filter(r => r.description.trim()).length;
-
   return (
     <TooltipProvider>
       <div className="space-y-4">
@@ -166,12 +163,6 @@ export default forwardRef(function NextDaysPlansPanel({
             DPR is locked for this date. Next day's plan cannot be changed.
           </div>
         )}
-
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <StatCard title="Planned Items" value={validEntriesCount} icon={ClipboardList} />
-          <StatCard title="Locked State" value={isDateLocked ? "Locked" : "Editable"} icon={ClipboardList} />
-        </div>
 
         {/* Table Form Layout */}
         <Card className="overflow-hidden border shadow-sm">
@@ -218,7 +209,7 @@ export default forwardRef(function NextDaysPlansPanel({
                       </Tooltip>
                     </div>
                   </th>
-                  <th className="text-center p-3 font-semibold text-xs text-muted-foreground uppercase w-[100px]">Actions</th>
+                  <th className="text-center p-3 font-semibold text-xs text-muted-foreground uppercase w-[100px]">Add/Remove</th>
                 </tr>
               </thead>
               <tbody>

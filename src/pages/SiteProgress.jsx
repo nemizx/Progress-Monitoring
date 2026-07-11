@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,7 +11,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
-import { ClipboardList, CheckCircle2, Clock, AlertTriangle, Calendar, Check, Save, X, ChevronsUpDown } from 'lucide-react';
+import { ClipboardList, CheckCircle2, Clock, AlertTriangle, Calendar, Save, X, ChevronsUpDown } from 'lucide-react';
 import EmptyState from '@/components/shared/EmptyState';
 import { formatCompactCurrencyINR, formatCurrencyINR, normalizeDateKey } from '@/lib/formatters';
 import { useAuth } from '@/lib/AuthContext';
@@ -27,10 +28,36 @@ import SpecialSiteVisitsPanel from '@/components/progress/SpecialSiteVisitsPanel
 import CriticalIssuesPanel from '@/components/progress/CriticalIssuesPanel';
 import NextDaysPlansPanel from '@/components/progress/NextDaysPlansPanel';
 import DprReviewDialog from '@/components/progress/DprReviewDialog';
+import WprSheetPanel from '@/components/progress/WprSheetPanel';
 import { filterBudgetBySubProject, filterProgressBySubProject, filterWbsBySubProject } from '@/lib/subProjectScope';
+import { buildWprWeeksList, getDefaultWprWeekId } from '@/lib/wprWeeks';
 
 const weatherIcons = { clear: '☀️', cloudy: '⛅', rainy: '🌧️', stormy: '⛈️', hot: '🌡️' };
 const normalizeActivityKey = (value) => String(value || '').trim().toLowerCase();
+
+const TAB_FROM_PARAM = { dpr: 'sheet', wpr: 'wpr', mpr: 'mpr', history: 'history' };
+const PARAM_FROM_TAB = { sheet: 'dpr', wpr: 'wpr', mpr: 'mpr', history: 'history' };
+const TAB_TITLES = { sheet: 'DPR', wpr: 'WPR', mpr: 'MPR', history: 'Aggregated Logs & History' };
+
+const highlightText = (text, highlight) => {
+  if (!text) return '—';
+  if (!highlight || !highlight.trim()) return text;
+  const escaped = highlight.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+  const parts = text.split(new RegExp(`(${escaped})`, 'gi'));
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.toLowerCase() === highlight.toLowerCase() ? (
+          <mark key={i} className="bg-amber-100 text-amber-950 font-semibold px-0.5 rounded">
+            {part}
+          </mark>
+        ) : (
+          part
+        )
+      )}
+    </>
+  );
+};
 
 const mapForecastToWeatherCondition = (weatherCode, maxTemp) => {
   const code = Number(weatherCode);
@@ -49,6 +76,7 @@ export default function SiteProgress() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const {
     projects, subProjects, wbsItems: allWbsItems, projectId, subProjectId,
@@ -56,7 +84,17 @@ export default function SiteProgress() {
   } = useProjectSubProject({ fetchWbs: true });
 
   const [typeFilter, setTypeFilter] = useState('');
-  const [activeTab, setActiveTab] = useState('sheet'); // 'sheet', 'wpr', 'mpr', 'history'
+  const tabParam = searchParams.get('tab') || 'dpr';
+  const activeTab = TAB_FROM_PARAM[tabParam] || 'sheet';
+
+  const setActiveTab = useCallback((tab) => {
+    const nextParam = PARAM_FROM_TAB[tab] || 'dpr';
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', nextParam);
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
   const [sheetSubTab, setSheetSubTab] = useState('dpr'); // 'dpr', 'staff-attendance'
   const [dprState, setDprState] = useState({});
   const [manualRowIds, setManualRowIds] = useState([]);
@@ -72,7 +110,7 @@ export default function SiteProgress() {
   const [lockedScopes, setLockedScopes] = useState({});
   
   const [activityPickerOpen, setActivityPickerOpen] = useState(false);
-  const [selectedActivityId, setSelectedActivityId] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const weatherManualRef = useRef(false);
   const contractorRef = useRef(null);
   const staffRef = useRef(null);
@@ -117,43 +155,13 @@ export default function SiteProgress() {
   };
 
   const [selectedReportDate, setSelectedReportDate] = useState(getLocalDateString());
-  const formattedSelectedDate = new Date(selectedReportDate).toLocaleDateString('en-IN', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
-  });
 
-  const getWeeksList = () => {
-    const weeks = [];
-    const curr = new Date();
-    for (let i = 0; i < 8; i++) {
-      const startOfWeek = new Date(curr);
-      const day = startOfWeek.getDay();
-      const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1) - (i * 7);
-      startOfWeek.setDate(diff);
-      
-      const endOfWeek = new Date(startOfWeek);
-      endOfWeek.setDate(startOfWeek.getDate() + 6);
-      
-      const startStr = startOfWeek.toISOString().split('T')[0];
-      const endStr = endOfWeek.toISOString().split('T')[0];
-      
-      const tempDate = new Date(startOfWeek.getTime());
-      tempDate.setHours(0, 0, 0, 0);
-      tempDate.setDate(tempDate.getDate() + 3 - (tempDate.getDay() + 6) % 7);
-      const week1 = new Date(tempDate.getFullYear(), 0, 4);
-      const weekNum = 1 + Math.round(((tempDate.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
-      
-      weeks.push({
-        id: `week_${i}`,
-        label: `Week ${weekNum} (${startStr} to ${endStr})`,
-        startDate: startStr,
-        endDate: endStr
-      });
-    }
-    return weeks;
-  };
+  const formattedSelectedDate = useMemo(() => {
+    if (!selectedReportDate) return '';
+    const d = new Date(`${selectedReportDate}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return selectedReportDate;
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  }, [selectedReportDate]);
 
   const getMonthsList = () => {
     const months = [];
@@ -161,10 +169,12 @@ export default function SiteProgress() {
     for (let i = 0; i < 6; i++) {
       const d = new Date(curr.getFullYear(), curr.getMonth() - i, 1);
       const monthName = d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
-      const startStr = d.toISOString().split('T')[0];
-      const nextMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-      const endStr = nextMonth.toISOString().split('T')[0];
-      
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
+      const startStr = `${y}-${m}-01`;
+      const endStr = `${y}-${m}-${String(lastDay).padStart(2, '0')}`;
+
       months.push({
         id: `month_${i}`,
         label: monthName,
@@ -175,18 +185,66 @@ export default function SiteProgress() {
     return months;
   };
 
-  const weeksList = getWeeksList();
   const monthsList = getMonthsList();
 
-  const [selectedWeek, setSelectedWeek] = useState(weeksList[0]?.id || '');
+  const [selectedWeek, setSelectedWeek] = useState('');
   const [selectedMonth, setSelectedMonth] = useState(monthsList[0]?.id || '');
+  const [selectedWprMonth, setSelectedWprMonth] = useState('');
+
+  const weeksList = useMemo(
+    () => buildWprWeeksList({
+      projectStartDate: selectedProject?.start_date || selectedProject?.created_date || null,
+    }),
+    [selectedProject?.start_date, selectedProject?.created_date, projectId]
+  );
+
+  const wprMonths = useMemo(() => {
+    const months = [];
+    const seen = new Set();
+    for (const w of weeksList) {
+      if (!seen.has(w.monthKey)) {
+        seen.add(w.monthKey);
+        months.push({
+          key: w.monthKey,
+          label: w.monthLabel
+        });
+      }
+    }
+    return months;
+  }, [weeksList]);
+
+  const filteredWeeksForDropdown = useMemo(() => {
+    return weeksList.filter(w => w.monthKey === selectedWprMonth);
+  }, [weeksList, selectedWprMonth]);
+
+  const handleWprMonthChange = (monthKey) => {
+    setSelectedWprMonth(monthKey);
+    const monthWeeks = weeksList.filter(w => w.monthKey === monthKey);
+    if (monthWeeks.length) {
+      setSelectedWeek(monthWeeks[0].id);
+    }
+  };
+
+  useEffect(() => {
+    if (!weeksList.length) {
+      setSelectedWeek('');
+      setSelectedWprMonth('');
+      return;
+    }
+    const targetWeekId = weeksList.some((w) => w.id === selectedWeek)
+      ? selectedWeek
+      : getDefaultWprWeekId(weeksList);
+    const weekObj = weeksList.find((w) => w.id === targetWeekId);
+    setSelectedWeek(targetWeekId);
+    setSelectedWprMonth(weekObj?.monthKey || '');
+  }, [weeksList, selectedWeek]);
 
   // Redirect non-admins if they try to access history directly
   useEffect(() => {
     if (activeTab === 'history' && !isAdmin) {
       setActiveTab('sheet');
     }
-  }, [activeTab, isAdmin]);
+  }, [activeTab, isAdmin, setActiveTab]);
 
   const { data: allEntries = [], isLoading: entriesLoading } = useQuery({
     queryKey: ['progress', projectId],
@@ -418,7 +476,6 @@ export default function SiteProgress() {
   }, [scopeKey, entriesLoading, dprEntriesForSelectedDate.length, lockedScopes]);
 
   useEffect(() => {
-    setSelectedActivityId('');
     setActivityPickerOpen(false);
     setManualRowIds([]);
     setLoadedScope(null);
@@ -592,6 +649,15 @@ export default function SiteProgress() {
     setLoadedScope(scopeKey);
   }, [scopeKey, activeBudgetIds, worksheetRowById, dprEntriesForSelectedDate, isReady, loadedScope, rowMatchesEntry]);
 
+  const getQtyBeforeForRow = useCallback((row) => {
+    const itemProgress = entries.filter(
+      (e) => rowMatchesEntry(row, e) && (e.report_type === 'daily' || !e.report_type) && !e._is_aggregated
+    );
+    return itemProgress
+      .filter((e) => normalizeDateKey(e.date) < selectedReportDate)
+      .reduce((sum, e) => sum + (parseFloat(e.quantity_done) || 0), 0);
+  }, [entries, rowMatchesEntry, selectedReportDate]);
+
   const handleInputChange = (budgetItemId, field, value) => {
     if (isSelectedDateLocked) return;
     setDprState(prev => ({
@@ -602,6 +668,42 @@ export default function SiteProgress() {
       }
     }));
   };
+
+  const handleQtyExecutedChange = useCallback((rowId, rawValue) => {
+    if (isSelectedDateLocked) return;
+
+    const row = worksheetRowById.get(rowId);
+    if (!row) return;
+
+    const totalQty = parseFloat(row.quantity) || 0;
+    const qtyBefore = getQtyBeforeForRow(row);
+    const maxTodayQty = Math.max(0, totalQty - qtyBefore);
+
+    if (rawValue === '' || rawValue === '.') {
+      handleInputChange(rowId, 'qty_executed', rawValue);
+      return;
+    }
+
+    const parsed = parseFloat(rawValue);
+    if (Number.isNaN(parsed)) return;
+
+    if (parsed < 0) {
+      handleInputChange(rowId, 'qty_executed', '0');
+      return;
+    }
+
+    if (parsed > maxTodayQty) {
+      toast({
+        title: 'Quantity limit reached',
+        description: `Today Qty cannot exceed ${maxTodayQty.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${row.unit || ''}.`.trim(),
+        variant: 'destructive',
+      });
+      handleInputChange(rowId, 'qty_executed', maxTodayQty > 0 ? String(maxTodayQty) : '0');
+      return;
+    }
+
+    handleInputChange(rowId, 'qty_executed', rawValue);
+  }, [isSelectedDateLocked, worksheetRowById, getQtyBeforeForRow, toast]);
 
   const handleAddActivity = (id) => {
     if (isSelectedDateLocked) return;
@@ -813,8 +915,6 @@ export default function SiteProgress() {
     () => worksheetRows.filter((item) => !activeBudgetIds.includes(item.row_id)),
     [worksheetRows, activeBudgetIds]
   );
-  const selectedActivityOption = searchableActivities.find((item) => item.row_id === selectedActivityId);
-  const addActivityDisabled = isSelectedDateLocked || !selectedActivityOption;
 
   // Active budget items listed in DPR sheet
   const activeBudgetItems = activeBudgetIds
@@ -838,6 +938,7 @@ export default function SiteProgress() {
       { key: 'unit', label: 'Unit' },
       { key: 'total_qty', label: 'Total Qty' },
       { key: 'today_qty', label: 'Today Qty' },
+      { key: 'balance_qty', label: 'Balance Qty' },
       { key: 'cumulative_qty', label: 'Cumulative Qty' },
       { key: 'percent_comp', label: '% Comp.' },
       { key: 'today_vowd', label: "Today's VOWD", render: (r) => formatCurrencyINR(r.today_vowd) },
@@ -864,6 +965,7 @@ export default function SiteProgress() {
         unit: row.unit || '—',
         total_qty: totalQty,
         today_qty: todayQty || '—',
+        balance_qty: Math.max(0, totalQty - cumulativeQty),
         cumulative_qty: cumulativeQty,
         percent_comp: totalQty > 0 ? `${((cumulativeQty / totalQty) * 100).toFixed(1)}%` : '0%',
         today_vowd: todayQty * rate,
@@ -954,7 +1056,6 @@ export default function SiteProgress() {
     );
   };
 
-  const getWeeklyAggregatedData = (start, end) => buildAggregatedData(start, end);
   const getMonthlyAggregatedData = (start, end) => buildAggregatedData(start, end);
 
   // History stats
@@ -975,7 +1076,6 @@ export default function SiteProgress() {
 
   // Weekly WPR computations
   const currentWeekObj = weeksList.find(w => w.id === selectedWeek) || weeksList[0];
-  const weeklyData = currentWeekObj ? getWeeklyAggregatedData(currentWeekObj.startDate, currentWeekObj.endDate) : [];
 
   // Monthly MPR computations
   const currentMonthObj = monthsList.find(m => m.id === selectedMonth) || monthsList[0];
@@ -985,10 +1085,9 @@ export default function SiteProgress() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-heading font-bold tracking-tight">Site Progress</h1>
-          <p className="text-sm text-muted-foreground mt-1 font-sans">
-            Log progress with the strict DPR worksheet, or review weekly and monthly rollups.
-          </p>
+          <h1 className="text-2xl font-heading font-bold tracking-tight">
+            {TAB_TITLES[activeTab] || 'Site Progress'}
+          </h1>
         </div>
       </div>
 
@@ -1000,259 +1099,181 @@ export default function SiteProgress() {
         subProjectId={subProjectId}
         onProjectChange={setProjectId}
         onSubProjectChange={setSubProjectId}
-      />
+      >
+        {activeTab === 'sheet' && projectId && subProjectId && (
+          <>
+            <div className="h-9 w-px bg-border hidden md:block self-end mb-1" />
 
-      {isReady && selectedProject && selectedSubProject && (
-        <p className="text-sm text-muted-foreground">
-          Progress for <span className="font-medium text-foreground">{selectedProject.name}</span>
-          {' → '}
-          <span className="font-medium text-foreground">{selectedSubProject.name}</span>
-        </p>
-      )}
+            <div className="flex items-center gap-2">
+              <div className="bg-primary/10 p-1.5 rounded-lg text-primary shrink-0 self-end mb-1">
+                <Calendar className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-1">Reporting Date</p>
+                <Input
+                  type="date"
+                  value={selectedReportDate}
+                  onChange={(event) => setSelectedReportDate(event.target.value)}
+                  className="h-9 w-36 text-xs font-semibold px-2 py-1"
+                />
+                <p className="text-[9px] text-muted-foreground mt-0.5 leading-none absolute">{formattedSelectedDate}</p>
+              </div>
+            </div>
+
+            <div className="h-9 w-px bg-border hidden md:block self-end mb-1" />
+
+            <div className="flex flex-col gap-1 justify-end">
+              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Weather</span>
+              <Select
+                value={weatherCondition}
+                onValueChange={(value) => {
+                  weatherManualRef.current = true;
+                  setWeatherManuallyEdited(true);
+                  setWeatherCondition(value);
+                }}
+                disabled={isSelectedDateLocked}
+              >
+                <SelectTrigger className="w-32 h-9 text-xs px-2">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(weatherIcons).map(([key, icon]) => (
+                    <SelectItem key={key} value={key} className="text-xs">{icon} {key.charAt(0).toUpperCase() + key.slice(1)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[9px] text-muted-foreground mt-0.5 leading-none absolute translate-y-10">
+                {weatherLoading
+                  ? 'Fetching weather...'
+                  : weatherError
+                    ? weatherError
+                    : weatherInfo
+                      ? `Auto-filled (${weatherInfo})`
+                      : 'Weather is editable.'}
+              </p>
+            </div>
+          </>
+        )}
+        {activeTab === 'wpr' && projectId && subProjectId && (
+          <>
+            <div className="h-9 w-px bg-border hidden md:block self-end mb-1" />
+
+            <div className="flex flex-col gap-1 justify-end">
+              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider leading-none">Select Month</span>
+              <Select value={selectedWprMonth} onValueChange={handleWprMonthChange}>
+                <SelectTrigger className="w-36 h-9 text-xs px-2">
+                  <SelectValue placeholder="Choose Month" />
+                </SelectTrigger>
+                <SelectContent>
+                  {wprMonths.map(m => (
+                    <SelectItem key={m.key} value={m.key} className="text-xs">
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="h-9 w-px bg-border hidden md:block self-end mb-1" />
+
+            <div className="flex flex-col gap-1 justify-end">
+              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider leading-none">Select Week</span>
+              <Select value={selectedWeek} onValueChange={setSelectedWeek} disabled={!filteredWeeksForDropdown.length}>
+                <SelectTrigger className="w-52 h-9 text-xs px-2">
+                  <SelectValue placeholder={filteredWeeksForDropdown.length ? 'Choose Week' : 'No weeks available'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {filteredWeeksForDropdown.map(w => (
+                    <SelectItem key={w.id} value={w.id} className="text-xs">
+                      Week {w.weekNum} ({w.startDate} to {w.endDate})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </>
+        )}
+
+        {activeTab === 'mpr' && projectId && subProjectId && (
+          <>
+            <div className="h-9 w-px bg-border hidden md:block self-end mb-1" />
+
+            <div className="flex flex-col gap-1 justify-end flex-1 max-w-[260px]">
+              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider leading-none">Select Month</span>
+              <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                <SelectTrigger className="w-full h-9 text-xs px-2">
+                  <SelectValue placeholder="Choose Month" />
+                </SelectTrigger>
+                <SelectContent>
+                  {monthsList.map(m => <SelectItem key={m.id} value={m.id} className="text-xs">{m.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-[9px] opacity-0 mt-0.5 leading-none">&nbsp;</p>
+            </div>
+          </>
+        )}
+      </ProjectSubProjectSelector>
 
       <SubProjectGate projectId={projectId} subProjectId={subProjectId} subProjects={subProjects}>
-      <div className="flex border-b border-border gap-2 overflow-x-auto pb-1">
-        <button 
-          onClick={() => setActiveTab('sheet')} 
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all whitespace-nowrap ${
-            activeTab === 'sheet' 
-              ? 'border-primary text-primary font-semibold' 
-              : 'border-transparent text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          Daily DPR Sheet
-        </button>
-        <button 
-          onClick={() => setActiveTab('wpr')} 
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all whitespace-nowrap ${
-            activeTab === 'wpr' 
-              ? 'border-primary text-primary font-semibold' 
-              : 'border-transparent text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          Weekly WPR Sheet
-        </button>
-        <button 
-          onClick={() => setActiveTab('mpr')} 
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all whitespace-nowrap ${
-            activeTab === 'mpr' 
-              ? 'border-primary text-primary font-semibold' 
-              : 'border-transparent text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          Monthly MPR Sheet
-        </button>
-        {isAdmin && (
-          <button 
-            onClick={() => setActiveTab('history')} 
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'history' 
-                ? 'border-primary text-primary font-semibold' 
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Aggregated Logs & History
-          </button>
-        )}
-      </div>
+
 
       {/* 1. Daily DPR Sheet Tab */}
       {activeTab === 'sheet' && (
         <div className="space-y-4">
           {isReady ? (
             <>
-              <div className="flex gap-1 overflow-x-auto pb-1">
-                <button
-                  type="button"
-                  onClick={() => setSheetSubTab('dpr')}
-                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
-                    sheetSubTab === 'dpr'
-                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
-                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
-                  }`}
-                >
-                  DPR Worksheet
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSheetSubTab('contractor')}
-                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
-                    sheetSubTab === 'contractor'
-                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
-                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
-                  }`}
-                >
-                  Labour Details
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSheetSubTab('staff-attendance')}
-                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
-                    sheetSubTab === 'staff-attendance'
-                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
-                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
-                  }`}
-                >
-                  Technical Staff Attendance
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSheetSubTab('material-status')}
-                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
-                    sheetSubTab === 'material-status'
-                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
-                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
-                  }`}
-                >
-                  Material Status
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSheetSubTab('machinery-details')}
-                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
-                    sheetSubTab === 'machinery-details'
-                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
-                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
-                  }`}
-                >
-                  Machineries Details
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSheetSubTab('days-report')}
-                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
-                    sheetSubTab === 'days-report'
-                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
-                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
-                  }`}
-                >
-                  Day's Report
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSheetSubTab('status-report')}
-                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
-                    sheetSubTab === 'status-report'
-                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
-                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
-                  }`}
-                >
-                  Status Report
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSheetSubTab('special-site-visits')}
-                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
-                    sheetSubTab === 'special-site-visits'
-                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
-                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
-                  }`}
-                >
-                  Special Site Visits
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSheetSubTab('critical-issues')}
-                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
-                    sheetSubTab === 'critical-issues'
-                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
-                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
-                  }`}
-                >
-                  Critical Issues
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSheetSubTab('next-days-plan')}
-                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all border whitespace-nowrap ${
-                    sheetSubTab === 'next-days-plan'
-                      ? 'bg-primary/10 text-primary border-primary/20 shadow-sm'
-                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted/50 hover:text-foreground'
-                  }`}
-                >
-                  Next Day's Plan
-                </button>
-              </div>
-
-              {/* DPR context card — shared across DPR Worksheet and Technical Staff Attendance */}
-              <div className="flex flex-wrap gap-x-4 gap-y-2 items-center bg-card border rounded-xl py-2 px-3 shadow-sm">
-                <div className="flex items-center gap-2">
-                  <div className="bg-primary/10 p-1.5 rounded-lg text-primary">
-                    <Calendar className="w-4 h-4" />
+              <div className="relative overflow-hidden rounded-2xl border border-primary/10 bg-gradient-to-br from-slate-50 via-white to-slate-100/80 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_8px_24px_-12px_rgba(15,23,42,0.18)] dark:from-slate-900/80 dark:via-slate-900/40 dark:to-slate-950/80 dark:border-primary/20">
+                <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-400/50 to-transparent" />
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex flex-wrap gap-2 flex-1">
+                    {[
+                      { id: 'dpr', label: 'DPR Worksheet' },
+                      { id: 'contractor', label: 'Labour Details' },
+                      { id: 'staff-attendance', label: 'Technical Staff Attendance' },
+                      { id: 'material-status', label: 'Material Status' },
+                      { id: 'machinery-details', label: 'Machineries Details' },
+                      { id: 'days-report', label: "Day's Report" },
+                      { id: 'status-report', label: 'Status Report' },
+                      { id: 'special-site-visits', label: 'Special Site Visits' },
+                      { id: 'critical-issues', label: 'Critical Issues' },
+                      { id: 'next-days-plan', label: "Next Day's Plan" },
+                    ].map((tab) => {
+                      const isActive = sheetSubTab === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setSheetSubTab(tab.id)}
+                          className={`group relative inline-flex items-center rounded-xl px-3.5 py-2 text-left text-[12px] font-medium tracking-wide transition-all duration-200 ${
+                            isActive
+                              ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-10px_rgba(15,40,70,0.65)] ring-1 ring-primary/30'
+                              : 'bg-slate-200/90 text-slate-700 ring-1 ring-slate-300/80 hover:-translate-y-0.5 hover:bg-slate-300/70 hover:text-slate-900 hover:shadow-md hover:ring-primary/25 dark:bg-slate-700/90 dark:text-slate-100 dark:ring-slate-500/70 dark:hover:bg-slate-600 dark:hover:text-white'
+                          }`}
+                        >
+                          <span className="leading-tight">{tab.label}</span>
+                          {isActive && (
+                            <span className="absolute inset-x-3 -bottom-px h-px bg-gradient-to-r from-transparent via-amber-300/80 to-transparent" />
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
-                  <div>
-                    <p className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider mb-0.5">Reporting Date</p>
-                    <Input
-                      type="date"
-                      value={selectedReportDate}
-                      onChange={(event) => setSelectedReportDate(event.target.value)}
-                      className="h-8 w-36 text-xs font-semibold px-2 py-1"
-                    />
-                    <p className="text-[9px] text-muted-foreground mt-0.5 leading-none">{formattedSelectedDate}</p>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {sheetSubTab === 'dpr' && !isSelectedDateLocked && modifiedCount > 0 && (
+                      <Badge variant="outline" className="bg-amber-500/10 text-amber-700 border-amber-500/20 text-[10px] px-2 py-0.5 font-bold">
+                        ⚠️ {modifiedCount} unsaved
+                      </Badge>
+                    )}
+                    <Button
+                      onClick={handleSaveDpr}
+                      disabled={isSubmitting || !isReady || isSelectedDateLocked}
+                      className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold h-10 px-5 text-sm shadow-sm transition-colors"
+                    >
+                      <Save className="w-4 h-4" />
+                      {isSelectedDateLocked ? 'Date Locked' : 'Save DPR'}
+                    </Button>
                   </div>
-                </div>
-
-                <div className="h-6 w-px bg-border hidden md:block" />
-
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Weather</span>
-                  <Select
-                    value={weatherCondition}
-                    onValueChange={(value) => {
-                      weatherManualRef.current = true;
-                      setWeatherManuallyEdited(true);
-                      setWeatherCondition(value);
-                    }}
-                    disabled={isSelectedDateLocked}
-                  >
-                    <SelectTrigger className="w-32 h-8 text-xs px-2">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.entries(weatherIcons).map(([key, icon]) => (
-                        <SelectItem key={key} value={key} className="text-xs">{icon} {key.charAt(0).toUpperCase() + key.slice(1)}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-[9px] text-muted-foreground mt-0.5 leading-none">
-                    {weatherLoading
-                      ? 'Fetching weather...'
-                      : weatherError
-                        ? weatherError
-                        : weatherInfo
-                          ? `Auto-filled (${weatherInfo})`
-                          : 'Weather is editable.'}
-                  </p>
-                </div>
-
-                <div className="h-6 w-px bg-border hidden md:block" />
-
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Submitted By</span>
-                  <Input
-                    value={submittedBy}
-                    onChange={e => setSubmittedBy(e.target.value)}
-                    className="h-8 w-36 text-xs font-semibold px-2 py-1"
-                    placeholder="Name..."
-                    disabled={isSelectedDateLocked}
-                  />
-                  <p className="text-[9px] opacity-0 mt-0.5 leading-none">&nbsp;</p>
-                </div>
-
-                <div className="ml-auto flex items-center gap-2">
-                  {sheetSubTab === 'dpr' && !isSelectedDateLocked && modifiedCount > 0 && (
-                    <Badge variant="outline" className="bg-amber-500/10 text-amber-700 border-amber-500/20 text-[10px] px-2 py-0.5 font-bold">
-                      ⚠️ {modifiedCount} unsaved
-                    </Badge>
-                  )}
-                  <Button
-                    onClick={handleSaveDpr}
-                    disabled={isSubmitting || !isReady || isSelectedDateLocked}
-                    className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold h-10 px-5 text-sm shadow-sm transition-colors"
-                  >
-                    <Save className="w-4 h-4" />
-                    {isSelectedDateLocked ? 'Date Locked' : 'Save DPR'}
-                  </Button>
                 </div>
               </div>
 
@@ -1378,77 +1399,78 @@ export default function SiteProgress() {
                     {worksheetCarryForwardCount} legacy L1 activit{worksheetCarryForwardCount === 1 ? 'y is' : 'ies are'} carried into L3 because consumed quantity exists.
                   </div>
                 )}
-                <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-3 items-end">
-                  <div className="flex flex-col gap-1">
-                    <Label className="text-[10px] uppercase font-bold text-muted-foreground">Search Activity</Label>
-                    <Popover open={activityPickerOpen} onOpenChange={setActivityPickerOpen}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          role="combobox"
-                          disabled={isSelectedDateLocked || searchableActivities.length === 0}
-                          className="h-9 mt-0.5 justify-between font-normal"
-                        >
-                          {selectedActivityOption
-                            ? `${selectedActivityOption.code || '—'}: ${selectedActivityOption.title}${
-                                selectedActivityOption.is_l1_carry_forward ? ' (L1 carried)' : ''
-                              }`
-                            : (searchableActivities.length === 0 ? 'No activities available' : 'Search by activity code or name...')}
-                          <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50 shrink-0" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-[min(90vw,560px)] p-0" align="start">
-                        <Command>
-                          <CommandInput placeholder="Type activity code or name..." />
-                          <CommandList>
-                            <CommandEmpty>No activity found.</CommandEmpty>
-                            <CommandGroup>
-                              {searchableActivities.map((item) => (
-                                <CommandItem
-                                  key={item.row_id}
-                                  value={`${item.code || ''} ${item.title || ''}`}
-                                  onSelect={() => {
-                                    setSelectedActivityId(item.row_id);
-                                    setActivityPickerOpen(false);
-                                  }}
-                                  className="gap-3"
-                                >
-                                  <span className="font-mono text-xs font-semibold whitespace-nowrap min-w-[170px] max-w-[220px] truncate">
-                                    {item.code || '—'}
-                                  </span>
-                                  <span className="truncate flex-1">{item.title}</span>
-                                  {item.is_l1_carry_forward && (
-                                    <span className="text-[10px] font-medium text-sky-700 bg-sky-100 border border-sky-200 rounded px-1.5 py-0.5">
-                                      L1 carried
-                                    </span>
-                                  )}
-                                  {selectedActivityId === item.row_id && <Check className="ml-auto h-4 w-4" />}
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-
-                  <Button 
-                    type="button"
-                    onClick={() => {
-                      if (!selectedActivityOption) return;
-                      handleAddActivity(selectedActivityOption.row_id);
-                      setSelectedActivityId('');
+                <div className="flex flex-col gap-1">
+                  <Label className="text-[10px] uppercase font-bold text-muted-foreground">Search Activity</Label>
+                  <Popover
+                    open={activityPickerOpen}
+                    onOpenChange={(open) => {
+                      setActivityPickerOpen(open);
+                      if (!open) {
+                        setSearchQuery('');
+                      }
                     }}
-                    disabled={addActivityDisabled}
-                    className={`font-semibold h-9 px-6 gap-1.5 ${
-                      addActivityDisabled
-                        ? 'bg-muted text-muted-foreground' 
-                        : 'bg-primary hover:bg-primary/95 text-white'
-                    }`}
                   >
-                    <span>➕</span> {isSelectedDateLocked ? 'Date Locked' : 'Add Activity'}
-                  </Button>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        role="combobox"
+                        disabled={isSelectedDateLocked || searchableActivities.length === 0}
+                        className="h-9 mt-0.5 justify-between font-normal"
+                      >
+                        {isSelectedDateLocked
+                          ? 'Date Locked'
+                          : (searchableActivities.length === 0
+                            ? 'No activities available'
+                            : 'Search by activity code or name...')}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50 shrink-0" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      className="w-[min(90vw,560px)] p-0"
+                      align="start"
+                      side="bottom"
+                      sideOffset={6}
+                      avoidCollisions={false}
+                    >
+                      <Command>
+                        <CommandInput
+                          value={searchQuery}
+                          onValueChange={setSearchQuery}
+                          placeholder="Type activity code or name..."
+                        />
+                        <CommandList>
+                          <CommandEmpty>No activity found.</CommandEmpty>
+                          <CommandGroup>
+                            {searchableActivities.map((item) => (
+                              <CommandItem
+                                key={item.row_id}
+                                value={`${item.code || ''} ${item.title || ''}`}
+                                onSelect={() => {
+                                  handleAddActivity(item.row_id);
+                                  setActivityPickerOpen(false);
+                                  setSearchQuery('');
+                                }}
+                                className="gap-3 items-start py-2.5"
+                              >
+                                <span className="font-mono text-xs font-semibold whitespace-nowrap min-w-[170px] max-w-[220px] shrink-0">
+                                  {highlightText(item.code || '—', searchQuery)}
+                                </span>
+                                <span className="flex-1 text-xs whitespace-normal break-words">
+                                  {highlightText(item.title, searchQuery)}
+                                </span>
+                                {item.is_l1_carry_forward && (
+                                  <span className="text-[10px] font-medium text-sky-700 bg-sky-100 border border-sky-200 rounded px-1.5 py-0.5 shrink-0 self-center">
+                                    L1 carried
+                                  </span>
+                                )}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
               </div>
 
@@ -1560,6 +1582,7 @@ export default function SiteProgress() {
                           <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-16">Unit</th>
                           <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-24">Total Qty</th>
                           <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-24">Today Qty</th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-24">Balance Qty</th>
                           <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-28">Cumulative Completed Qty</th>
                           <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-20">% Comp.</th>
                           <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-28">Today&apos;s VOWD</th>
@@ -1588,6 +1611,8 @@ export default function SiteProgress() {
                           const tomorrowQty = state.tomorrow_qty === '' ? 0 : parseFloat(state.tomorrow_qty) || 0;
                           const cumulativeQty = qtyBefore + todayQty;
                           const totalQty = parseFloat(bItem.quantity) || 0;
+                          const balanceQty = Math.max(0, totalQty - cumulativeQty);
+                          const maxTodayQty = Math.max(0, totalQty - qtyBefore);
                           const rate = parseFloat(bItem.cost_per_unit) || 0;
                           const percentComp = totalQty > 0 ? (cumulativeQty / totalQty) * 100 : 0;
                           const todayVowd = todayQty * rate;
@@ -1641,12 +1666,19 @@ export default function SiteProgress() {
                                 <Input
                                   type="number"
                                   step="any"
+                                  min={0}
+                                  max={maxTodayQty}
                                   className="w-20 mx-auto text-right h-8 text-xs font-mono font-semibold"
                                   placeholder="0"
                                   value={state.qty_executed ?? ''}
-                                  onChange={(e) => handleInputChange(rowId, 'qty_executed', e.target.value)}
-                                  disabled={isSelectedDateLocked}
+                                  onChange={(e) => handleQtyExecutedChange(rowId, e.target.value)}
+                                  disabled={isSelectedDateLocked || maxTodayQty <= 0}
+                                  title={maxTodayQty > 0 ? `Max today: ${maxTodayQty}` : 'No balance quantity remaining'}
                                 />
+                              </td>
+
+                              <td className="p-2.5 text-right font-mono text-xs border-r">
+                                {balanceQty.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                               </td>
 
                               <td className="p-2.5 text-right font-mono text-xs border-r">
@@ -1716,79 +1748,20 @@ export default function SiteProgress() {
       {/* 2. Weekly WPR Sheet Tab */}
       {activeTab === 'wpr' && (
         <div className="space-y-4">
-          <div className="flex flex-wrap gap-4 items-center bg-card border rounded-xl p-4 shadow-sm">
-            <span className="text-sm font-semibold text-muted-foreground">Select Week:</span>
-            <Select value={selectedWeek} onValueChange={setSelectedWeek}>
-              <SelectTrigger className="w-80">
-                <SelectValue placeholder="Choose Week" />
-              </SelectTrigger>
-              <SelectContent>
-                {weeksList.map(w => <SelectItem key={w.id} value={w.id}>{w.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-4">
-            <CardHeader className="p-0 pb-1">
-              <CardTitle className="text-base font-bold">Aggregated Weekly Progress Log ({currentWeekObj?.label})</CardTitle>
-            </CardHeader>
-            
-            <Card className="overflow-hidden border shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm font-sans border-collapse">
-                  <thead>
-                    <tr className="border-b bg-muted/50">
-                      <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase">Line Item</th>
-                      <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase">Domain</th>
-                      <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase">Sub-Project</th>
-                      <th className="text-center p-3 font-semibold text-xs text-muted-foreground uppercase">Unit</th>
-                      <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase">Weekly Qty Done</th>
-                      <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase">Value of Work</th>
-                      <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase">Labour Days</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {weeklyData.map(row => (
-                      <tr key={row.id} className="border-b hover:bg-muted/10 transition-colors">
-                        <td className="p-3 text-xs font-semibold whitespace-nowrap">{row.title}</td>
-                        <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">{row.domain}</td>
-                        <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">{row.subProject}</td>
-                        <td className="p-3 text-center text-xs font-bold text-muted-foreground">{row.unit}</td>
-                        <td className="p-3 text-right font-mono text-xs font-semibold">{row.qtyDone.toLocaleString()}</td>
-                        <td className="p-3 text-right font-mono text-xs text-emerald-600 font-bold">{fmtFull(row.value)}</td>
-                        <td className="p-3 text-right font-mono text-xs">{row.laborCount}</td>
-                      </tr>
-                    ))}
-                    {weeklyData.length === 0 && (
-                      <tr>
-                        <td colSpan={7} className="p-8 text-center text-muted-foreground text-xs font-sans">
-                          No daily progress logged during this week.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          </div>
+          <WprSheetPanel
+            projectId={projectId}
+            subProjectId={subProjectId}
+            selectedProject={selectedProject}
+            selectedSubProject={selectedSubProject}
+            week={currentWeekObj}
+            submittedBy={submittedBy}
+          />
         </div>
       )}
 
       {/* 3. Monthly MPR Sheet Tab */}
       {activeTab === 'mpr' && (
         <div className="space-y-4">
-          <div className="flex flex-wrap gap-4 items-center bg-card border rounded-xl p-4 shadow-sm">
-            <span className="text-sm font-semibold text-muted-foreground">Select Month:</span>
-            <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-              <SelectTrigger className="w-64">
-                <SelectValue placeholder="Choose Month" />
-              </SelectTrigger>
-              <SelectContent>
-                {monthsList.map(m => <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-
           <div className="space-y-4">
             <CardHeader className="p-0 pb-1">
               <CardTitle className="text-base font-bold">Aggregated Monthly Progress Log ({currentMonthObj?.label})</CardTitle>
@@ -1840,12 +1813,12 @@ export default function SiteProgress() {
         <div className="space-y-6">
           {/* History Filters */}
           <div className="flex flex-wrap gap-3">
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <Select value={typeFilter || 'all'} onValueChange={(v) => setTypeFilter(v === 'all' ? '' : v)}>
               <SelectTrigger className="w-44">
                 <SelectValue placeholder="All Log Types" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={null}>All Log Types</SelectItem>
+                <SelectItem value="all">All Log Types</SelectItem>
                 <SelectItem value="daily">Daily Logs (DPR)</SelectItem>
                 <SelectItem value="weekly">Weekly Rollup (WPR)</SelectItem>
                 <SelectItem value="monthly">Monthly Rollup (MPR)</SelectItem>

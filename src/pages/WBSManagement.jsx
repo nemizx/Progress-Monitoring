@@ -234,7 +234,7 @@ export default function WBSManagement() {
     mutationFn: () => base44.wbsTemplate.resetToDefault(),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['wbs-template'] });
-      setApplyMessage(`Standard template loaded: ${result.total} items (16 categories + sub-items).`);
+      setApplyMessage(`Standard template loaded: ${result.total} categories (heads only).`);
       setTimeout(() => setApplyMessage(''), 5000);
     },
   });
@@ -1549,7 +1549,7 @@ export default function WBSManagement() {
               className="gap-2"
               disabled={resetTemplateMutation.isPending}
               onClick={() => {
-                if (templateItems.length === 0 || confirm('Reload standard WBS data from image format? This replaces the current template.')) {
+                if (templateItems.length === 0 || confirm('Reload standard WBS heads (L1 only)? This replaces the current template and removes existing sub-heads.')) {
                   resetTemplateMutation.mutate();
                 }
               }}
@@ -1664,11 +1664,6 @@ export default function WBSManagement() {
             <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2">{applyMessage}</div>
           )}
 
-          {wbsReady && hasL1Data && !hasL3Data && (
-            <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
-              L1 / L2 WBS is available. Upload L3 WBS to activate the L3 tab.
-            </div>
-          )}
 
           {wbsReady && hasL1Data && hasL3Data && (
             <div className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
@@ -1949,7 +1944,7 @@ export default function WBSManagement() {
                               <th className="text-left p-3 font-semibold">WBS ID / Activity</th>
                               <th className="text-right p-3 font-semibold">Budget</th>
                               <th className="text-left p-3 font-semibold">Progress</th>
-                              <th className="text-right p-3 font-semibold">Actions</th>
+                              <th className="text-right p-3 font-semibold">Add/Remove</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1997,7 +1992,7 @@ export default function WBSManagement() {
                   <thead>
                     <tr className="border-b bg-muted/30">
                       <th className="text-left p-3 font-semibold">WBS ID / WBS Name</th>
-                      {isAdmin && <th className="text-right p-3 font-semibold w-28">Actions</th>}
+                      {isAdmin && <th className="text-right p-3 font-semibold w-28">Add/Remove</th>}
                     </tr>
                   </thead>
                   <tbody>

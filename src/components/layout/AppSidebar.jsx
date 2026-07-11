@@ -1,45 +1,61 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, FolderKanban, CalendarClock, Network,
+  LayoutDashboard, CalendarClock, Network,
   ClipboardList, BarChart3, MessageSquare, Bell,
-  IndianRupee, Shield, ChevronLeft, ChevronRight, HardHat, LogOut, Users, Building2
+  Shield, ChevronLeft, ChevronRight, HardHat, LogOut, Users, Building2
 } from 'lucide-react';
 import { base44 } from '@/api/base44Client';
 import { cn } from '@/lib/utils';
 import ThemeToggle from './ThemeToggle';
-import { useQuery } from '@tanstack/react-query';
-
-const navStructure = [
-  { type: 'link', path: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { type: 'link', path: '/progress', label: 'Progress', icon: ClipboardList },
-  { type: 'link', path: '/technical-staff', label: 'Technical Staff', icon: Users },
-  { type: 'link', path: '/contractors', label: 'Contractors', icon: Building2 },
-  { type: 'group', label: 'Schedule', icon: CalendarClock, children: [
-    { path: '/scheduler', label: 'Schedule Builder' },
-    { path: '/schedule-monitor', label: 'Schedule Monitor' },
-  ]},
-  { type: 'group', label: 'Analytics', icon: BarChart3, children: [
-    { path: '/reports', label: 'Reports' },
-    { path: '/analytics', label: 'Analytics' },
-  ]},
-  { type: 'group', label: 'WBS', icon: Network, children: [
-    { path: '/wbs', label: 'WBS' },
-    { path: '/budget', label: 'Budget' },
-    { path: '/cost', label: 'Cost Controls' },
-  ]},
-  { type: 'group', label: 'Admin', icon: Shield, children: [
-    { path: '/admin', label: 'Administration' },
-    { path: '/projects', label: 'Projects' },
-  ]},
-  { type: 'link', path: '/collaboration', label: 'Collaboration', icon: MessageSquare },
-];
+import { useAuth } from '@/lib/AuthContext';
 
 export default function AppSidebar() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const [openGroups, setOpenGroups] = useState(() => navStructure.reduce((acc, n) => { if (n.type === 'group') acc[n.label] = true; return acc; }, {}));
+
+  const dynamicNavStructure = React.useMemo(() => {
+    return [
+      { type: 'link', path: '/', label: 'Dashboard', icon: LayoutDashboard },
+      { type: 'group', label: 'Progress', icon: ClipboardList, children: [
+        { path: '/progress', tab: 'dpr', label: 'DPR' },
+        { path: '/progress', tab: 'wpr', label: 'WPR' },
+        { path: '/progress', tab: 'mpr', label: 'MPR' },
+        ...(isAdmin ? [{ path: '/progress', tab: 'history', label: 'Aggregated Logs & History' }] : []),
+      ]},
+      { type: 'link', path: '/technical-staff', label: 'Technical Staff', icon: Users },
+      { type: 'link', path: '/contractors', label: 'Contractors', icon: Building2 },
+      { type: 'group', label: 'Schedule', icon: CalendarClock, children: [
+        { path: '/scheduler', label: 'Schedule Builder' },
+        { path: '/schedule-monitor', label: 'Schedule Monitor' },
+      ]},
+      { type: 'group', label: 'Analytics', icon: BarChart3, children: [
+        { path: '/reports', label: 'Reports' },
+        { path: '/analytics', label: 'Analytics' },
+      ]},
+      { type: 'group', label: 'WBS', icon: Network, children: [
+        { path: '/wbs', label: 'WBS' },
+        { path: '/budget', label: 'Budget' },
+        { path: '/cost', label: 'Cost Controls' },
+      ]},
+      { type: 'group', label: 'Admin', icon: Shield, children: [
+        { path: '/admin', label: 'Administration' },
+        { path: '/projects', label: 'Projects' },
+      ]},
+      { type: 'link', path: '/collaboration', label: 'Collaboration', icon: MessageSquare },
+    ];
+  }, [isAdmin]);
+
+  const [openGroups, setOpenGroups] = useState(() => ({
+    'Progress': true,
+    'Schedule': true,
+    'Analytics': true,
+    'WBS': true,
+    'Admin': true,
+  }));
 
   return (
     <aside className={cn(
@@ -66,7 +82,7 @@ export default function AppSidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
-        {navStructure.map((node) => {
+        {dynamicNavStructure.map((node) => {
           if (node.type === 'link') {
             const isActive = location.pathname === node.path || (node.path !== '/' && location.pathname.startsWith(node.path));
             const Icon = node.icon;
@@ -95,11 +111,29 @@ export default function AppSidebar() {
               </button>
               {open && !collapsed && (
                 <div className="mt-1 ml-6 space-y-1">
-                  {node.children.map(child => (
-                    <Link key={child.path} to={child.path} className={cn("flex items-center gap-2 px-2 py-1 rounded-md text-sm text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent")}> 
-                      <span className="text-[13px]">{child.label}</span>
-                    </Link>
-                  ))}
+                  {node.children.map(child => {
+                    const childTo = child.tab
+                      ? `${child.path}?tab=${child.tab}`
+                      : child.path;
+                    const progressTab = new URLSearchParams(location.search).get('tab') || 'dpr';
+                    const isChildActive = child.tab
+                      ? location.pathname === child.path && progressTab === child.tab
+                      : location.pathname === child.path || location.pathname.startsWith(`${child.path}/`);
+                    return (
+                      <Link
+                        key={childTo}
+                        to={childTo}
+                        className={cn(
+                          "flex items-center gap-2 px-2 py-1 rounded-md text-sm transition-colors",
+                          isChildActive
+                            ? "bg-sidebar-primary text-sidebar-primary-foreground font-medium"
+                            : "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                        )}
+                      >
+                        <span className="text-[13px]">{child.label}</span>
+                      </Link>
+                    );
+                  })}
                 </div>
               )}
             </div>

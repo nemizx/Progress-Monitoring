@@ -240,27 +240,32 @@ export default forwardRef(function ContractorLabourPanel({
 
   const getReviewData = useCallback(() => ({
     title: 'C. Contractor Labour',
-    columns: [
-      { key: 'sr', label: 'Sr.' },
-      { key: 'contractor', label: 'Contractor' },
-      { key: 'carpenter', label: 'C' },
-      { key: 'barbender', label: 'B' },
-      { key: 'mason', label: 'M' },
-      { key: 'total', label: 'Total' },
-    ],
-    rows: rows.map((r, i) => {
-      const total = (parseFloat(r.carpenter) || 0) + (parseFloat(r.barbender) || 0) + (parseFloat(r.mason) || 0)
-        + (parseFloat(r.carpenter_helper) || 0) + (parseFloat(r.barbender_helper) || 0)
-        + (parseFloat(r.mc) || 0) + (parseFloat(r.fc) || 0);
-      return {
-        sr: i + 1,
-        contractor: contractorNameMap.get(r.contractor_id) || '—',
-        carpenter: r.carpenter || 0,
-        barbender: r.barbender || 0,
-        mason: r.mason || 0,
-        total,
-      };
-    }),
+    layout: 'contractor-labour',
+    columns: [],
+    rows: rows
+      .filter((r) => r.contractor_id)
+      .map((r, i) => {
+        const carpenter = parseFloat(r.carpenter) || 0;
+        const barbender = parseFloat(r.barbender) || 0;
+        const mason = parseFloat(r.mason) || 0;
+        const carpenterHelper = parseFloat(r.carpenter_helper) || 0;
+        const barbenderHelper = parseFloat(r.barbender_helper) || 0;
+        const mc = parseFloat(r.mc) || 0;
+        const fc = parseFloat(r.fc) || 0;
+        return {
+          sr: i + 1,
+          contractor_name: contractorNameMap.get(r.contractor_id) || '—',
+          unit: r.unit || 'Nos',
+          carpenter,
+          barbender,
+          mason,
+          carpenter_helper: carpenterHelper,
+          barbender_helper: barbenderHelper,
+          mc,
+          fc,
+          total: carpenter + barbender + mason + carpenterHelper + barbenderHelper + mc + fc,
+        };
+      }),
   }), [rows, contractorNameMap]);
 
   useDprPanelRef(ref, {
