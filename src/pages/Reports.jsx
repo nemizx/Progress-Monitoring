@@ -901,7 +901,7 @@ export default function Reports() {
 
       for (const element of allElements) {
         const canvas = await html2canvas(element, {
-          scale: 2,
+          scale: 1.5,
           useCORS: true,
           logging: false,
           backgroundColor: '#ffffff',
@@ -913,7 +913,7 @@ export default function Reports() {
           windowHeight: document.documentElement.offsetHeight
         });
 
-        const imgData = canvas.toDataURL('image/png');
+        const imgData = canvas.toDataURL('image/jpeg', 0.7);
         const maxImgWidth = pageWidth - (2 * margin); // 277 mm
         const maxImgHeight = pageHeight - (2 * margin); // 190 mm
 
@@ -936,7 +936,7 @@ export default function Reports() {
         // Center the card horizontally on the page
         const xOffset = margin + (maxImgWidth - imgWidth) / 2;
 
-        pdf.addImage(imgData, 'PNG', xOffset, currentY, imgWidth, imgHeight);
+        pdf.addImage(imgData, 'JPEG', xOffset, currentY, imgWidth, imgHeight, undefined, 'FAST');
         currentY += imgHeight + 6; // gap between cards
         isFirstPage = false;
       }
