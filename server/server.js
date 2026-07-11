@@ -472,8 +472,12 @@ app.post('/api/entities/:entity/filter', authenticateToken, async (req, res) => 
     const queryParams = [];
 
     Object.keys(criteria).forEach((key) => {
-      queryParams.push(criteria[key]);
-      queryText += ` AND "${key}" = $${queryParams.length}`;
+      if (criteria[key] === null) {
+        queryText += ` AND "${key}" IS NULL`;
+      } else {
+        queryParams.push(criteria[key]);
+        queryText += ` AND "${key}" = $${queryParams.length}`;
+      }
     });
 
     if (sortField) {

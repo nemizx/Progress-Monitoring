@@ -1550,15 +1550,12 @@ Format with markdown. Be specific, professional, and actionable.`;
                                 const subPlanTotal = sub.rows.reduce((s, r) => s + (Number(r.plan) || 0), 0);
                                 const subAchievedTotal = sub.rows.reduce((s, r) => s + (Number(r.achieved) || 0), 0);
                                 const subPct = subPlanTotal > 0 ? Math.min(Math.round((subAchievedTotal / subPlanTotal) * 100), 100) : 0;
-                                const isSingleProjectWise = sub.subProjectName === 'Project-wise';
 
                                 return (
                                   <React.Fragment key={sub.subProjectName}>
-                                    {!isSingleProjectWise && (
-                                      <tr className="bg-slate-50/80 font-bold border-b text-primary">
-                                        <td colSpan={6} className="p-2 pl-4 text-xs font-bold border-b">{sub.subProjectName}</td>
-                                      </tr>
-                                    )}
+                                    <tr className="bg-slate-50/80 font-bold border-b text-primary">
+                                      <td colSpan={6} className="p-2 pl-4 text-xs font-bold border-b">{sub.subProjectName}</td>
+                                    </tr>
                                     {sub.rows.map((r, idx) => (
                                       <tr key={idx} className="border-b hover:bg-slate-50/50">
                                         <td className="p-2.5 text-center text-muted-foreground border-r">{idx + 1}</td>
@@ -1571,16 +1568,14 @@ Format with markdown. Be specific, professional, and actionable.`;
                                         <td className="p-2.5 text-slate-600">{r.remark || '—'}</td>
                                       </tr>
                                     ))}
-                                    {!isSingleProjectWise && (
-                                      <tr className="bg-slate-100/50 font-bold border-b text-slate-700">
-                                        <td className="p-2 text-center border-r"></td>
-                                        <td className="p-2 border-r">{sub.subProjectName} Subtotal</td>
-                                        <td className="p-2 border-r text-right font-mono">{subPlanTotal}</td>
-                                        <td className="p-2 border-r text-right font-mono">{subAchievedTotal}</td>
-                                        <td className="p-2 border-r text-right font-mono text-emerald-700">{subPct}%</td>
-                                        <td className="p-2"></td>
-                                      </tr>
-                                    )}
+                                    <tr className="bg-slate-100/50 font-bold border-b text-slate-700">
+                                      <td className="p-2 text-center border-r"></td>
+                                      <td className="p-2 border-r">{sub.subProjectName} Subtotal</td>
+                                      <td className="p-2 border-r text-right font-mono">{subPlanTotal}</td>
+                                      <td className="p-2 border-r text-right font-mono">{subAchievedTotal}</td>
+                                      <td className="p-2 border-r text-right font-mono text-emerald-700">{subPct}%</td>
+                                      <td className="p-2"></td>
+                                    </tr>
                                   </React.Fragment>
                                 );
                               })}

@@ -10,6 +10,7 @@ export default function ProjectSubProjectSelector({
   onSubProjectChange,
   projectLabel = 'Project *',
   subProjectLabel = 'Sub Project *',
+  hideSubProject = false,
   className = '',
   children,
 }) {
@@ -28,23 +29,25 @@ export default function ProjectSubProjectSelector({
           </SelectContent>
         </Select>
       </div>
-      <div>
-        <Label className="text-xs text-muted-foreground mb-1 block">{subProjectLabel}</Label>
-        <Select
-          value={subProjectId || undefined}
-          onValueChange={onSubProjectChange}
-          disabled={!projectId}
-        >
-          <SelectTrigger className="w-full sm:w-56">
-            <SelectValue placeholder={projectId ? 'Select sub-project' : 'Select project first'} />
-          </SelectTrigger>
-          <SelectContent>
-            {subProjects.map((sp) => (
-              <SelectItem key={sp.id} value={sp.id}>{sp.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      {!hideSubProject && (
+        <div>
+          <Label className="text-xs text-muted-foreground mb-1 block">{subProjectLabel}</Label>
+          <Select
+            value={subProjectId || undefined}
+            onValueChange={onSubProjectChange}
+            disabled={!projectId}
+          >
+            <SelectTrigger className="w-full sm:w-56">
+              <SelectValue placeholder={projectId ? 'Select sub-project' : 'Select project first'} />
+            </SelectTrigger>
+            <SelectContent>
+              {subProjects.map((sp) => (
+                <SelectItem key={sp.id} value={sp.id}>{sp.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       {children}
     </div>
   );

@@ -233,43 +233,27 @@ export default function WprSheetPanel({
   const weekId = week?.id || '';
   const weekStart = week?.startDate || '';
   const weekEnd = week?.endDate || '';
-  const scopeKey = `${projectId}:${subProjectId}:${weekId}`;
+  const scopeKey = `${projectId}:${subProjectId || 'project'}:${weekId}`;
   const isLocked = status === 'submitted';
 
   const { data: existingReports = [], isLoading: reportLoading } = useQuery({
-    queryKey: ['wpr-report', projectId, subProjectId, weekId],
+    queryKey: ['wpr-report', projectId, subProjectId || 'project', weekId],
     queryFn: () =>
-      base44.entities.WprReport.filter(
-        subProjectId
-          ? {
-              project_id: projectId,
-              sub_project_id: subProjectId,
-              week_id: weekId,
-            }
-          : {
-              project_id: projectId,
-              sub_project_id: null,
-              week_id: weekId,
-            }
-      ),
+      base44.entities.WprReport.filter({
+        project_id: projectId,
+        sub_project_id: subProjectId || null,
+        week_id: weekId,
+      }),
     enabled: !!projectId && !!weekId,
   });
 
   const { data: labourEntries = [], isLoading: labourLoading } = useQuery({
-    queryKey: ['wpr-labours', projectId, subProjectId, weekStart, weekEnd],
+    queryKey: ['wpr-labours', projectId, subProjectId || 'project', weekStart, weekEnd],
     queryFn: () =>
-      base44.entities.ContractorLabour.filter(
-        subProjectId
-          ? {
-              project_id: projectId,
-              sub_project_id: subProjectId,
-            }
-          : {
-              project_id: projectId,
-            },
-        '-date',
-        2000
-      ),
+      base44.entities.ContractorLabour.filter({
+        project_id: projectId,
+        ...(subProjectId ? { sub_project_id: subProjectId } : {}),
+      }, '-date', 2000),
     enabled: !!projectId && !!weekStart && !!weekEnd,
   });
 
@@ -292,10 +276,9 @@ export default function WprSheetPanel({
   });
 
   const scopedProgress = useMemo(
-    () => {
-      if (!subProjectId) return allProgress;
-      return filterProgressBySubProject(allProgress, allBudgetItems, allWbsItems, subProjectId);
-    },
+    () => subProjectId 
+      ? filterProgressBySubProject(allProgress, allBudgetItems, allWbsItems, subProjectId)
+      : allProgress,
     [allProgress, allBudgetItems, allWbsItems, subProjectId]
   );
 

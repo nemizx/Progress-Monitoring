@@ -1215,12 +1215,7 @@ export default function SiteProgress() {
         )}
       </ProjectSubProjectSelector>
 
-      <SubProjectGate
-        projectId={projectId}
-        subProjectId={subProjectId}
-        subProjects={subProjects}
-        bypass={activeTab === 'wpr'}
-      >
+      <SubProjectGate projectId={projectId} subProjectId={subProjectId} subProjects={subProjects} bypassSubProject={activeTab === 'wpr'}>
 
 
       {/* 1. Daily DPR Sheet Tab */}
@@ -1756,9 +1751,9 @@ export default function SiteProgress() {
         <div className="space-y-4">
           <WprSheetPanel
             projectId={projectId}
-            subProjectId={subProjectId}
+            subProjectId=""
             selectedProject={selectedProject}
-            selectedSubProject={selectedSubProject}
+            selectedSubProject={null}
             week={currentWeekObj}
             submittedBy={submittedBy}
           />

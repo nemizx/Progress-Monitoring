@@ -9,13 +9,11 @@ export default function SubProjectGate({
   subProjectId,
   subProjects = [],
   children,
-  bypass = false,
+  bypassSubProject = false,
   projectMessage = 'Choose a project first, then select a sub-project to continue.',
   subProjectMessage = 'Choose a sub-project to view and manage data for this tower, block, or phase.',
   noSubProjectsMessage = 'Add sub-projects (towers, blocks, phases) under Projects before using this feature.',
 }) {
-  if (bypass) return children;
-
   if (!projectId) {
     return (
       <EmptyState
@@ -26,7 +24,7 @@ export default function SubProjectGate({
     );
   }
 
-  if (!subProjectId) {
+  if (!bypassSubProject && !subProjectId) {
     if (subProjects.length === 0) {
       return (
         <EmptyState

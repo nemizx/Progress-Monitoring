@@ -279,10 +279,7 @@ export async function buildWprExcelWorkbook({
     let sectionAchievedTotal = 0;
 
     sec.subprojects.forEach((sub) => {
-      const isSingleProjectWise = sub.subProjectName === 'Project-wise';
-      if (!isSingleProjectWise) {
-        b.groupLabel(sub.subProjectName);
-      }
+      b.groupLabel(sub.subProjectName);
 
       let subPlanTotal = 0;
       let subAchievedTotal = 0;
@@ -306,17 +303,15 @@ export async function buildWprExcelWorkbook({
       sectionPlanTotal += subPlanTotal;
       sectionAchievedTotal += subAchievedTotal;
 
-      if (!isSingleProjectWise) {
-        const subPct = subPlanTotal > 0 ? Math.min(Math.round((subAchievedTotal / subPlanTotal) * 100), 100) : 0;
-        b.subtotalRow([
-          '',
-          `${sub.subProjectName} Subtotal`,
-          subPlanTotal,
-          subAchievedTotal,
-          `${subPct}%`,
-          '',
-        ]);
-      }
+      const subPct = subPlanTotal > 0 ? Math.min(Math.round((subAchievedTotal / subPlanTotal) * 100), 100) : 0;
+      b.subtotalRow([
+        '',
+        `${sub.subProjectName} Subtotal`,
+        subPlanTotal,
+        subAchievedTotal,
+        `${subPct}%`,
+        '',
+      ]);
     });
 
     const overallPct = sectionPlanTotal > 0 ? Math.min(Math.round((sectionAchievedTotal / sectionPlanTotal) * 100), 100) : 0;
