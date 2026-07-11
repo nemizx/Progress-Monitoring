@@ -1592,32 +1592,22 @@ Format with markdown. Be specific, professional, and actionable.`;
                       <table className="w-full text-xs font-sans border-collapse">
                         <thead>
                           <tr className="bg-slate-100 border-b">
-                            <th rowSpan={4} className="p-3 text-left font-bold border-r align-middle bg-slate-200/50 min-w-[200px]">Area of Review</th>
-                            <th rowSpan={4} className="p-3 text-center font-bold border-r align-middle bg-slate-200/50 min-w-[60px]">Unit</th>
-                            <th rowSpan={3} colSpan={3} className="p-3 text-center font-bold border-r align-middle bg-slate-200/50">Monthly</th>
+                            <th rowSpan={2} className="p-3 text-left font-bold border-r border-b align-middle bg-slate-200/50 min-w-[200px]">Area of Review</th>
+                            <th rowSpan={2} className="p-3 text-center font-bold border-r border-b align-middle bg-slate-200/50 min-w-[60px]">Unit</th>
+                            <th colSpan={3} className="p-3 text-center font-bold border-r border-b bg-slate-200/50">Monthly</th>
                             <th colSpan={3} className="p-2.5 text-center font-bold border-b bg-slate-200/50">
                               {weeksList.find(w => w.id === selectedWprReportWeek) ? `Week ${weeksList.find(w => w.id === selectedWprReportWeek).weekNum}` : 'Weekly'}
-                            </th>
-                          </tr>
-                          <tr className="bg-slate-100 border-b">
-                            <th colSpan={2} className="p-1.5 text-center font-semibold border-r border-b text-[10px]">From</th>
-                            <th colSpan={1} className="p-1.5 text-center font-semibold border-b text-[10px]">To</th>
-                          </tr>
-                          <tr className="bg-slate-100 border-b">
-                            <th colSpan={2} className="p-1.5 text-center font-mono border-r border-b text-[10px] text-slate-600">
-                              {formatWprDate(weeksList.find(w => w.id === selectedWprReportWeek)?.startDate)}
-                            </th>
-                            <th colSpan={1} className="p-1.5 text-center font-mono border-b text-[10px] text-slate-600">
-                              {formatWprDate(weeksList.find(w => w.id === selectedWprReportWeek)?.endDate)}
+                              {" "}
+                              ({weeksList.find(w => w.id === selectedWprReportWeek) ? `${formatWprDate(weeksList.find(w => w.id === selectedWprReportWeek).startDate)} to ${formatWprDate(weeksList.find(w => w.id === selectedWprReportWeek).endDate)}` : ''})
                             </th>
                           </tr>
                           <tr className="bg-slate-50 border-b text-[10px]">
-                            <th className="p-2 text-right font-bold border-r">Plan</th>
-                            <th className="p-2 text-right font-bold border-r">Achieved</th>
-                            <th className="p-2 text-right font-bold border-r">% Achieved</th>
-                            <th className="p-2 text-right font-bold border-r">Plan</th>
-                            <th className="p-2 text-right font-bold border-r">Achieved</th>
-                            <th className="p-2 text-right font-bold">% Achieved</th>
+                            <th className="p-2 text-right font-bold border-r border-b">Plan</th>
+                            <th className="p-2 text-right font-bold border-r border-b">Achieved</th>
+                            <th className="p-2 text-right font-bold border-r border-b">% Achieved</th>
+                            <th className="p-2 text-right font-bold border-r border-b">Plan</th>
+                            <th className="p-2 text-right font-bold border-r border-b">Achieved</th>
+                            <th className="p-2 text-right font-bold border-b">% Achieved</th>
                           </tr>
                         </thead>
                         <tbody>
