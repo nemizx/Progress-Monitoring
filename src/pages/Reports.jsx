@@ -876,8 +876,10 @@ export default function Reports() {
       const { jsPDF } = await import('jspdf');
       const html2canvas = (await import('html2canvas')).default;
 
-      const container = document.getElementById('wpr-report-print-container');
-      if (!container) throw new Error('Report container not found');
+      const summaryCard = document.getElementById('wpr-summary-card');
+      const detailedCards = Array.from(document.querySelectorAll('.wpr-detail-card'));
+      
+      if (!summaryCard) throw new Error('Summary card not found');
 
       // Create a landscape jsPDF instance
       const pdf = new jsPDF({
@@ -886,34 +888,37 @@ export default function Reports() {
         format: 'a4'
       });
 
-      const canvas = await html2canvas(container, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff'
-      });
-
-      const imgData = canvas.toDataURL('image/png');
-      
       // A4 Landscape dimensions
       const pageWidth = 297;
       const pageHeight = 210;
-      
-      // Calculate scaled image height to fit the full page width
-      const imgWidth = pageWidth;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      const margin = 10;
+      const maxPageHeight = pageHeight - margin;
 
-      let remainingHeight = imgHeight;
-      let yOffset = 0;
+      let currentY = margin;
       let isFirstPage = true;
 
-      while (remainingHeight > 0) {
-        if (!isFirstPage) {
+      const allElements = [summaryCard, ...detailedCards];
+
+      for (const element of allElements) {
+        const canvas = await html2canvas(element, {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#ffffff'
+        });
+
+        const imgData = canvas.toDataURL('image/png');
+        const imgWidth = pageWidth - (2 * margin); // 277 mm
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+        // If it doesn't fit on the current page, start a new page
+        if (!isFirstPage && currentY + imgHeight > maxPageHeight) {
           pdf.addPage('a4', 'landscape');
+          currentY = margin;
         }
-        pdf.addImage(imgData, 'PNG', 0, yOffset, imgWidth, imgHeight);
-        yOffset -= pageHeight;
-        remainingHeight -= pageHeight;
+
+        pdf.addImage(imgData, 'PNG', margin, currentY, imgWidth, imgHeight);
+        currentY += imgHeight + 8; // add a small gap of 8mm between cards
         isFirstPage = false;
       }
 
