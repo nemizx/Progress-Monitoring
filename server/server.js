@@ -1279,6 +1279,14 @@ async function ensureExtendedTables() {
     ALTER TABLE technical_staff_attendance
     ADD CONSTRAINT technical_staff_attendance_staff_date_sub_project_key UNIQUE (technical_staff_id, date, sub_project_id)
   `);
+
+  // Add partial unique index for project-wide WPR (sub_project_id IS NULL)
+  // Standard UNIQUE constraint doesn't enforce uniqueness for NULLs in PostgreSQL
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS wpr_reports_project_week_null_sub
+    ON wpr_reports (project_id, week_id)
+    WHERE sub_project_id IS NULL
+  `);
 }
 
 // Start listening

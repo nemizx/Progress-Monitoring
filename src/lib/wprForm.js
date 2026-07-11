@@ -95,7 +95,7 @@ export const calcAvgWeeklyLabour = (labourEntries, weekStart, weekEnd) => {
   const days = Object.keys(byDate);
   if (days.length === 0) return 0;
   const total = days.reduce((sum, d) => sum + byDate[d], 0);
-  return Math.round((total / days.length) * 100) / 100;
+  return Math.round(total / days.length);
 };
 
 /** Sum of value_of_work_done for progress entries in the week. */

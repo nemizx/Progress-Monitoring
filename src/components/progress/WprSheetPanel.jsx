@@ -412,7 +412,7 @@ export default function WprSheetPanel({
       };
       return {
         project_id: projectId,
-        sub_project_id: subProjectId,
+        sub_project_id: subProjectId || null,
         week_id: weekId,
         week_start: weekStart,
         week_end: weekEnd,
@@ -445,7 +445,7 @@ export default function WprSheetPanel({
       setReportId(created?.id || null);
     }
     setStatus(nextStatus);
-    queryClient.invalidateQueries({ queryKey: ['wpr-report', projectId, subProjectId, weekId] });
+    queryClient.invalidateQueries({ queryKey: ['wpr-report', projectId, subProjectId || 'project', weekId] });
   };
 
   const handleSaveDraft = async () => {
