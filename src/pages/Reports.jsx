@@ -876,43 +876,45 @@ export default function Reports() {
       const { jsPDF } = await import('jspdf');
       const html2canvas = (await import('html2canvas')).default;
 
-      const summaryCard = document.getElementById('wpr-summary-card');
-      const detailedCards = document.querySelectorAll('.wpr-detail-card');
-      
-      if (!summaryCard) throw new Error('Summary card not found');
+      const container = document.getElementById('wpr-report-print-container');
+      if (!container) throw new Error('Report container not found');
 
+      // Create a landscape jsPDF instance
       const pdf = new jsPDF({
-        orientation: 'portrait',
+        orientation: 'landscape',
         unit: 'mm',
         format: 'a4'
       });
 
-      const addCardToPdf = async (element, isFirstPage) => {
-        if (!isFirstPage) pdf.addPage();
-        
-        const canvas = await html2canvas(element, {
-          scale: 2,
-          useCORS: true,
-          logging: false
-        });
-        
-        const imgData = canvas.toDataURL('image/png');
-        const imgWidth = 210;
-        const pageHeight = 297;
-        const imgHeight = (canvas.height * imgWidth) / canvas.width;
-        
-        let yOffset = 0;
-        if (imgHeight < pageHeight) {
-          yOffset = (pageHeight - imgHeight) / 3;
+      const canvas = await html2canvas(container, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff'
+      });
+
+      const imgData = canvas.toDataURL('image/png');
+      
+      // A4 Landscape dimensions
+      const pageWidth = 297;
+      const pageHeight = 210;
+      
+      // Calculate scaled image height to fit the full page width
+      const imgWidth = pageWidth;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+      let remainingHeight = imgHeight;
+      let yOffset = 0;
+      let isFirstPage = true;
+
+      while (remainingHeight > 0) {
+        if (!isFirstPage) {
+          pdf.addPage('a4', 'landscape');
         }
-        
-        pdf.addImage(imgData, 'PNG', 0, yOffset, imgWidth, Math.min(imgHeight, pageHeight));
-      };
-
-      await addCardToPdf(summaryCard, true);
-
-      for (const card of detailedCards) {
-        await addCardToPdf(card, false);
+        pdf.addImage(imgData, 'PNG', 0, yOffset, imgWidth, imgHeight);
+        yOffset -= pageHeight;
+        remainingHeight -= pageHeight;
+        isFirstPage = false;
       }
 
       const weekObj = weeksList.find(w => w.id === selectedWprReportWeek);
