@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,8 +9,7 @@ import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-  FileText, Loader2, Download, TrendingUp, AlertTriangle, Users, DollarSign,
-  Calendar, Wrench, Clock, Coins, Package, HelpCircle, FileSpreadsheet
+  FileText, Loader2, Download, TrendingUp, AlertTriangle, DollarSign, FileSpreadsheet
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import ContractorLabourTable from '@/components/progress/ContractorLabourTable';
@@ -19,8 +18,11 @@ import StatCard from '@/components/shared/StatCard';
 import StatusBadge from '@/components/shared/StatusBadge';
 import { formatCompactCurrencyINR, formatCurrencyINR, normalizeDateKey } from '@/lib/formatters';
 import { buildDprExcelWorkbook, downloadDprExcelWorkbook } from '@/lib/dprExcelExport';
+import { buildWprExcelWorkbook, downloadWprExcelWorkbook } from '@/lib/wprExcelExport';
 import { useToast } from '@/components/ui/use-toast';
 import { useProjectSubProject } from '@/hooks/useProjectSubProject';
+import { buildWprWeeksList } from '@/lib/wprWeeks';
+import { calcPct } from '@/lib/wprForm';
 
 const PIE_COLORS = ['#1e3a5f', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444'];
 
@@ -43,10 +45,19 @@ export default function Reports() {
     return localDate.toISOString().split('T')[0];
   };
   const [selectedDprDate, setSelectedDprDate] = useState(getLocalDateString());
+  const [selectedWprReportWeek, setSelectedWprReportWeek] = useState('');
+  const [selectedWprReportMonth, setSelectedWprReportMonth] = useState('');
   const { toast } = useToast();
 
   const isReportReady = !!projectId;
   const selectedProject = projects.find((p) => p.id === projectId);
+
+  // --- WPR Reports Queries ---
+  const { data: allWprReports = [], isLoading: wprReportsLoading } = useQuery({
+    queryKey: ['wpr-reports-all', projectId],
+    queryFn: () => projectId ? base44.entities.WprReport.filter({ project_id: projectId }) : Promise.resolve([]),
+    enabled: !!projectId,
+  });
 
   // --- Date-based Queries for DPR Reports ---
 
@@ -192,6 +203,258 @@ export default function Reports() {
   const changeCats = {};
   filteredChanges.forEach(c => { changeCats[c.category || 'other'] = (changeCats[c.category || 'other'] || 0) + 1; });
   const changeChart = Object.entries(changeCats).map(([name, value]) => ({ name: name.replace(/_/g,' '), value }));
+
+  // --- WPR Weeks & Months Memo Lists ---
+  const weeksList = useMemo(
+    () => buildWprWeeksList({
+      projectStartDate: selectedProject?.start_date || selectedProject?.created_date || null,
+    }),
+    [selectedProject?.start_date, selectedProject?.created_date, projectId]
+  );
+
+  const filledWprWeekIds = useMemo(() => {
+    return new Set(allWprReports.map(r => r.week_id));
+  }, [allWprReports]);
+
+  const wprMonths = useMemo(() => {
+    const months = [];
+    const seen = new Set();
+    for (const w of weeksList) {
+      if (!seen.has(w.monthKey)) {
+        seen.add(w.monthKey);
+        months.push({
+          key: w.monthKey,
+          label: w.monthLabel
+        });
+      }
+    }
+    return months;
+  }, [weeksList]);
+
+  const filteredWprWeeks = useMemo(() => {
+    return weeksList.filter(w => w.monthKey === selectedWprReportMonth && filledWprWeekIds.has(w.id));
+  }, [weeksList, selectedWprReportMonth, filledWprWeekIds]);
+
+  const handleWprReportMonthChange = (monthKey) => {
+    setSelectedWprReportMonth(monthKey);
+    const monthWeeks = weeksList.filter(w => w.monthKey === monthKey && filledWprWeekIds.has(w.id));
+    if (monthWeeks.length) {
+      setSelectedWprReportWeek(monthWeeks[0].id);
+    } else {
+      setSelectedWprReportWeek('');
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'wpr-reports') return;
+    if (!weeksList.length) {
+      setSelectedWprReportWeek('');
+      setSelectedWprReportMonth('');
+      return;
+    }
+    const latestWeek = weeksList.find(w => filledWprWeekIds.has(w.id));
+    const targetWeekId = selectedWprReportWeek && filledWprWeekIds.has(selectedWprReportWeek)
+      ? selectedWprReportWeek
+      : (latestWeek?.id || '');
+    const weekObj = weeksList.find((w) => w.id === targetWeekId);
+    setSelectedWprReportWeek(targetWeekId);
+    setSelectedWprReportMonth(weekObj?.monthKey || latestWeek?.monthKey || weeksList[0]?.monthKey || '');
+  }, [weeksList, filledWprWeekIds, activeTab, selectedWprReportWeek]);
+
+  const wprWeekReports = useMemo(() => {
+    if (!selectedWprReportWeek) return [];
+    return allWprReports.filter(r => r.week_id === selectedWprReportWeek);
+  }, [allWprReports, selectedWprReportWeek]);
+
+  const parsedWprReports = useMemo(() => {
+    return wprWeekReports.map(r => {
+      try {
+        return {
+          ...r,
+          parsedForm: JSON.parse(r.form_data || '{}')
+        };
+      } catch (e) {
+        return { ...r, parsedForm: {} };
+      }
+    });
+  }, [wprWeekReports]);
+
+  const wprSummaryData = useMemo(() => {
+    if (!parsedWprReports.length) return [];
+
+    const sumField = (key, subKey) => {
+      return parsedWprReports.reduce((sum, r) => {
+        const val = r.parsedForm?.[key]?.[subKey];
+        return sum + (Number(val) || 0);
+      }, 0);
+    };
+
+    const countSectionRows = (key, field = 'plan') => {
+      return parsedWprReports.reduce((sum, r) => {
+        const rows = r.parsedForm?.[key] || [];
+        return sum + rows.filter(row => row.name && String(row[field] || '').trim() !== '').length;
+      }, 0);
+    };
+
+    const avgField = (key, subKey) => {
+      let count = 0;
+      const sum = parsedWprReports.reduce((acc, r) => {
+        const val = r.parsedForm?.[key]?.[subKey];
+        if (val !== undefined && val !== null && val !== '') {
+          count++;
+          return acc + Number(val);
+        }
+        return acc;
+      }, 0);
+      return count > 0 ? sum / count : 0;
+    };
+
+    const data = [
+      {
+        id: 1,
+        name: 'Avg. No Of Labour Allocated',
+        unit: 'Nos',
+        plan: sumField('avgLabour', 'plan'),
+        achieved: sumField('avgLabour', 'achieved'),
+      },
+      {
+        id: 2,
+        name: 'No. of Construction Milestones to Achieve: Building wise',
+        unit: 'Nos',
+        plan: sumField('milestones', 'plan'),
+        achieved: sumField('milestones', 'achieved'),
+      },
+      {
+        id: 3,
+        name: 'Quality Rating',
+        unit: 'Rating',
+        plan: avgField('qualityRating', 'plan') || 10,
+        achieved: avgField('qualityRating', 'achieved'),
+      },
+      {
+        id: 4,
+        name: 'Health and Safety Rating',
+        unit: 'Rating',
+        plan: avgField('healthSafetyRating', 'plan') || 10,
+        achieved: avgField('healthSafetyRating', 'achieved'),
+      },
+      {
+        id: 5,
+        name: 'No of Requisition Of Material',
+        unit: 'Nos',
+        plan: countSectionRows('materialRequisitions', 'plan'),
+        achieved: countSectionRows('materialRequisitions', 'achieved'),
+      },
+      {
+        id: 6,
+        name: 'Bills to certify',
+        unit: 'Nos',
+        plan: countSectionRows('billsToCertify', 'plan'),
+        achieved: countSectionRows('billsToCertify', 'achieved'),
+      },
+      {
+        id: 7,
+        name: 'No. of leadership input / client inputs / consultant inputs to be adopted',
+        unit: 'Nos',
+        plan: countSectionRows('leadershipInputs', 'plan'),
+        achieved: countSectionRows('leadershipInputs', 'achieved'),
+      },
+      {
+        id: 8,
+        name: 'Mock up Activity',
+        unit: 'Nos',
+        plan: countSectionRows('mockUpActivities', 'plan'),
+        achieved: countSectionRows('mockUpActivities', 'achieved'),
+      },
+      {
+        id: 9,
+        name: 'Contractors to be Mobilized',
+        unit: 'Nos',
+        plan: countSectionRows('contractorsMobilized', 'plan'),
+        achieved: countSectionRows('contractorsMobilized', 'achieved'),
+      },
+      {
+        id: 10,
+        name: 'Contractor review meeting conducted',
+        unit: 'Nos',
+        plan: sumField('contractorReviewMeeting', 'plan'),
+        achieved: sumField('contractorReviewMeeting', 'achieved'),
+      },
+      {
+        id: 11,
+        name: 'Key Plan Activity',
+        unit: 'Nos',
+        plan: countSectionRows('keyPlanActivities', 'plan'),
+        achieved: countSectionRows('keyPlanActivities', 'achieved'),
+      },
+      {
+        id: 12,
+        name: 'Value of Work Done',
+        unit: 'INR',
+        plan: sumField('valueOfWorkDone', 'plan'),
+        achieved: sumField('valueOfWorkDone', 'achieved'),
+        isCurrency: true
+      },
+      {
+        id: 13,
+        name: 'Work Methodology Details',
+        unit: 'Nos',
+        plan: countSectionRows('workMethodology', 'plan'),
+        achieved: countSectionRows('workMethodology', 'achieved'),
+      },
+      {
+        id: 14,
+        name: 'Support Required / Decision On Details',
+        unit: 'Nos',
+        plan: countSectionRows('supportRequired', 'plan'),
+        achieved: countSectionRows('supportRequired', 'achieved'),
+      },
+    ];
+
+    return data.map(item => {
+      const pct = calcPct(item.plan, item.achieved);
+      return {
+        ...item,
+        pct: pct !== null ? `${pct}%` : '—'
+      };
+    });
+  }, [parsedWprReports]);
+
+  const wprDetailedSections = useMemo(() => {
+    const sections = [
+      { key: 'materialRequisitions', title: '5. No of Requisition Of Material', nameLabel: 'Requisition' },
+      { key: 'billsToCertify', title: '6. Bills to certify', nameLabel: 'Bills to Certify' },
+      { key: 'leadershipInputs', title: '7. No. of leadership input / client inputs / consultant inputs to be adopted', nameLabel: 'Feedback' },
+      { key: 'mockUpActivities', title: '8. Mock up Activity', nameLabel: 'Mock up Activity' },
+      { key: 'contractorsMobilized', title: '9. Contractors to be Mobilized', nameLabel: 'Contractor' },
+      { key: 'keyPlanActivities', title: '11. Key Plan Activity', nameLabel: 'Activity Name' },
+      { key: 'workMethodology', title: '13. Work Methodology Details', nameLabel: 'Work Methodology' },
+      { key: 'supportRequired', title: '14. Support Required / Decision On Details', nameLabel: 'Support Required / Decision On' },
+    ];
+
+    return sections.map(sec => {
+      const subprojectRows = [];
+      parsedWprReports.forEach(report => {
+        const sub = subProjects.find(s => s.id === report.sub_project_id);
+        const rows = report.parsedForm?.[sec.key] || [];
+        const validRows = rows.filter(r => r.name);
+        if (validRows.length) {
+          subprojectRows.push({
+            subProjectName: sub?.name || 'Unassigned Subproject',
+            rows: validRows.map(r => ({
+              ...r,
+              pct: calcPct(r.plan, r.achieved)
+            }))
+          });
+        }
+      });
+
+      return {
+        ...sec,
+        subprojects: subprojectRows
+      };
+    });
+  }, [parsedWprReports, subProjects]);
 
   // Helper date formatter
   const formatDateDMY = (dateStr) => {
@@ -488,6 +751,83 @@ export default function Reports() {
     }
   };
 
+  const handleExportWprExcel = async () => {
+    if (!projectId || !selectedWprReportWeek) return;
+
+    toast({ title: 'Exporting WPR Excel...', description: 'Assembling progress datasets.' });
+    try {
+      const { workbook, filename } = await buildWprExcelWorkbook({
+        selectedProject,
+        selectedWprReportWeek,
+        weeksList,
+        wprSummaryData,
+        wprDetailedSections,
+      });
+
+      await downloadWprExcelWorkbook(workbook, filename);
+      toast({ title: 'WPR Excel Exported', description: `Saved as ${filename}` });
+    } catch (err) {
+      console.error(err);
+      toast({ title: 'Export Failed', description: err.message || 'Could not export WPR Excel.', variant: 'destructive' });
+    }
+  };
+
+  const handleExportWprPdf = async () => {
+    if (!selectedWprReportWeek) return;
+    toast({ title: 'Exporting PDF...', description: 'Assembling document pages.' });
+    try {
+      const { jsPDF } = await import('jspdf');
+      const html2canvas = (await import('html2canvas')).default;
+
+      const summaryCard = document.getElementById('wpr-summary-card');
+      const detailedCards = document.querySelectorAll('.wpr-detail-card');
+      
+      if (!summaryCard) throw new Error('Summary card not found');
+
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      const addCardToPdf = async (element, isFirstPage) => {
+        if (!isFirstPage) pdf.addPage();
+        
+        const canvas = await html2canvas(element, {
+          scale: 2,
+          useCORS: true,
+          logging: false
+        });
+        
+        const imgData = canvas.toDataURL('image/png');
+        const imgWidth = 210;
+        const pageHeight = 297;
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+        
+        let yOffset = 0;
+        if (imgHeight < pageHeight) {
+          yOffset = (pageHeight - imgHeight) / 3;
+        }
+        
+        pdf.addImage(imgData, 'PNG', 0, yOffset, imgWidth, Math.min(imgHeight, pageHeight));
+      };
+
+      await addCardToPdf(summaryCard, true);
+
+      for (const card of detailedCards) {
+        await addCardToPdf(card, false);
+      }
+
+      const weekObj = weeksList.find(w => w.id === selectedWprReportWeek);
+      const filename = `WPR_Report_${weekObj?.startDate || 'week'}.pdf`;
+      pdf.save(filename);
+      toast({ title: 'PDF Exported', description: `Saved as ${filename}` });
+    } catch (err) {
+      console.error(err);
+      toast({ title: 'Export Failed', description: err.message || 'Could not export WPR PDF.', variant: 'destructive' });
+    }
+  };
+
   // --- Executive LLM Report Generator ---
   const generateReport = async () => {
     if (!isReportReady) return;
@@ -543,6 +883,7 @@ Format with markdown. Be specific, professional, and actionable.`;
           <TabsList className="bg-muted/40 p-1 rounded-lg">
             <TabsTrigger value="dashboards" className="text-xs font-semibold">Dashboards</TabsTrigger>
             <TabsTrigger value="dpr-reports" className="text-xs font-semibold">DPR Reports</TabsTrigger>
+            <TabsTrigger value="wpr-reports" className="text-xs font-semibold">WPR Reports</TabsTrigger>
             <TabsTrigger value="generate" className="text-xs font-semibold">Generate Summary Report</TabsTrigger>
           </TabsList>
 
@@ -1066,6 +1407,200 @@ Format with markdown. Be specific, professional, and actionable.`;
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+          {/* WPR Reports Tab */}
+          <TabsContent value="wpr-reports" className="mt-4 space-y-6">
+            <Card className="border shadow-sm">
+              <CardContent className="p-4 flex flex-col md:flex-row md:items-end justify-between gap-4">
+                <div className="flex flex-wrap gap-4 items-end flex-1">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-muted-foreground">Select Month</Label>
+                    <Select value={selectedWprReportMonth} onValueChange={handleWprReportMonthChange}>
+                      <SelectTrigger className="w-full sm:w-44 bg-background">
+                        <SelectValue placeholder="Choose Month" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {wprMonths.map(m => (
+                          <SelectItem key={m.key} value={m.key}>{m.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-muted-foreground">Select Week</Label>
+                    <Select
+                      value={selectedWprReportWeek}
+                      onValueChange={setSelectedWprReportWeek}
+                      disabled={!filteredWprWeeks.length}
+                    >
+                      <SelectTrigger className="w-full sm:w-60 bg-background">
+                        <SelectValue placeholder={filteredWprWeeks.length ? 'Choose Week' : 'No filled weeks available'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {filteredWprWeeks.map(w => (
+                          <SelectItem key={w.id} value={w.id}>
+                            Week {w.weekNum} ({w.startDate} to {w.endDate})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    onClick={handleExportWprPdf}
+                    disabled={!selectedWprReportWeek}
+                    variant="outline"
+                    className="gap-2 border-slate-300 text-slate-700 font-semibold h-10 text-sm"
+                  >
+                    <FileText className="w-4 h-4 text-rose-600" /> Export PDF
+                  </Button>
+                  <Button
+                    onClick={handleExportWprExcel}
+                    disabled={!selectedWprReportWeek}
+                    className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold h-10 text-sm"
+                  >
+                    <FileSpreadsheet className="w-4 h-4" /> Export Excel
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {selectedWprReportWeek && parsedWprReports.length > 0 ? (
+              <div id="wpr-report-print-container" className="space-y-6 bg-slate-50/50 p-2 rounded-lg">
+                
+                {/* 1. Summary Card */}
+                <Card id="wpr-summary-card" className="shadow-sm border p-6 bg-white">
+                  <div className="text-center mb-6 border-b pb-4">
+                    <h2 className="text-xl font-bold font-heading tracking-tight text-slate-800">PLANEDGE MONITOR</h2>
+                    <h3 className="text-xs uppercase font-bold text-slate-500 tracking-widest mt-0.5">Weekly Progress Monitoring Report</h3>
+                    <p className="text-sm font-semibold text-primary mt-2">{selectedProject?.name}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {weeksList.find(w => w.id === selectedWprReportWeek)?.label}
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wide">
+                      A. BUILDING WISE WEEKLY PROGRESS MONITORING REPORT (SUMMARY)
+                    </h4>
+                    
+                    <div className="overflow-x-auto border rounded-lg">
+                      <table className="w-full text-xs font-sans">
+                        <thead>
+                          <tr className="bg-slate-100 border-b">
+                            <th className="p-2.5 text-center font-bold w-[60px] border-r">Sr. No</th>
+                            <th className="p-2.5 text-left font-bold border-r">Line Item / Parameter</th>
+                            <th className="p-2.5 text-center font-bold w-[80px] border-r">Unit</th>
+                            <th className="p-2.5 text-right font-bold w-[120px] border-r">Plan Qty</th>
+                            <th className="p-2.5 text-right font-bold w-[120px] border-r">Achieved Qty</th>
+                            <th className="p-2.5 text-right font-bold w-[100px]">% Completion</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {wprSummaryData.map((item, index) => (
+                            <tr key={item.id} className="border-b hover:bg-slate-50/50">
+                              <td className="p-2.5 text-center text-muted-foreground border-r">{index + 1}</td>
+                              <td className="p-2.5 border-r font-semibold text-slate-700">{item.name}</td>
+                              <td className="p-2.5 border-r text-center font-medium text-slate-600">{item.unit}</td>
+                              <td className="p-2.5 border-r text-right font-mono font-medium text-slate-700">
+                                {item.isCurrency ? `Rs. ${Number(item.plan).toLocaleString('en-IN')}` : item.plan}
+                              </td>
+                              <td className="p-2.5 border-r text-right font-mono font-bold text-slate-900 bg-amber-50/5">
+                                {item.isCurrency ? `Rs. ${Number(item.achieved).toLocaleString('en-IN')}` : item.achieved}
+                              </td>
+                              <td className="p-2.5 text-right font-mono font-bold text-emerald-600 bg-emerald-50/5">
+                                {item.pct}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </Card>
+
+                {/* 2. Detailed Cards Loop */}
+                {wprDetailedSections.map((sec) => {
+                  if (!sec.subprojects || sec.subprojects.length === 0) return null;
+
+                  return (
+                    <Card key={sec.key} className="wpr-detail-card shadow-sm border p-6 bg-white">
+                      <div className="space-y-4">
+                        <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wide">
+                          {sec.title}
+                        </h4>
+
+                        <div className="overflow-x-auto border rounded-lg">
+                          <table className="w-full text-xs font-sans">
+                            <thead>
+                              <tr className="bg-slate-100 border-b">
+                                <th className="p-2.5 text-center font-bold w-[60px] border-r">Sr. No</th>
+                                <th className="p-2.5 text-left font-bold border-r">{sec.nameLabel} Name</th>
+                                <th className="p-2.5 text-right font-bold w-[120px] border-r">Plan Qty</th>
+                                <th className="p-2.5 text-right font-bold w-[120px] border-r">Achieved Qty</th>
+                                <th className="p-2.5 text-right font-bold w-[100px] border-r">% Comp.</th>
+                                <th className="p-2.5 text-left font-bold">Remarks</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sec.subprojects.map((sub) => {
+                                const subPlanTotal = sub.rows.reduce((s, r) => s + (Number(r.plan) || 0), 0);
+                                const subAchievedTotal = sub.rows.reduce((s, r) => s + (Number(r.achieved) || 0), 0);
+                                const subPct = subPlanTotal > 0 ? Math.min(Math.round((subAchievedTotal / subPlanTotal) * 100), 100) : 0;
+                                const isSingleProjectWise = sub.subProjectName === 'Project-wise';
+
+                                return (
+                                  <React.Fragment key={sub.subProjectName}>
+                                    {!isSingleProjectWise && (
+                                      <tr className="bg-slate-50/80 font-bold border-b text-primary">
+                                        <td colSpan={6} className="p-2 pl-4 text-xs font-bold border-b">{sub.subProjectName}</td>
+                                      </tr>
+                                    )}
+                                    {sub.rows.map((r, idx) => (
+                                      <tr key={idx} className="border-b hover:bg-slate-50/50">
+                                        <td className="p-2.5 text-center text-muted-foreground border-r">{idx + 1}</td>
+                                        <td className="p-2.5 border-r font-medium text-slate-700">{r.name}</td>
+                                        <td className="p-2.5 border-r text-right font-mono">{r.plan || '—'}</td>
+                                        <td className="p-2.5 border-r text-right font-mono font-bold text-slate-900 bg-amber-50/5">{r.achieved || '—'}</td>
+                                        <td className="p-2.5 border-r text-right font-mono font-bold text-emerald-600 bg-emerald-50/5">
+                                          {r.pct !== null ? `${r.pct}%` : '—'}
+                                        </td>
+                                        <td className="p-2.5 text-slate-600">{r.remark || '—'}</td>
+                                      </tr>
+                                    ))}
+                                    {!isSingleProjectWise && (
+                                      <tr className="bg-slate-100/50 font-bold border-b text-slate-700">
+                                        <td className="p-2 text-center border-r"></td>
+                                        <td className="p-2 border-r">{sub.subProjectName} Subtotal</td>
+                                        <td className="p-2 border-r text-right font-mono">{subPlanTotal}</td>
+                                        <td className="p-2 border-r text-right font-mono">{subAchievedTotal}</td>
+                                        <td className="p-2 border-r text-right font-mono text-emerald-700">{subPct}%</td>
+                                        <td className="p-2"></td>
+                                      </tr>
+                                    )}
+                                  </React.Fragment>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+            ) : (
+              <Card className="border border-dashed shadow-none p-12 text-center">
+                <p className="text-sm text-muted-foreground font-sans">
+                  {wprMonths.length === 0 
+                    ? 'No WPR weekly data filled or submitted yet for this project.'
+                    : 'Select a Month and Week above to view the WPR Weekly progress report.'}
+                </p>
+              </Card>
+            )}
           </TabsContent>
 
           {/* 3. Generate Report Tab */}

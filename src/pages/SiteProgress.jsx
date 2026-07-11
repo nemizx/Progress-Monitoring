@@ -1099,6 +1099,7 @@ export default function SiteProgress() {
         subProjectId={subProjectId}
         onProjectChange={setProjectId}
         onSubProjectChange={setSubProjectId}
+        hideSubProject={activeTab === 'wpr'}
       >
         {activeTab === 'sheet' && projectId && subProjectId && (
           <>
@@ -1154,7 +1155,7 @@ export default function SiteProgress() {
             </div>
           </>
         )}
-        {activeTab === 'wpr' && projectId && subProjectId && (
+        {activeTab === 'wpr' && projectId && (
           <>
             <div className="h-9 w-px bg-border hidden md:block self-end mb-1" />
 
@@ -1214,7 +1215,12 @@ export default function SiteProgress() {
         )}
       </ProjectSubProjectSelector>
 
-      <SubProjectGate projectId={projectId} subProjectId={subProjectId} subProjects={subProjects}>
+      <SubProjectGate
+        projectId={projectId}
+        subProjectId={subProjectId}
+        subProjects={subProjects}
+        bypass={activeTab === 'wpr'}
+      >
 
 
       {/* 1. Daily DPR Sheet Tab */}

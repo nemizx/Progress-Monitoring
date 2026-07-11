@@ -239,22 +239,38 @@ export default function WprSheetPanel({
   const { data: existingReports = [], isLoading: reportLoading } = useQuery({
     queryKey: ['wpr-report', projectId, subProjectId, weekId],
     queryFn: () =>
-      base44.entities.WprReport.filter({
-        project_id: projectId,
-        sub_project_id: subProjectId,
-        week_id: weekId,
-      }),
-    enabled: !!projectId && !!subProjectId && !!weekId,
+      base44.entities.WprReport.filter(
+        subProjectId
+          ? {
+              project_id: projectId,
+              sub_project_id: subProjectId,
+              week_id: weekId,
+            }
+          : {
+              project_id: projectId,
+              sub_project_id: null,
+              week_id: weekId,
+            }
+      ),
+    enabled: !!projectId && !!weekId,
   });
 
   const { data: labourEntries = [], isLoading: labourLoading } = useQuery({
     queryKey: ['wpr-labours', projectId, subProjectId, weekStart, weekEnd],
     queryFn: () =>
-      base44.entities.ContractorLabour.filter({
-        project_id: projectId,
-        sub_project_id: subProjectId,
-      }, '-date', 2000),
-    enabled: !!projectId && !!subProjectId && !!weekStart && !!weekEnd,
+      base44.entities.ContractorLabour.filter(
+        subProjectId
+          ? {
+              project_id: projectId,
+              sub_project_id: subProjectId,
+            }
+          : {
+              project_id: projectId,
+            },
+        '-date',
+        2000
+      ),
+    enabled: !!projectId && !!weekStart && !!weekEnd,
   });
 
   const { data: allProgress = [], isLoading: progressLoading } = useQuery({
@@ -276,7 +292,10 @@ export default function WprSheetPanel({
   });
 
   const scopedProgress = useMemo(
-    () => filterProgressBySubProject(allProgress, allBudgetItems, allWbsItems, subProjectId),
+    () => {
+      if (!subProjectId) return allProgress;
+      return filterProgressBySubProject(allProgress, allBudgetItems, allWbsItems, subProjectId);
+    },
     [allProgress, allBudgetItems, allWbsItems, subProjectId]
   );
 
