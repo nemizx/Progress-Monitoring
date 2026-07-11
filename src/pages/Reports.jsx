@@ -904,7 +904,13 @@ export default function Reports() {
           scale: 2,
           useCORS: true,
           logging: false,
-          backgroundColor: '#ffffff'
+          backgroundColor: '#ffffff',
+          scrollX: 0,
+          scrollY: 0,
+          width: element.offsetWidth,
+          height: element.offsetHeight,
+          windowWidth: document.documentElement.offsetWidth,
+          windowHeight: document.documentElement.offsetHeight
         });
 
         const imgData = canvas.toDataURL('image/png');
