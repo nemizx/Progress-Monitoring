@@ -914,17 +914,30 @@ export default function Reports() {
         });
 
         const imgData = canvas.toDataURL('image/png');
-        const imgWidth = pageWidth - (2 * margin); // 277 mm
-        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+        const maxImgWidth = pageWidth - (2 * margin); // 277 mm
+        const maxImgHeight = pageHeight - (2 * margin); // 190 mm
 
-        // If it doesn't fit on the current page, start a new page
+        let imgWidth = maxImgWidth;
+        let imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+        // If the card height exceeds a single page height, scale it down to fit perfectly
+        if (imgHeight > maxImgHeight) {
+          const scale = maxImgHeight / imgHeight;
+          imgWidth = imgWidth * scale;
+          imgHeight = maxImgHeight;
+        }
+
+        // If it doesn't fit on the current page's remaining space, start a new page
         if (!isFirstPage && currentY + imgHeight > maxPageHeight) {
           pdf.addPage('a4', 'landscape');
           currentY = margin;
         }
 
-        pdf.addImage(imgData, 'PNG', margin, currentY, imgWidth, imgHeight);
-        currentY += imgHeight + 8; // add a small gap of 8mm between cards
+        // Center the card horizontally on the page
+        const xOffset = margin + (maxImgWidth - imgWidth) / 2;
+
+        pdf.addImage(imgData, 'PNG', xOffset, currentY, imgWidth, imgHeight);
+        currentY += imgHeight + 6; // gap between cards
         isFirstPage = false;
       }
 
