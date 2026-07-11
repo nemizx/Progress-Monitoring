@@ -71,8 +71,8 @@ export default function Reports() {
   // Technical Staff Attendance
   const { data: staffAttendance = [] } = useQuery({
     queryKey: ['staff-attendance-date', projectId, selectedDprDate],
-    queryFn: () => projectId ? base44.entities.TechnicalStaffAttendance.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
-    enabled: !!projectId,
+    queryFn: () => projectId && selectedDprDate ? base44.entities.TechnicalStaffAttendance.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
+    enabled: !!projectId && !!selectedDprDate,
   });
 
   // Contractors List
@@ -84,15 +84,15 @@ export default function Reports() {
   // Contractor Labour Entries
   const { data: contractorLabours = [] } = useQuery({
     queryKey: ['contractor-labours-project-date', projectId, selectedDprDate],
-    queryFn: () => projectId ? base44.entities.ContractorLabour.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
-    enabled: !!projectId,
+    queryFn: () => projectId && selectedDprDate ? base44.entities.ContractorLabour.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
+    enabled: !!projectId && !!selectedDprDate,
   });
 
   // Material Status Entries
   const { data: materialStatusEntries = [] } = useQuery({
     queryKey: ['material-status-date', projectId, selectedDprDate],
-    queryFn: () => projectId ? base44.entities.MaterialStatus.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
-    enabled: !!projectId,
+    queryFn: () => projectId && selectedDprDate ? base44.entities.MaterialStatus.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
+    enabled: !!projectId && !!selectedDprDate,
   });
 
   // Material Status History (to calculate till date values)
@@ -105,8 +105,8 @@ export default function Reports() {
   // Machinery Details
   const { data: machineryDetailsEntries = [] } = useQuery({
     queryKey: ['machinery-details-date', projectId, selectedDprDate],
-    queryFn: () => projectId ? base44.entities.MachineryDetail.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
-    enabled: !!projectId,
+    queryFn: () => projectId && selectedDprDate ? base44.entities.MachineryDetail.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
+    enabled: !!projectId && !!selectedDprDate,
   });
 
   // Machinery Details History
@@ -119,35 +119,53 @@ export default function Reports() {
   // Days Reports (Day's Report)
   const { data: daysReports = [] } = useQuery({
     queryKey: ['days-report-date', projectId, selectedDprDate],
-    queryFn: () => projectId ? base44.entities.DaysReport.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
-    enabled: !!projectId,
+    queryFn: () => projectId && selectedDprDate ? base44.entities.DaysReport.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
+    enabled: !!projectId && !!selectedDprDate,
   });
 
   // Status Reports
   const { data: statusReports = [] } = useQuery({
     queryKey: ['status-report-date', projectId, selectedDprDate],
-    queryFn: () => projectId ? base44.entities.StatusReport.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
-    enabled: !!projectId,
+    queryFn: () => projectId && selectedDprDate ? base44.entities.StatusReport.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
+    enabled: !!projectId && !!selectedDprDate,
   });
 
   // Special Site Visits
   const { data: specialSiteVisits = [] } = useQuery({
     queryKey: ['site-visits-date', projectId, selectedDprDate],
-    queryFn: () => projectId ? base44.entities.SpecialSiteVisit.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
-    enabled: !!projectId,
+    queryFn: () => projectId && selectedDprDate ? base44.entities.SpecialSiteVisit.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
+    enabled: !!projectId && !!selectedDprDate,
   });
 
   // Critical Issues
   const { data: criticalIssues = [] } = useQuery({
     queryKey: ['critical-issues-date', projectId, selectedDprDate],
-    queryFn: () => projectId ? base44.entities.CriticalIssue.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
-    enabled: !!projectId,
+    queryFn: () => projectId && selectedDprDate ? base44.entities.CriticalIssue.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
+    enabled: !!projectId && !!selectedDprDate,
   });
 
   // Next Day's Plans
   const { data: nextDaysPlans = [] } = useQuery({
     queryKey: ['next-days-plans-date', projectId, selectedDprDate],
-    queryFn: () => projectId ? base44.entities.NextDaysPlan.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
+    queryFn: () => projectId && selectedDprDate ? base44.entities.NextDaysPlan.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
+    enabled: !!projectId && !!selectedDprDate,
+  });
+
+  // Progress entries for the specific DPR date (for Section A: Status of Work)
+  const { data: dprDateProgressEntries = [], isLoading: dprProgressLoading } = useQuery({
+    queryKey: ['progress-entries-dpr-date', projectId, selectedDprDate],
+    queryFn: () => projectId && selectedDprDate
+      ? base44.entities.ProgressEntry.filter({ project_id: projectId, date: selectedDprDate }, '-date', 2000)
+      : Promise.resolve([]),
+    enabled: !!projectId && !!selectedDprDate,
+  });
+
+  // All historical progress entries for cumulative calculations in Section A
+  const { data: dprHistoricalProgress = [], isLoading: dprHistoricalLoading } = useQuery({
+    queryKey: ['progress-entries-dpr-historical', projectId],
+    queryFn: () => projectId
+      ? base44.entities.ProgressEntry.filter({ project_id: projectId }, '-date', 10000)
+      : Promise.resolve([]),
     enabled: !!projectId,
   });
 
@@ -467,11 +485,9 @@ export default function Reports() {
   const dprWorksheetData = useMemo(() => {
     if (!projectId) return [];
 
-    // Entries for selected date and all historical entries
-    const entriesForSelectedDate = progressEntries.filter(
-      (e) => normalizeDateKey(e.date) === selectedDprDate && !e._is_aggregated
-    );
-    const historicalEntries = progressEntries.filter(
+    // Use dedicated date-scoped entries for today's data; historical for cumulative
+    const entriesForSelectedDate = dprDateProgressEntries.filter(e => !e._is_aggregated);
+    const historicalEntries = dprHistoricalProgress.filter(
       (e) => normalizeDateKey(e.date) <= selectedDprDate && !e._is_aggregated
     );
 
@@ -583,7 +599,7 @@ export default function Reports() {
     });
 
     return [...wbsRows, ...orphanRows];
-  }, [projectId, projectWbsItems, progressEntries, budgetItems, selectedDprDate, nextDaysPlans]);
+  }, [projectId, projectWbsItems, dprDateProgressEntries, dprHistoricalProgress, budgetItems, selectedDprDate, nextDaysPlans]);
 
   // --- Dynamic Calculations for Contractor Labour ---
   const contractorLabourData = useMemo(() => {
@@ -740,7 +756,7 @@ export default function Reports() {
         specialSiteVisits,
         criticalIssues,
         nextDaysPlans,
-        progressEntries,
+        progressEntries: dprHistoricalProgress,
       });
 
       await downloadDprExcelWorkbook(workbook, filename);
