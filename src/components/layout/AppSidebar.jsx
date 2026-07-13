@@ -10,11 +10,12 @@ import { cn } from '@/lib/utils';
 import ThemeToggle from './ThemeToggle';
 import { useAuth } from '@/lib/AuthContext';
 
-export default function AppSidebar({ collapsed, setCollapsed }) {
+export default function AppSidebar() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const location = useLocation();
   const navigate = useNavigate();
+  const [hovered, setHovered] = useState(false);
 
   const dynamicNavStructure = React.useMemo(() => {
     return [
@@ -23,7 +24,6 @@ export default function AppSidebar({ collapsed, setCollapsed }) {
         { path: '/progress', tab: 'dpr', label: 'DPR' },
         { path: '/progress', tab: 'wpr', label: 'WPR' },
         { path: '/progress', tab: 'mpr', label: 'MPR' },
-        ...(isAdmin ? [{ path: '/progress', tab: 'history', label: 'Aggregated Logs & History' }] : []),
       ]},
       { type: 'link', path: '/technical-staff', label: 'Technical Staff', icon: Users },
       { type: 'link', path: '/contractors', label: 'Contractors', icon: Building2 },
@@ -57,17 +57,21 @@ export default function AppSidebar({ collapsed, setCollapsed }) {
   }));
 
   return (
-    <aside className={cn(
-      "fixed left-0 top-0 h-full bg-sidebar text-sidebar-foreground z-40 transition-all duration-300 flex flex-col border-r border-sidebar-border",
-      collapsed ? "w-[68px]" : "w-[240px]"
-    )}>
+    <aside
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className={cn(
+        "fixed left-0 top-0 h-full bg-sidebar text-sidebar-foreground z-40 transition-all duration-300 flex flex-col border-r border-sidebar-border",
+        !hovered ? "w-[68px]" : "w-[240px] shadow-2xl"
+      )}
+    >
       {/* Logo */}
       <div className="flex items-center gap-3 px-4 h-16 border-b border-sidebar-border shrink-0">
         <div className="w-9 h-9 rounded-lg bg-sidebar-primary flex items-center justify-center shrink-0">
           <HardHat className="w-5 h-5 text-sidebar-primary-foreground" />
         </div>
-        {!collapsed && (
-          <div className="flex-1 flex items-center justify-between">
+        {hovered && (
+          <div className="flex-1 flex items-center justify-between animate-in fade-in duration-200">
             <div className="overflow-hidden">
               <h1 className="font-heading font-bold text-sm tracking-tight text-sidebar-foreground">Planedge_Monitors</h1>
               <p className="text-[10px] text-sidebar-foreground/50 uppercase tracking-widest">Construction OS</p>
@@ -86,14 +90,14 @@ export default function AppSidebar({ collapsed, setCollapsed }) {
             const isActive = location.pathname === node.path || (node.path !== '/' && location.pathname.startsWith(node.path));
             const Icon = node.icon;
             return (
-              <Link key={node.path} to={node.path} title={collapsed ? node.label : undefined}
+              <Link key={node.path} to={node.path} title={!hovered ? node.label : undefined}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150",
                   isActive ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm" : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
                 )}
               >
                 {Icon && <Icon className="w-[18px] h-[18px] shrink-0" />}
-                {!collapsed && <span className="truncate">{node.label}</span>}
+                {hovered && <span className="truncate animate-in fade-in duration-200">{node.label}</span>}
               </Link>
             );
           }
@@ -104,12 +108,12 @@ export default function AppSidebar({ collapsed, setCollapsed }) {
               <button onClick={() => setOpenGroups(prev => ({ ...prev, [node.label]: !prev[node.label] }))} className={cn("flex items-center justify-between w-full px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors text-sidebar-foreground/70 hover:bg-sidebar-accent")}> 
                 <div className="flex items-center gap-3">
                   {node.icon && <node.icon className="w-[18px] h-[18px]" />}
-                  {!collapsed && <span>{node.label}</span>}
+                  {hovered && <span className="animate-in fade-in duration-200">{node.label}</span>}
                 </div>
-                {!collapsed && <span className="text-xs">{open ? '-' : '+'}</span>}
+                {hovered && <span className="text-xs">{open ? '-' : '+'}</span>}
               </button>
-              {open && !collapsed && (
-                <div className="mt-1 ml-6 space-y-1">
+              {open && hovered && (
+                <div className="mt-1 ml-6 space-y-1 animate-in slide-in-from-left-2 duration-200">
                   {node.children.map(child => {
                     const childTo = child.tab
                       ? `${child.path}?tab=${child.tab}`
@@ -141,24 +145,18 @@ export default function AppSidebar({ collapsed, setCollapsed }) {
       </nav>
 
       {/* Footer */}
-      <div className="p-2 border-t border-sidebar-border space-y-0.5">
+      <div className="p-2 border-t border-sidebar-border">
         <div className="flex items-center gap-2">
-          <ThemeToggle className="ml-1" />
+          <ThemeToggle className="ml-1 shrink-0" />
           <button
             onClick={() => base44.auth.logout()}
             className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent w-full transition-colors"
-            title={collapsed ? 'Logout' : undefined}
+            title={!hovered ? 'Logout' : undefined}
           >
             <LogOut className="w-[18px] h-[18px] shrink-0" />
-            {!collapsed && <span>Logout</span>}
+            {hovered && <span className="animate-in fade-in duration-200">Logout</span>}
           </button>
         </div>
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="flex items-center justify-center w-full py-1.5 rounded-lg text-sidebar-foreground/30 hover:text-sidebar-foreground/60 transition-colors"
-        >
-          {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-        </button>
       </div>
     </aside>
   );

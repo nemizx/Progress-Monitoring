@@ -35,9 +35,9 @@ import { buildWprWeeksList, getDefaultWprWeekId } from '@/lib/wprWeeks';
 const weatherIcons = { clear: '☀️', cloudy: '⛅', rainy: '🌧️', stormy: '⛈️', hot: '🌡️' };
 const normalizeActivityKey = (value) => String(value || '').trim().toLowerCase();
 
-const TAB_FROM_PARAM = { dpr: 'sheet', wpr: 'wpr', mpr: 'mpr', history: 'history' };
-const PARAM_FROM_TAB = { sheet: 'dpr', wpr: 'wpr', mpr: 'mpr', history: 'history' };
-const TAB_TITLES = { sheet: 'DPR', wpr: 'WPR', mpr: 'MPR', history: 'Aggregated Logs & History' };
+const TAB_FROM_PARAM = { dpr: 'sheet', wpr: 'wpr', mpr: 'mpr' };
+const PARAM_FROM_TAB = { sheet: 'dpr', wpr: 'wpr', mpr: 'mpr' };
+const TAB_TITLES = { sheet: 'DPR', wpr: 'WPR', mpr: 'MPR' };
 
 const highlightText = (text, highlight) => {
   if (!text) return '—';
@@ -239,12 +239,12 @@ export default function SiteProgress() {
     setSelectedWprMonth(weekObj?.monthKey || '');
   }, [weeksList, selectedWeek]);
 
-  // Redirect non-admins if they try to access history directly
+  // Redirect if they try to access history tab directly (deprecated)
   useEffect(() => {
-    if (activeTab === 'history' && !isAdmin) {
+    if (activeTab === 'history') {
       setActiveTab('sheet');
     }
-  }, [activeTab, isAdmin, setActiveTab]);
+  }, [activeTab, setActiveTab]);
 
   const { data: allEntries = [], isLoading: entriesLoading } = useQuery({
     queryKey: ['progress', projectId],
@@ -1809,139 +1809,7 @@ export default function SiteProgress() {
         </div>
       )}
 
-      {/* 4. Aggregated Logs & History Tab */}
-      {activeTab === 'history' && isAdmin && (
-        <div className="space-y-6">
-          {/* History Filters */}
-          <div className="flex flex-wrap gap-3">
-            <Select value={typeFilter || 'all'} onValueChange={(v) => setTypeFilter(v === 'all' ? '' : v)}>
-              <SelectTrigger className="w-44">
-                <SelectValue placeholder="All Log Types" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Log Types</SelectItem>
-                <SelectItem value="daily">Daily Logs (DPR)</SelectItem>
-                <SelectItem value="weekly">Weekly Rollup (WPR)</SelectItem>
-                <SelectItem value="monthly">Monthly Rollup (MPR)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
 
-          {/* Stats Bar */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-              { label: 'Draft Logs', value: draftCount, icon: Clock, color: 'text-slate-500' },
-              { label: 'Submitted Logs', value: submittedCount, icon: ClipboardList, color: 'text-blue-600' },
-              { label: 'Approved Logs', value: approvedCount, icon: CheckCircle2, color: 'text-emerald-600' },
-              { label: 'Total Site Attendance', value: totalLabor, icon: AlertTriangle, color: 'text-amber-600' },
-            ].map(s => (
-              <Card key={s.label}>
-                <CardContent className="p-4 flex items-center gap-3">
-                  <s.icon className={`w-8 h-8 ${s.color}`} />
-                  <div>
-                    <p className="text-2xl font-bold font-sans">{s.value}</p>
-                    <p className="text-xs text-muted-foreground">{s.label}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          {/* Aggregated Logs List */}
-          {entriesLoading ? (
-            <div className="text-center py-12 text-muted-foreground text-sm font-sans">Loading log history...</div>
-          ) : filtered.length === 0 ? (
-            <EmptyState icon={ClipboardList} title="No progress records found" description="Submitted progress entries will appear here." />
-          ) : (
-            <Card className="overflow-hidden border shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm font-sans border-collapse">
-                  <thead>
-                    <tr className="border-b bg-muted/30">
-                      <th className="text-left p-3 font-semibold text-xs">Date / Period</th>
-                      <th className="text-left p-3 font-semibold text-xs">Type</th>
-                      <th className="text-left p-3 font-semibold text-xs">Work Description & Line Item</th>
-                      <th className="text-right p-3 font-semibold text-xs">Quantity Logged</th>
-                      <th className="text-right p-3 font-semibold text-xs">Value of Work Done</th>
-                      <th className="text-right p-3 font-semibold text-xs">Attendance</th>
-                      <th className="text-left p-3 font-semibold text-xs">Weather</th>
-                      <th className="text-left p-3 font-semibold text-xs">Status</th>
-                      <th className="p-3 w-16"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map(e => {
-                      const bItem = budgetItems.find(b => b.id === e.budget_item_id);
-                      return (
-                        <tr key={e.id} className="border-b hover:bg-muted/10 transition-colors">
-                          <td className="p-3 text-xs font-semibold whitespace-nowrap text-slate-700">{e.date}</td>
-                          <td className="p-3">
-                            <Badge 
-                              variant="outline" 
-                              className={`text-[9px] uppercase font-extrabold px-1.5 py-0.2 ${
-                                e.report_type === 'weekly' 
-                                  ? 'bg-blue-50 text-blue-700 border-blue-200' 
-                                  : e.report_type === 'monthly'
-                                    ? 'bg-purple-50 text-purple-700 border-purple-200'
-                                    : 'bg-slate-50 text-slate-700 border-slate-200'
-                              }`}
-                            >
-                              {e.report_type}
-                            </Badge>
-                          </td>
-                          <td className="p-3 max-w-xs">
-                            <p className="truncate font-semibold text-foreground">{e.work_done_description || '—'}</p>
-                            {bItem && (
-                              <p className="text-[10px] text-primary font-bold mt-0.5 truncate flex items-center gap-1">
-                                <span>🔗</span> {bItem.code}: {bItem.title}
-                              </p>
-                            )}
-                            {e.issues_reported && (
-                              <p className="text-[10px] text-destructive mt-0.5 truncate font-medium">
-                                ⚠️ {e.issues_reported}
-                              </p>
-                            )}
-                          </td>
-                          <td className="p-3 text-right whitespace-nowrap font-mono font-medium text-xs">
-                            {e.quantity_done ? `${e.quantity_done.toLocaleString()} ${e.unit || ''}` : '—'}
-                          </td>
-                          <td className="p-3 text-right text-emerald-600 font-bold font-mono text-xs whitespace-nowrap">
-                            {e.value_of_work_done ? fmt(e.value_of_work_done) : '—'}
-                          </td>
-                          <td className="p-3 text-right font-mono font-medium text-xs">{e.labor_count || 0}</td>
-                          <td className="p-3 whitespace-nowrap text-xs">
-                            {weatherIcons[e.weather_condition] || '—'}{' '}
-                            <span className="capitalize text-muted-foreground">{e.weather_condition}</span>
-                          </td>
-                          <td className="p-3">
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${statusColor[e.status] || ''}`}>
-                              {e.status}
-                            </span>
-                          </td>
-                          <td className="p-3 text-center">
-                            {!e._is_aggregated ? (
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                className="h-7 w-7 text-destructive hover:bg-destructive/10" 
-                                onClick={() => deleteMutation.mutate(e.id)}
-                              >
-                                <span className="text-xs">🗑️</span>
-                              </Button>
-                            ) : (
-                              <Badge variant="secondary" className="text-[8px] bg-muted text-muted-foreground font-bold tracking-wider">AUTO</Badge>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          )}
-        </div>
-      )}
       </SubProjectGate>
     </div>
   );
