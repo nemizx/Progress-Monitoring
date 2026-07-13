@@ -45,6 +45,7 @@ function PlanAchievedRow({
   achievedDisplay,
   locked = false,
   formatAchieved,
+  formatPlan,
 }) {
   const achievedValue = achievedLocked
     ? (achievedDisplay ?? achieved)
@@ -62,10 +63,23 @@ function PlanAchievedRow({
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">Plan</Label>
           <Input
-            type="number"
+            type={formatPlan ? 'text' : 'number'}
             step="any"
-            value={plan ?? ''}
-            onChange={(e) => onPlanChange?.(e.target.value)}
+            value={
+              formatPlan
+                ? formatPlan(plan)
+                : (plan ?? '')
+            }
+            onChange={(e) => {
+              if (formatPlan) {
+                const rawVal = e.target.value.replace(/[^0-9.]/g, '');
+                const parts = rawVal.split('.');
+                const cleanVal = parts[0] + (parts.length > 1 ? '.' + parts.slice(1).join('') : '');
+                onPlanChange?.(cleanVal);
+              } else {
+                onPlanChange?.(e.target.value);
+              }
+            }}
             disabled={locked || planLocked}
             readOnly={planLocked}
             className={planLocked ? 'bg-muted/50 font-medium' : ''}
@@ -403,6 +417,37 @@ export default function WprSheetPanel({
     }));
   };
 
+  const formatInputCurrency = (val) => {
+    if (val === undefined || val === null || val === '') return '';
+    const str = String(val);
+    const match = str.match(/\.(\d*)$/);
+    const numericVal = parseFloat(str);
+    if (isNaN(numericVal)) return '';
+
+    const formatter = new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0
+    });
+    
+    if (match) {
+      const decimalPart = match[1];
+      const integerPart = str.split('.')[0];
+      const parsedInt = parseFloat(integerPart) || 0;
+      const formattedInt = formatter.format(parsedInt);
+      return `${formattedInt}.${decimalPart}`;
+    }
+    
+    const hasDecimal = str.includes('.');
+    const decimals = hasDecimal ? str.split('.')[1].length : 0;
+    
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: Math.min(decimals, 2)
+    }).format(numericVal);
+  };
+
   const buildPayload = useCallback(
     (nextStatus) => {
       const formData = {
@@ -720,6 +765,7 @@ export default function WprSheetPanel({
               achievedLocked
               locked={isLocked}
               formatAchieved={(v) => formatCurrencyINR(v || 0)}
+              formatPlan={formatInputCurrency}
             />
 
             <MultiRowSection
