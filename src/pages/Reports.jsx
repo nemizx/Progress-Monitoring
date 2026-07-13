@@ -1183,7 +1183,7 @@ Format with markdown. Be specific, professional, and actionable.`;
             <Card className="shadow-sm border">
               <CardHeader className="pb-3 border-b bg-muted/20">
                 <CardTitle className="text-sm font-semibold flex items-center justify-between">
-                  <span>A. STATUS OF THE WORK (Subproject-wise Bifurcated)</span>
+                  <span>A. STATUS OF THE WORK</span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
@@ -1306,7 +1306,7 @@ Format with markdown. Be specific, professional, and actionable.`;
             {/* C. Contractor Labour preview */}
             <Card className="shadow-sm border overflow-hidden">
               <CardHeader className="pb-3 border-b bg-muted/20">
-                <CardTitle className="text-sm font-semibold">C. BUILDING WISE MANPOWER DETAILS & ALLOCATION (Bifurcated)</CardTitle>
+                <CardTitle className="text-sm font-semibold">C. BUILDING WISE MANPOWER DETAILS & ALLOCATION</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 {(() => {
