@@ -10,10 +10,9 @@ import { cn } from '@/lib/utils';
 import ThemeToggle from './ThemeToggle';
 import { useAuth } from '@/lib/AuthContext';
 
-export default function AppSidebar() {
+export default function AppSidebar({ collapsed, setCollapsed }) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
-  const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
