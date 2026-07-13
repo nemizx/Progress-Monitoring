@@ -1748,38 +1748,38 @@ Format with markdown. Be specific, professional, and actionable.`;
                         </h4>
 
                         <div className="overflow-x-auto border rounded-lg">
-                          <table className="w-full text-xs font-sans border-collapse border border-slate-200">
+                          <table className="w-full text-xs font-sans border-separate border-spacing-0 border-t border-l border-slate-200">
                             <thead>
-                              <tr className="bg-slate-100 border-b border-slate-200">
-                                <th rowSpan={2} className="p-2.5 text-center font-bold w-[60px] border-r border-slate-200 align-middle">Sr. No</th>
-                                <th rowSpan={2} className="p-2.5 text-left font-bold border-r border-slate-200 align-middle">{sec.nameLabel} Name</th>
-                                <th colSpan={3} className="p-2.5 text-center font-bold border-r border-slate-200 bg-slate-150">Monthly</th>
-                                <th colSpan={3} className="p-2.5 text-center font-bold border-r border-slate-200 bg-slate-150">
+                              <tr className="bg-slate-100">
+                                <th rowSpan={2} className="p-2.5 text-center font-bold w-[60px] border-r border-b border-slate-200 align-middle bg-slate-200 text-slate-800">Sr. No</th>
+                                <th rowSpan={2} className="p-2.5 text-left font-bold border-r border-b border-slate-200 align-middle bg-slate-200 text-slate-800">{sec.nameLabel} Name</th>
+                                <th colSpan={3} className="p-2.5 text-center font-bold border-r border-b border-slate-200 bg-slate-200 text-slate-800">Monthly</th>
+                                <th colSpan={3} className="p-2.5 text-center font-bold border-r border-b border-slate-200 bg-slate-200 text-slate-800">
                                   {weeksList.find(w => w.id === selectedWprReportWeek) ? `Week ${weeksList.find(w => w.id === selectedWprReportWeek).weekNum}` : 'Weekly'}
                                 </th>
-                                <th rowSpan={2} className="p-2.5 text-left font-bold align-middle">Remarks</th>
+                                <th rowSpan={2} className="p-2.5 text-left font-bold border-r border-b border-slate-200 align-middle bg-slate-200 text-slate-800">Remarks</th>
                               </tr>
-                              <tr className="bg-slate-50 border-b border-slate-200 text-[10px]">
-                                <th className="p-2 text-right font-bold border-r border-slate-200 text-slate-700 bg-slate-50">Plan</th>
-                                <th className="p-2 text-right font-bold border-r border-slate-200 text-slate-700 bg-slate-50">Achieved</th>
-                                <th className="p-2 text-right font-bold border-r border-slate-200 text-slate-700 bg-slate-50">% Comp.</th>
-                                <th className="p-2 text-right font-bold border-r border-slate-200 text-slate-700 bg-slate-50">Plan</th>
-                                <th className="p-2 text-right font-bold border-r border-slate-200 text-slate-700 bg-slate-50">Achieved</th>
-                                <th className="p-2 text-right font-bold border-r border-slate-200 text-slate-700 bg-slate-50">% Comp.</th>
+                              <tr className="bg-slate-50 text-[10px]">
+                                <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Plan</th>
+                                <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Achieved</th>
+                                <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">% Comp.</th>
+                                <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Plan</th>
+                                <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Achieved</th>
+                                <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">% Comp.</th>
                               </tr>
                             </thead>
                             <tbody>
                               {sec.rows.map((r, idx) => (
-                                <tr key={idx} className="border-b border-slate-200 hover:bg-slate-50/50">
-                                  <td className="p-2.5 text-center text-muted-foreground border-r border-slate-200">{idx + 1}</td>
-                                  <td className="p-2.5 border-r border-slate-200 font-medium text-slate-700">{r.name}</td>
-                                  <td className="p-2.5 border-r border-slate-200 text-right font-mono text-slate-700">{r.monthlyPlan}</td>
-                                  <td className="p-2.5 border-r border-slate-200 text-right font-mono font-semibold text-slate-850">{r.monthlyAchieved}</td>
-                                  <td className="p-2.5 border-r border-slate-200 text-right font-mono font-bold text-emerald-650 bg-emerald-50">{r.monthlyPct}</td>
-                                  <td className="p-2.5 border-r border-slate-200 text-right font-mono text-slate-700">{r.weeklyPlan !== null ? r.weeklyPlan : '—'}</td>
-                                  <td className="p-2.5 border-r border-slate-200 text-right font-mono font-semibold text-slate-850">{r.weeklyAchieved !== null ? r.weeklyAchieved : '—'}</td>
-                                  <td className="p-2.5 border-r border-slate-200 text-right font-mono font-bold text-emerald-650 bg-emerald-50">{r.weeklyPct}</td>
-                                  <td className="p-2.5 text-slate-600">{r.remark || '—'}</td>
+                                <tr key={idx} className="hover:bg-slate-50/50">
+                                  <td className="p-2.5 text-center text-muted-foreground border-r border-b border-slate-200">{idx + 1}</td>
+                                  <td className="p-2.5 border-r border-b border-slate-200 font-medium text-slate-700">{r.name}</td>
+                                  <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-slate-700">{r.monthlyPlan}</td>
+                                  <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-semibold text-slate-850">{r.monthlyAchieved}</td>
+                                  <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-bold text-emerald-650 bg-emerald-50">{r.monthlyPct}</td>
+                                  <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-slate-700">{r.weeklyPlan !== null ? r.weeklyPlan : '—'}</td>
+                                  <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-semibold text-slate-850">{r.weeklyAchieved !== null ? r.weeklyAchieved : '—'}</td>
+                                  <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-bold text-emerald-650 bg-emerald-50">{r.weeklyPct}</td>
+                                  <td className="p-2.5 border-r border-b border-slate-200 text-slate-600">{r.remark || '—'}</td>
                                 </tr>
                               ))}
                               {(() => {
@@ -1792,16 +1792,16 @@ Format with markdown. Be specific, professional, and actionable.`;
                                 const sectionWPct = sectionWPlanTotal > 0 ? Math.min(Math.round((sectionWAchievedTotal / sectionWPlanTotal) * 100), 100) : 0;
 
                                 return (
-                                  <tr className="bg-slate-100 font-bold text-slate-800 text-[11px] border-t border-slate-350">
-                                    <td className="p-2.5 border-r border-slate-200 text-center bg-slate-100/80">—</td>
-                                    <td className="p-2.5 border-r border-slate-200 bg-slate-100/80">Total</td>
-                                    <td className="p-2.5 border-r border-slate-200 text-right font-mono bg-slate-100/80">{sectionMPlanTotal}</td>
-                                    <td className="p-2.5 border-r border-slate-200 text-right font-mono bg-slate-100/80">{sectionMAchievedTotal}</td>
-                                    <td className="p-2.5 border-r border-slate-200 text-right font-mono text-emerald-700 bg-slate-100/80">{sectionMPct}%</td>
-                                    <td className="p-2.5 border-r border-slate-200 text-right font-mono bg-slate-100/80">{sectionWPlanTotal}</td>
-                                    <td className="p-2.5 border-r border-slate-200 text-right font-mono bg-slate-100/80">{sectionWAchievedTotal}</td>
-                                    <td className="p-2.5 border-r border-slate-200 text-right font-mono text-emerald-700 bg-slate-100/80">{sectionWPct}%</td>
-                                    <td className="p-2.5 bg-slate-100/80">—</td>
+                                  <tr className="bg-slate-100 font-bold text-slate-800 text-[11px]">
+                                    <td className="p-2.5 border-r border-b border-slate-200 text-center bg-slate-100/80">—</td>
+                                    <td className="p-2.5 border-r border-b border-slate-200 bg-slate-100/80">Total</td>
+                                    <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono bg-slate-100/80">{sectionMPlanTotal}</td>
+                                    <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono bg-slate-100/80">{sectionMAchievedTotal}</td>
+                                    <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-emerald-700 bg-slate-100/80">{sectionMPct}%</td>
+                                    <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono bg-slate-100/80">{sectionWPlanTotal}</td>
+                                    <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono bg-slate-100/80">{sectionWAchievedTotal}</td>
+                                    <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-emerald-700 bg-slate-100/80">{sectionWPct}%</td>
+                                    <td className="p-2.5 border-r border-b border-slate-200 bg-slate-100/80">—</td>
                                   </tr>
                                 );
                               })()}
