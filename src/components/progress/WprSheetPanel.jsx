@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Lock, Plus, Minus, Save, FileCheck } from 'lucide-react';
 import { formatCurrencyINR, normalizeDateKey } from '@/lib/formatters';
+import { cn } from '@/lib/utils';
 import { filterProgressBySubProject } from '@/lib/subProjectScope';
 import {
   calcAvgWeeklyLabour,
