@@ -1685,25 +1685,27 @@ Format with markdown. Be specific, professional, and actionable.`;
                     </h4>
                     
                     <div className="overflow-x-auto border rounded-lg">
-                      <table className="w-full text-xs font-sans border-collapse border border-slate-300">
+                      <table className="w-full text-xs font-sans border-separate border-spacing-0 border-t border-l border-slate-200">
                         <thead>
-                          <tr className="bg-slate-100 border-b border-slate-300">
-                            <th rowSpan={2} className="p-3 text-left font-bold border-r border-b border-slate-300 align-middle bg-slate-200 min-w-[200px] text-slate-800">Area of Review</th>
-                            <th rowSpan={2} className="p-3 text-center font-bold border-r border-b border-slate-300 align-middle bg-slate-200 min-w-[60px] text-slate-800">Unit</th>
-                            <th colSpan={3} className="p-3 text-center font-bold border-r border-b border-slate-300 bg-slate-200 text-slate-800">Monthly</th>
-                            <th colSpan={3} className="p-2.5 text-center font-bold border-b border-slate-300 bg-slate-200 text-slate-800">
+                          <tr className="bg-slate-100">
+                            <th className="p-3 text-left font-bold border-r border-slate-200 align-bottom pb-1 bg-slate-200 min-w-[200px] text-slate-800">Area of Review</th>
+                            <th className="p-3 text-center font-bold border-r border-slate-200 align-bottom pb-1 bg-slate-200 min-w-[60px] text-slate-800">Unit</th>
+                            <th colSpan={3} className="p-3 text-center font-bold border-r border-b border-slate-200 bg-slate-200 text-slate-800">Monthly</th>
+                            <th colSpan={3} className="p-2.5 text-center font-bold border-r border-b border-slate-200 bg-slate-200 text-slate-800">
                               {weeksList.find(w => w.id === selectedWprReportWeek) ? `Week ${weeksList.find(w => w.id === selectedWprReportWeek).weekNum}` : 'Weekly'}
                               {" "}
                               ({weeksList.find(w => w.id === selectedWprReportWeek) ? `${formatWprDate(weeksList.find(w => w.id === selectedWprReportWeek).startDate)} to ${formatWprDate(weeksList.find(w => w.id === selectedWprReportWeek).endDate)}` : ''})
                             </th>
                           </tr>
-                          <tr className="bg-slate-50 border-b border-slate-300 text-[10px]">
-                            <th className="p-2 text-right font-bold border-r border-b border-slate-300 text-slate-700 bg-slate-100">Plan</th>
-                            <th className="p-2 text-right font-bold border-r border-b border-slate-300 text-slate-700 bg-slate-100">Achieved</th>
-                            <th className="p-2 text-right font-bold border-r border-b border-slate-300 text-slate-700 bg-slate-100">% Achieved</th>
-                            <th className="p-2 text-right font-bold border-r border-b border-slate-300 text-slate-700 bg-slate-100">Plan</th>
-                            <th className="p-2 text-right font-bold border-r border-b border-slate-300 text-slate-700 bg-slate-100">Achieved</th>
-                            <th className="p-2 text-right font-bold border-b border-slate-300 text-slate-700 bg-slate-100">% Achieved</th>
+                          <tr className="bg-slate-50 text-[10px]">
+                            <th className="border-r border-b border-slate-200 bg-slate-200 h-4"></th>
+                            <th className="border-r border-b border-slate-200 bg-slate-200 h-4"></th>
+                            <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Plan</th>
+                            <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Achieved</th>
+                            <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">% Achieved</th>
+                            <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Plan</th>
+                            <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Achieved</th>
+                            <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">% Achieved</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1726,7 +1728,7 @@ Format with markdown. Be specific, professional, and actionable.`;
                             }
 
                             return (
-                              <tr key={item.id} className="border-b border-slate-200 hover:bg-slate-50/50">
+                              <tr key={item.id} className="hover:bg-slate-50/50">
                                 <td className="p-2.5 border-r border-b border-slate-200 font-semibold text-slate-700">{item.name}</td>
                                 <td className="p-2.5 border-r border-b border-slate-200 text-center font-medium text-slate-600">{item.unit}</td>
                                 <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-slate-700">{mPlanDisplay}</td>
@@ -1734,19 +1736,19 @@ Format with markdown. Be specific, professional, and actionable.`;
                                 <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-bold text-emerald-650 bg-emerald-50">{item.monthlyPct}</td>
                                 <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-slate-700">{wPlanDisplay}</td>
                                 <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-semibold text-slate-850">{wAchievedDisplay}</td>
-                                <td className="p-2.5 border-b border-slate-200 text-right font-mono font-bold text-emerald-650 bg-emerald-50">{item.weeklyPct}</td>
+                                <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-bold text-emerald-650 bg-emerald-50">{item.weeklyPct}</td>
                               </tr>
                             );
                           })}
-                          <tr className="bg-slate-150 font-bold text-slate-800 text-[11px] border-t border-slate-300">
-                            <td className="p-2.5 border-r border-slate-300 bg-slate-100">Total</td>
-                            <td className="p-2.5 border-r border-slate-300 text-center bg-slate-100">—</td>
-                            <td className="p-2.5 border-r border-slate-300 text-right bg-slate-100">—</td>
-                            <td className="p-2.5 border-r border-slate-300 text-right bg-slate-100">—</td>
-                            <td className="p-2.5 border-r border-slate-300 text-right font-mono text-emerald-700 bg-slate-100">{wprTotals.monthly}</td>
-                            <td className="p-2.5 border-r border-slate-300 text-right bg-slate-100">—</td>
-                            <td className="p-2.5 border-r border-slate-300 text-right bg-slate-100">—</td>
-                            <td className="p-2.5 text-right font-mono text-emerald-700 bg-slate-100">{wprTotals.weekly}</td>
+                          <tr className="bg-slate-100 font-bold text-slate-800 text-[11px]">
+                            <td className="p-2.5 border-r border-b border-slate-200 bg-slate-100/80">Total</td>
+                            <td className="p-2.5 border-r border-b border-slate-200 text-center bg-slate-100/80">—</td>
+                            <td className="p-2.5 border-r border-b border-slate-200 text-right bg-slate-100/80">—</td>
+                            <td className="p-2.5 border-r border-b border-slate-200 text-right bg-slate-100/80">—</td>
+                            <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-emerald-700 bg-slate-100/80">{wprTotals.monthly}</td>
+                            <td className="p-2.5 border-r border-b border-slate-200 text-right bg-slate-100/80">—</td>
+                            <td className="p-2.5 border-r border-b border-slate-200 text-right bg-slate-100/80">—</td>
+                            <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-emerald-700 bg-slate-100/80">{wprTotals.weekly}</td>
                           </tr>
                         </tbody>
                       </table>
@@ -1769,21 +1771,24 @@ Format with markdown. Be specific, professional, and actionable.`;
                           <table className="w-full text-xs font-sans border-separate border-spacing-0 border-t border-l border-slate-200">
                             <thead>
                               <tr className="bg-slate-100">
-                                <th rowSpan={2} className="p-2.5 text-center font-bold w-[60px] border-r border-b border-slate-200 align-middle bg-slate-200 text-slate-800">Sr. No</th>
-                                <th rowSpan={2} className="p-2.5 text-left font-bold border-r border-b border-slate-200 align-middle bg-slate-200 text-slate-800">{sec.nameLabel} Name</th>
+                                <th className="p-2.5 text-center font-bold w-[60px] border-r border-slate-200 align-bottom pb-1 bg-slate-200 text-slate-800">Sr. No</th>
+                                <th className="p-2.5 text-left font-bold border-r border-slate-200 align-bottom pb-1 bg-slate-200 text-slate-800">{sec.nameLabel} Name</th>
                                 <th colSpan={3} className="p-2.5 text-center font-bold border-r border-b border-slate-200 bg-slate-200 text-slate-800">Monthly</th>
                                 <th colSpan={3} className="p-2.5 text-center font-bold border-r border-b border-slate-200 bg-slate-200 text-slate-800">
                                   {weeksList.find(w => w.id === selectedWprReportWeek) ? `Week ${weeksList.find(w => w.id === selectedWprReportWeek).weekNum}` : 'Weekly'}
                                 </th>
-                                <th rowSpan={2} className="p-2.5 text-left font-bold border-r border-b border-slate-200 align-middle bg-slate-200 text-slate-800">Remarks</th>
+                                <th className="p-2.5 text-left font-bold border-r border-slate-200 align-bottom pb-1 bg-slate-200 text-slate-800">Remarks</th>
                               </tr>
                               <tr className="bg-slate-50 text-[10px]">
+                                <th className="border-r border-b border-slate-200 bg-slate-200 h-4"></th>
+                                <th className="border-r border-b border-slate-200 bg-slate-200 h-4"></th>
                                 <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Plan</th>
                                 <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Achieved</th>
                                 <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">% Comp.</th>
                                 <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Plan</th>
                                 <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Achieved</th>
                                 <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">% Comp.</th>
+                                <th className="border-r border-b border-slate-200 bg-slate-200 h-4"></th>
                               </tr>
                             </thead>
                             <tbody>
