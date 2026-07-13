@@ -535,24 +535,80 @@ export default function Reports() {
     ];
 
     return sections.map(sec => {
-      const allRows = [];
-      parsedWprReports.forEach(report => {
+      const monthlyNames = new Set();
+      parsedWprMonthReports.forEach(report => {
         const rows = report.parsedForm?.[sec.key] || [];
-        const validRows = rows.filter(r => r.name);
-        validRows.forEach(r => {
-          allRows.push({
-            ...r,
-            pct: calcPct(r.plan, r.achieved)
-          });
+        rows.forEach(r => {
+          if (r.name && String(r.name).trim()) {
+            monthlyNames.add(String(r.name).trim());
+          }
         });
       });
 
+      const uniqueNames = Array.from(monthlyNames);
+
+      const rows = uniqueNames.map(name => {
+        let monthlyPlan = 0;
+        let monthlyAchieved = 0;
+        parsedWprMonthReports.forEach(report => {
+          const sRows = report.parsedForm?.[sec.key] || [];
+          sRows.forEach(r => {
+            if (r.name && String(r.name).trim().toLowerCase() === name.toLowerCase()) {
+              monthlyPlan += parseFloat(r.plan) || 0;
+              monthlyAchieved += parseFloat(r.achieved) || 0;
+            }
+          });
+        });
+
+        let weeklyPlan = 0;
+        let weeklyAchieved = 0;
+        let weeklyRemark = '';
+        let hasWeekly = false;
+
+        parsedWprReports.forEach(report => {
+          const sRows = report.parsedForm?.[sec.key] || [];
+          sRows.forEach(r => {
+            if (r.name && String(r.name).trim().toLowerCase() === name.toLowerCase()) {
+              weeklyPlan += parseFloat(r.plan) || 0;
+              weeklyAchieved += parseFloat(r.achieved) || 0;
+              weeklyRemark = r.remark || '';
+              hasWeekly = true;
+            }
+          });
+        });
+
+        const calcRowPct = (plan, achieved) => {
+          const p = parseFloat(plan) || 0;
+          const a = parseFloat(achieved) || 0;
+          if (p === 0 && a === 0) return 0;
+          if (p === 0 && a > 0) return 100;
+          return Math.min(Math.round((a / p) * 100), 100);
+        };
+
+        const mPctVal = calcRowPct(monthlyPlan, monthlyAchieved);
+        const wPctVal = hasWeekly ? calcRowPct(weeklyPlan, weeklyAchieved) : null;
+
+        return {
+          name,
+          monthlyPlan,
+          monthlyAchieved,
+          monthlyPct: `${mPctVal}%`,
+          weeklyPlan: hasWeekly ? weeklyPlan : null,
+          weeklyAchieved: hasWeekly ? weeklyAchieved : null,
+          weeklyPct: wPctVal !== null ? `${wPctVal}%` : '—',
+          remark: hasWeekly ? weeklyRemark : '—',
+          hasWeekly,
+        };
+      });
+
+      const filteredRows = rows.filter(r => r.monthlyPlan > 0 || r.monthlyAchieved > 0);
+
       return {
         ...sec,
-        rows: allRows
+        rows: filteredRows
       };
     });
-  }, [parsedWprReports]);
+  }, [parsedWprMonthReports, parsedWprReports]);
 
   // Helper date formatter
   const formatDateDMY = (dateStr) => {
@@ -1692,42 +1748,60 @@ Format with markdown. Be specific, professional, and actionable.`;
                         </h4>
 
                         <div className="overflow-x-auto border rounded-lg">
-                          <table className="w-full text-xs font-sans">
+                          <table className="w-full text-xs font-sans border-collapse border border-slate-200">
                             <thead>
-                              <tr className="bg-slate-100 border-b">
-                                <th className="p-2.5 text-center font-bold w-[60px] border-r">Sr. No</th>
-                                <th className="p-2.5 text-left font-bold border-r">{sec.nameLabel} Name</th>
-                                <th className="p-2.5 text-right font-bold w-[120px] border-r">Plan Qty</th>
-                                <th className="p-2.5 text-right font-bold w-[120px] border-r">Achieved Qty</th>
-                                <th className="p-2.5 text-right font-bold w-[100px] border-r">% Comp.</th>
-                                <th className="p-2.5 text-left font-bold">Remarks</th>
+                              <tr className="bg-slate-100 border-b border-slate-200">
+                                <th rowSpan={2} className="p-2.5 text-center font-bold w-[60px] border-r border-slate-200 align-middle">Sr. No</th>
+                                <th rowSpan={2} className="p-2.5 text-left font-bold border-r border-slate-200 align-middle">{sec.nameLabel} Name</th>
+                                <th colSpan={3} className="p-2.5 text-center font-bold border-r border-slate-200 bg-slate-150">Monthly</th>
+                                <th colSpan={3} className="p-2.5 text-center font-bold border-r border-slate-200 bg-slate-150">
+                                  {weeksList.find(w => w.id === selectedWprReportWeek) ? `Week ${weeksList.find(w => w.id === selectedWprReportWeek).weekNum}` : 'Weekly'}
+                                </th>
+                                <th rowSpan={2} className="p-2.5 text-left font-bold align-middle">Remarks</th>
+                              </tr>
+                              <tr className="bg-slate-50 border-b border-slate-200 text-[10px]">
+                                <th className="p-2 text-right font-bold border-r border-slate-200 text-slate-700 bg-slate-50">Plan</th>
+                                <th className="p-2 text-right font-bold border-r border-slate-200 text-slate-700 bg-slate-50">Achieved</th>
+                                <th className="p-2 text-right font-bold border-r border-slate-200 text-slate-700 bg-slate-50">% Comp.</th>
+                                <th className="p-2 text-right font-bold border-r border-slate-200 text-slate-700 bg-slate-50">Plan</th>
+                                <th className="p-2 text-right font-bold border-r border-slate-200 text-slate-700 bg-slate-50">Achieved</th>
+                                <th className="p-2 text-right font-bold border-r border-slate-200 text-slate-700 bg-slate-50">% Comp.</th>
                               </tr>
                             </thead>
                             <tbody>
                               {sec.rows.map((r, idx) => (
-                                <tr key={idx} className="border-b hover:bg-slate-50/50">
-                                  <td className="p-2.5 text-center text-muted-foreground border-r">{idx + 1}</td>
-                                  <td className="p-2.5 border-r font-medium text-slate-700">{r.name}</td>
-                                  <td className="p-2.5 border-r text-right font-mono">{r.plan || '—'}</td>
-                                  <td className="p-2.5 border-r text-right font-mono font-bold text-slate-900 bg-amber-50/5">{r.achieved || '—'}</td>
-                                  <td className="p-2.5 border-r text-right font-mono font-bold text-emerald-600 bg-emerald-50/5">
-                                    {r.pct !== null ? `${r.pct}%` : '—'}
-                                  </td>
+                                <tr key={idx} className="border-b border-slate-200 hover:bg-slate-50/50">
+                                  <td className="p-2.5 text-center text-muted-foreground border-r border-slate-200">{idx + 1}</td>
+                                  <td className="p-2.5 border-r border-slate-200 font-medium text-slate-700">{r.name}</td>
+                                  <td className="p-2.5 border-r border-slate-200 text-right font-mono text-slate-700">{r.monthlyPlan}</td>
+                                  <td className="p-2.5 border-r border-slate-200 text-right font-mono font-semibold text-slate-850">{r.monthlyAchieved}</td>
+                                  <td className="p-2.5 border-r border-slate-200 text-right font-mono font-bold text-emerald-650 bg-emerald-50">{r.monthlyPct}</td>
+                                  <td className="p-2.5 border-r border-slate-200 text-right font-mono text-slate-700">{r.weeklyPlan !== null ? r.weeklyPlan : '—'}</td>
+                                  <td className="p-2.5 border-r border-slate-200 text-right font-mono font-semibold text-slate-850">{r.weeklyAchieved !== null ? r.weeklyAchieved : '—'}</td>
+                                  <td className="p-2.5 border-r border-slate-200 text-right font-mono font-bold text-emerald-650 bg-emerald-50">{r.weeklyPct}</td>
                                   <td className="p-2.5 text-slate-600">{r.remark || '—'}</td>
                                 </tr>
                               ))}
                               {(() => {
-                                const sectionPlanTotal = sec.rows.reduce((s, r) => s + (Number(r.plan) || 0), 0);
-                                const sectionAchievedTotal = sec.rows.reduce((s, r) => s + (Number(r.achieved) || 0), 0);
-                                const sectionPct = sectionPlanTotal > 0 ? Math.min(Math.round((sectionAchievedTotal / sectionPlanTotal) * 100), 100) : 0;
+                                const sectionMPlanTotal = sec.rows.reduce((s, r) => s + (Number(r.monthlyPlan) || 0), 0);
+                                const sectionMAchievedTotal = sec.rows.reduce((s, r) => s + (Number(r.monthlyAchieved) || 0), 0);
+                                const sectionMPct = sectionMPlanTotal > 0 ? Math.min(Math.round((sectionMAchievedTotal / sectionMPlanTotal) * 100), 100) : 0;
+
+                                const sectionWPlanTotal = sec.rows.reduce((s, r) => s + (Number(r.weeklyPlan) || 0), 0);
+                                const sectionWAchievedTotal = sec.rows.reduce((s, r) => s + (Number(r.weeklyAchieved) || 0), 0);
+                                const sectionWPct = sectionWPlanTotal > 0 ? Math.min(Math.round((sectionWAchievedTotal / sectionWPlanTotal) * 100), 100) : 0;
+
                                 return (
-                                  <tr className="bg-slate-100/50 font-bold border-b text-slate-700">
-                                    <td className="p-2 text-center border-r"></td>
-                                    <td className="p-2 border-r">Total</td>
-                                    <td className="p-2 border-r text-right font-mono">{sectionPlanTotal}</td>
-                                    <td className="p-2 border-r text-right font-mono">{sectionAchievedTotal}</td>
-                                    <td className="p-2 border-r text-right font-mono text-emerald-700">{sectionPct}%</td>
-                                    <td className="p-2"></td>
+                                  <tr className="bg-slate-100 font-bold text-slate-800 text-[11px] border-t border-slate-350">
+                                    <td className="p-2.5 border-r border-slate-200 text-center bg-slate-100/80">—</td>
+                                    <td className="p-2.5 border-r border-slate-200 bg-slate-100/80">Total</td>
+                                    <td className="p-2.5 border-r border-slate-200 text-right font-mono bg-slate-100/80">{sectionMPlanTotal}</td>
+                                    <td className="p-2.5 border-r border-slate-200 text-right font-mono bg-slate-100/80">{sectionMAchievedTotal}</td>
+                                    <td className="p-2.5 border-r border-slate-200 text-right font-mono text-emerald-700 bg-slate-100/80">{sectionMPct}%</td>
+                                    <td className="p-2.5 border-r border-slate-200 text-right font-mono bg-slate-100/80">{sectionWPlanTotal}</td>
+                                    <td className="p-2.5 border-r border-slate-200 text-right font-mono bg-slate-100/80">{sectionWAchievedTotal}</td>
+                                    <td className="p-2.5 border-r border-slate-200 text-right font-mono text-emerald-700 bg-slate-100/80">{sectionWPct}%</td>
+                                    <td className="p-2.5 bg-slate-100/80">—</td>
                                   </tr>
                                 );
                               })()}
