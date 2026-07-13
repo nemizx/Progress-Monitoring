@@ -116,3 +116,15 @@
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground) / 0.5);
 }
+
+/* Disable spin-button stepper on Chrome, Safari, Edge, Opera */
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Disable spin-button stepper on Firefox */
+input[type=number] {
+  -moz-appearance: textfield;
+}
