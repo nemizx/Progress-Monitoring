@@ -46,6 +46,7 @@ function PlanAchievedRow({
   locked = false,
   formatAchieved,
   formatPlan,
+  isRating = false,
 }) {
   const achievedValue = achievedLocked
     ? (achievedDisplay ?? achieved)
@@ -90,20 +91,46 @@ function PlanAchievedRow({
           <Label className="text-xs text-muted-foreground">
             Achieved{achievedLocked ? ' (auto)' : ''}
           </Label>
-          <Input
-            type={formatAchieved ? 'text' : 'number'}
-            step="any"
-            value={
-              formatAchieved
-                ? formatAchieved(achievedValue)
-                : (achievedValue ?? '')
-            }
-            onChange={(e) => onAchievedChange?.(e.target.value)}
-            disabled={locked || achievedLocked}
-            readOnly={achievedLocked}
-            className={achievedLocked ? 'bg-muted/50' : ''}
-            placeholder={`Enter achieved for ${cleanLabel}`}
-          />
+          {isRating ? (
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => {
+                const isSelected = Number(achievedValue) === num;
+                const isDisabled = locked || achievedLocked;
+                return (
+                  <button
+                    key={num}
+                    type="button"
+                    disabled={isDisabled}
+                    onClick={() => onAchievedChange?.(num)}
+                    className={cn(
+                      "w-8 h-8 rounded-full border text-xs font-semibold flex items-center justify-center transition-all duration-150 shrink-0",
+                      isSelected
+                        ? "bg-primary text-primary-foreground border-primary shadow-sm scale-105"
+                        : "bg-background text-muted-foreground border-muted-foreground/20 hover:border-muted-foreground hover:bg-muted/10",
+                      isDisabled && "opacity-80 cursor-not-allowed"
+                    )}
+                  >
+                    {num}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <Input
+              type={formatAchieved ? 'text' : 'number'}
+              step="any"
+              value={
+                formatAchieved
+                  ? formatAchieved(achievedValue)
+                  : (achievedValue ?? '')
+              }
+              onChange={(e) => onAchievedChange?.(e.target.value)}
+              disabled={locked || achievedLocked}
+              readOnly={achievedLocked}
+              className={achievedLocked ? 'bg-muted/50' : ''}
+              placeholder={`Enter achieved for ${cleanLabel}`}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -687,6 +714,7 @@ export default function WprSheetPanel({
               onAchievedChange={(v) => updateSimple('qualityRating', 'achieved', v)}
               locked={isLocked}
               planLocked
+              isRating
             />
 
             <PlanAchievedRow
@@ -697,6 +725,7 @@ export default function WprSheetPanel({
               onAchievedChange={(v) => updateSimple('healthSafetyRating', 'achieved', v)}
               locked={isLocked}
               planLocked
+              isRating
             />
 
             <MultiRowSection
