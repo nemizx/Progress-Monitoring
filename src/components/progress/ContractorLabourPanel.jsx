@@ -323,46 +323,41 @@ export default forwardRef(function ContractorLabourPanel({
   return (
     <div className="space-y-4">
       {/* Top Header Row with Search & Save Actions */}
-      <div className="flex flex-wrap gap-2 items-center justify-between">
-        <div className="flex items-center gap-2">
-          {rows.length > 0 && !isDateLocked && (
-            <Popover open={searchOpen} onOpenChange={setSearchOpen}>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-1.5 h-9 font-semibold text-xs border-dashed">
-                  <Plus className="w-3.5 h-3.5" /> Add Contractor
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[min(90vw,360px)] p-0" align="start">
-                <Command>
-                  <CommandInput placeholder="Search contractor..." />
-                  <CommandList>
-                    <CommandEmpty>No available contractors.</CommandEmpty>
-                    <CommandGroup>
-                      {availableContractors.map((c) => (
-                        <CommandItem
-                          key={c.id}
-                          value={c.name}
-                          onSelect={() => handleAddContractor(c.id)}
-                          className="text-xs"
-                        >
-                          {c.name}
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 ml-auto">
-          {rows.length > 0 && !isDateLocked && modifiedCount > 0 && (
-            <Badge variant="outline" className="bg-amber-500/10 text-amber-700 border-amber-500/20 text-[10px] px-2 py-0.5 font-bold">
-              ⚠️ {modifiedCount} unsaved
-            </Badge>
-          )}
-        </div>
+      <div className="flex flex-wrap gap-2 items-center justify-end">
+        {rows.length > 0 && !isDateLocked && modifiedCount > 0 && (
+          <Badge variant="outline" className="bg-amber-500/10 text-amber-700 border-amber-500/20 text-[10px] px-2 py-0.5 font-bold mr-auto">
+            ⚠️ {modifiedCount} unsaved
+          </Badge>
+        )}
+        {rows.length > 0 && !isDateLocked && (
+          <Popover open={searchOpen} onOpenChange={setSearchOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5 h-9 font-semibold text-xs border border-dashed border-slate-400 bg-slate-200 text-slate-800 hover:bg-slate-300 hover:text-slate-900 transition-colors shadow-sm">
+                <Plus className="w-3.5 h-3.5" /> Add Contractor
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[min(90vw,360px)] p-0" align="end">
+              <Command>
+                <CommandInput placeholder="Search contractor..." />
+                <CommandList>
+                  <CommandEmpty>No available contractors.</CommandEmpty>
+                  <CommandGroup>
+                    {availableContractors.map((c) => (
+                      <CommandItem
+                        key={c.id}
+                        value={c.name}
+                        onSelect={() => handleAddContractor(c.id)}
+                        className="text-xs"
+                      >
+                        {c.name}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+        )}
       </div>
 
       {isDateLocked && (
