@@ -963,10 +963,28 @@ export default function Reports() {
           backgroundColor: '#ffffff',
           scrollX: 0,
           scrollY: 0,
-          width: element.offsetWidth,
-          height: element.offsetHeight,
-          windowWidth: document.documentElement.offsetWidth,
-          windowHeight: document.documentElement.offsetHeight
+          onclone: (clonedDoc, clonedEl) => {
+            const el = clonedEl || clonedDoc.getElementById(element.id);
+            if (el) {
+              el.style.overflow = 'visible';
+              el.style.height = 'auto';
+              el.style.maxHeight = 'none';
+              
+              let parent = el.parentElement;
+              while (parent) {
+                parent.style.overflow = 'visible';
+                parent = parent.parentElement;
+              }
+
+              const wrappers = el.querySelectorAll('.overflow-x-auto');
+              wrappers.forEach(w => {
+                w.style.overflow = 'visible';
+                w.style.overflowX = 'visible';
+                w.style.width = 'auto';
+                w.style.maxHeight = 'none';
+              });
+            }
+          }
         });
 
         const imgData = canvas.toDataURL('image/jpeg', 0.7);
