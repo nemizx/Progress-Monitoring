@@ -1192,8 +1192,8 @@ Format with markdown. Be specific, professional, and actionable.`;
                     <thead>
                       <tr className="bg-muted/40 border-b">
                         <th className="p-2.5 text-center font-bold w-[60px] border-r">Sr. No</th>
-                        <th className="p-2.5 text-left font-bold w-[120px] border-r">Activity ID</th>
-                        <th className="p-2.5 text-left font-bold border-r">Activity Name</th>
+                        <th className="p-2.5 text-left font-bold w-[120px] border-r whitespace-nowrap">Activity ID</th>
+                        <th className="p-2.5 text-left font-bold min-w-[300px] border-r">Activity Name</th>
                         <th className="p-2.5 text-left font-bold w-[80px] border-r">Unit</th>
                         <th className="p-2.5 text-right font-bold w-[90px] border-r">Total Qty</th>
                         <th className="p-2.5 text-right font-bold w-[90px] border-r">Today Qty</th>
@@ -1209,9 +1209,9 @@ Format with markdown. Be specific, professional, and actionable.`;
                       {(() => {
                         const DprRow = ({ item, index }) => (
                           <tr key={item.id} className="border-b hover:bg-muted/10">
-                            <td className="p-2.5 text-center text-muted-foreground border-r">{index + 1}</td>
-                            <td className="p-2.5 border-r font-mono text-[10px]">{item.activity_code || '—'}</td>
-                            <td className="p-2.5 border-r font-semibold">{item.title}</td>
+                            <td className="p-2.5 text-center text-muted-foreground border-r">{index}</td>
+                            <td className="p-2.5 border-r font-mono text-[10px] whitespace-nowrap">{item.activity_code || '—'}</td>
+                            <td className="p-2.5 border-r font-semibold px-4">{item.title}</td>
                             <td className="p-2.5 border-r text-center">{item.unit || '—'}</td>
                             <td className="p-2.5 border-r text-right font-mono">{Number(item.planned_qty || 0).toFixed(2)}</td>
                             <td className="p-2.5 border-r text-right font-mono bg-amber-50/10 font-bold">{item.today_qty > 0 ? item.today_qty : '—'}</td>
