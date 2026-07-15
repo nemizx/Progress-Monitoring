@@ -90,7 +90,8 @@ const tableMap = {
   'SpecialSiteVisit': 'special_site_visits',
   'CriticalIssue': 'critical_issues',
   'NextDaysPlan': 'next_days_plans',
-  'WprReport': 'wpr_reports'
+  'WprReport': 'wpr_reports',
+  'MprReport': 'mpr_reports'
 };
 
 const TABLES_WITH_CREATED_BY = new Set(['projects']);
@@ -1068,6 +1069,10 @@ async function ensureExtendedTables() {
     ADD COLUMN IF NOT EXISTS project_code VARCHAR(100)
   `);
   await db.query(`
+    ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS elevation_photo_url TEXT
+  `);
+  await db.query(`
     ALTER TABLE progress_entries
     ADD COLUMN IF NOT EXISTS wbs_item_id VARCHAR(50) REFERENCES wbs_items(id) ON DELETE SET NULL
   `);
@@ -1237,6 +1242,23 @@ async function ensureExtendedTables() {
       created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE (project_id, sub_project_id, week_id)
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS mpr_reports (
+      id VARCHAR(50) PRIMARY KEY,
+      project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+      month_id VARCHAR(20) NOT NULL,
+      month_start DATE NOT NULL,
+      month_end DATE NOT NULL,
+      status VARCHAR(50) DEFAULT 'draft',
+      form_data TEXT,
+      submitted_by VARCHAR(255),
+      submitted_at TIMESTAMP,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (project_id, month_id)
     )
   `);
 

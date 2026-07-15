@@ -8,9 +8,23 @@ import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Plus, Trash2, Users, ChevronsUpDown } from 'lucide-react';
+import { Loader2, Plus, Trash2, Users, ChevronsUpDown, HelpCircle } from 'lucide-react';
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { useToast } from '@/components/ui/use-toast';
 import { useDprPanelRef } from '@/components/progress/useDprPanelRef';
+
+function HeaderTooltip({ text }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <HelpCircle className="w-3 h-3 text-muted-foreground/60 hover:text-muted-foreground cursor-help inline-block ml-1 align-middle" />
+      </TooltipTrigger>
+      <TooltipContent className="max-w-[200px] text-center font-sans font-normal normal-case">
+        {text}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 export default forwardRef(function ContractorLabourPanel({
   projectId,
@@ -321,6 +335,7 @@ export default forwardRef(function ContractorLabourPanel({
   }
 
   return (
+    <TooltipProvider>
     <div className="space-y-4">
       {/* Top Header Row with Search & Save Actions */}
       <div className="flex flex-wrap gap-2 items-center justify-end">
@@ -425,10 +440,22 @@ export default forwardRef(function ContractorLabourPanel({
                   <th rowSpan={2} className="p-3 text-left font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 w-16">Sr. No</th>
                   <th rowSpan={2} className="p-3 text-left font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 min-w-[240px]">Contractor Name</th>
                   <th rowSpan={2} className="p-3 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 w-24">Unit</th>
-                  <th colSpan={3} className="p-2 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 bg-muted/20">Skilled Labour</th>
-                  <th colSpan={2} className="p-2 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 bg-muted/30">Semi Skilled Labour</th>
-                  <th colSpan={2} className="p-2 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 bg-muted/20">Unskilled Labour</th>
-                  <th rowSpan={2} className="p-3 text-right font-bold text-[11px] uppercase tracking-wider w-28">Total</th>
+                  <th colSpan={3} className="p-2 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 bg-muted/20">
+                    Skilled Labour
+                    <HeaderTooltip text="Skilled tradespeople deployed by this contractor today." />
+                  </th>
+                  <th colSpan={2} className="p-2 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 bg-muted/30">
+                    Semi Skilled Labour
+                    <HeaderTooltip text="Semi-skilled helper labour deployed by this contractor today." />
+                  </th>
+                  <th colSpan={2} className="p-2 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 bg-muted/20">
+                    Unskilled Labour
+                    <HeaderTooltip text="Unskilled male/female coolie labour deployed by this contractor today." />
+                  </th>
+                  <th rowSpan={2} className="p-3 text-right font-bold text-[11px] uppercase tracking-wider w-28">
+                    Total
+                    <HeaderTooltip text="Sum of all labour categories for this contractor today." />
+                  </th>
                   {!isDateLocked && <th rowSpan={2} className="p-3 border-l border-slate-200 w-12"></th>}
                 </tr>
                 <tr className="border-b bg-muted/40 text-[10px] text-muted-foreground text-center">
@@ -610,5 +637,6 @@ export default forwardRef(function ContractorLabourPanel({
         </Card>
       )}
     </div>
+    </TooltipProvider>
   );
 });

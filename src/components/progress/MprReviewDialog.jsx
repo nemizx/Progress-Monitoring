@@ -48,6 +48,25 @@ function ColumnHeader({ label, tooltip }) {
 }
 
 function ReviewSection({ section }) {
+  if (section.layout === 'html') {
+    const isEmpty = !section.html || section.html.replace(/<[^>]*>/g, '').trim() === '';
+    return (
+      <div className="border rounded-lg overflow-hidden">
+        <div className="bg-muted/40 px-4 py-2 border-b">
+          <SectionTitle title={section.title} tooltip={section.tooltip} />
+        </div>
+        {isEmpty ? (
+          <p className="text-xs text-muted-foreground p-4">No entries for this section.</p>
+        ) : (
+          <div
+            className="p-4 text-xs prose prose-sm max-w-none"
+            dangerouslySetInnerHTML={{ __html: section.html }}
+          />
+        )}
+      </div>
+    );
+  }
+
   if (!section?.rows?.length) {
     return (
       <div className="border rounded-lg overflow-hidden">
@@ -109,7 +128,7 @@ function ReviewSection({ section }) {
   );
 }
 
-export default function WprReviewDialog({
+export default function MprReviewDialog({
   open,
   onOpenChange,
   meta,
@@ -120,23 +139,18 @@ export default function WprReviewDialog({
   return (
     <TooltipProvider>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col gap-0 p-0">
+      <DialogContent className="max-w-6xl max-h-[90vh] flex flex-col gap-0 p-0">
         <DialogHeader className="px-6 pt-6 pb-4 border-b shrink-0">
-          <DialogTitle className="text-lg font-heading">Review &amp; Final Submit WPR</DialogTitle>
+          <DialogTitle className="text-lg font-heading">Review &amp; Final Submit MPR</DialogTitle>
           <DialogDescription className="text-sm">
-            Review the weekly progress report below before final submission for{' '}
-            <span className="font-semibold text-foreground">{meta?.weekLabel}</span>.
-            After submit, this week will be locked.
+            Review the monthly progress report below before final submission for{' '}
+            <span className="font-semibold text-foreground">{meta?.monthLabel}</span>.
+            After submit, this month will be locked.
           </DialogDescription>
           <div className="flex flex-wrap gap-4 pt-2 text-xs text-muted-foreground">
             {meta?.projectName && (
               <span>
                 <span className="font-semibold text-foreground">Project:</span> {meta.projectName}
-              </span>
-            )}
-            {meta?.subProjectName && (
-              <span>
-                <span className="font-semibold text-foreground">Sub-project:</span> {meta.subProjectName}
               </span>
             )}
             {meta?.submittedBy && (

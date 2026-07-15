@@ -54,6 +54,7 @@ CREATE TABLE projects (
     project_manager VARCHAR(255),
     priority VARCHAR(50) DEFAULT 'medium',
     project_type VARCHAR(100),
+    elevation_photo_url TEXT,
     created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by_id VARCHAR(50) REFERENCES users(id) ON DELETE SET NULL

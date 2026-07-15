@@ -8,7 +8,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, HardHat, Briefcase, Plus, Minus, UserPlus } from 'lucide-react';
+import { Loader2, HardHat, Briefcase, Plus, Minus, UserPlus, HelpCircle } from 'lucide-react';
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import EmptyState from '@/components/shared/EmptyState';
 import StatCard from '@/components/shared/StatCard';
 import { useToast } from '@/components/ui/use-toast';
@@ -161,9 +162,9 @@ export default forwardRef(function TechnicalStaffAttendancePanel({
     title: 'B. Technical Staff Attendance',
     columns: [
       { key: 'sr', label: 'Sr.' },
-      { key: 'name', label: 'Name' },
-      { key: 'designation', label: 'Designation' },
-      { key: 'status', label: 'Attendance' },
+      { key: 'name', label: 'Name', tooltip: 'Full name of the technical staff member.' },
+      { key: 'designation', label: 'Designation', tooltip: 'Role or designation on site, e.g. JE, Site Engineer.' },
+      { key: 'status', label: 'Attendance', tooltip: 'Present or Absent for the selected DPR date.' },
     ],
     rows: staffMembers.map((staff, i) => ({
       sr: i + 1,
@@ -220,6 +221,7 @@ export default forwardRef(function TechnicalStaffAttendancePanel({
   }
 
   return (
+    <TooltipProvider>
     <div className="space-y-4">
       <div className="flex justify-end">
         <Button className="gap-2" onClick={handleOpenAdd}>
@@ -245,9 +247,45 @@ export default forwardRef(function TechnicalStaffAttendancePanel({
           <table className="w-full text-sm font-sans">
             <thead>
               <tr className="border-b bg-muted/50">
-                <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase">Name</th>
-                <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase">Designation</th>
-                <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase">Attendance</th>
+                <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase">
+                  <div className="flex items-center gap-1 select-none">
+                    <span>Name</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                        Full name of the technical staff member.
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                </th>
+                <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase">
+                  <div className="flex items-center gap-1 select-none">
+                    <span>Designation</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                        Role or designation on site, e.g. JE, Site Engineer.
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                </th>
+                <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase">
+                  <div className="flex items-center gap-1 select-none">
+                    <span>Attendance</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                        Mark this staff member Present or Absent for the selected DPR date.
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -273,7 +311,7 @@ export default forwardRef(function TechnicalStaffAttendancePanel({
                             <SelectValue placeholder="Mark attendance" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="unmarked">Not marked</SelectItem>
+                            <SelectItem value="unmarked">Select</SelectItem>
                             <SelectItem value="present">Present</SelectItem>
                             <SelectItem value="absent">Absent</SelectItem>
                           </SelectContent>
@@ -310,6 +348,7 @@ export default forwardRef(function TechnicalStaffAttendancePanel({
         isPending={createStaffMutation.isPending}
       />
     </div>
+    </TooltipProvider>
   );
 });
 
@@ -324,6 +363,7 @@ function AddStaffDialog({
   isPending,
 }) {
   return (
+    <TooltipProvider>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-4xl font-sans">
         <DialogHeader>
@@ -335,8 +375,28 @@ function AddStaffDialog({
 
         <form onSubmit={onSubmit} className="space-y-4 pt-2">
           <div className="hidden md:grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] gap-3 px-1">
-            <Label className="text-xs font-semibold">Staff Name *</Label>
-            <Label className="text-xs font-semibold">Designation *</Label>
+            <div className="flex items-center gap-1 select-none">
+              <Label className="text-xs font-semibold">Staff Name *</Label>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                  Full name of the technical staff member to add.
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <div className="flex items-center gap-1 select-none">
+              <Label className="text-xs font-semibold">Designation *</Label>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                  Role or designation on site, e.g. JE, Site Engineer.
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <span />
           </div>
 
@@ -395,5 +455,6 @@ function AddStaffDialog({
         </form>
       </DialogContent>
     </Dialog>
+    </TooltipProvider>
   );
 }

@@ -1,4 +1,19 @@
 import React from 'react';
+import { HelpCircle } from 'lucide-react';
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
+
+function HeaderTooltip({ text }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <HelpCircle className="w-3 h-3 text-muted-foreground/60 hover:text-muted-foreground cursor-help inline-block ml-1 align-middle" />
+      </TooltipTrigger>
+      <TooltipContent className="max-w-[200px] text-center font-sans font-normal normal-case">
+        {text}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 function ValueBox({ value }) {
   return (
@@ -25,6 +40,7 @@ export default function ContractorLabourTable({
   }
 
   return (
+    <TooltipProvider>
     <div className="overflow-x-auto">
       <table className="w-full text-sm font-sans border-collapse border-slate-200 min-w-[900px]">
         <thead>
@@ -40,15 +56,19 @@ export default function ContractorLabourTable({
             </th>
             <th colSpan={3} className="p-2 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 bg-muted/20">
               Skilled Labour
+              <HeaderTooltip text="Skilled tradespeople deployed by this contractor today." />
             </th>
             <th colSpan={2} className="p-2 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 bg-muted/30">
               Semi Skilled Labour
+              <HeaderTooltip text="Semi-skilled helper labour deployed by this contractor today." />
             </th>
             <th colSpan={2} className="p-2 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 bg-muted/20">
               Unskilled Labour
+              <HeaderTooltip text="Unskilled male/female coolie labour deployed by this contractor today." />
             </th>
             <th rowSpan={2} className="p-3 text-right font-bold text-[11px] uppercase tracking-wider w-28">
               Total
+              <HeaderTooltip text="Sum of all labour categories for this contractor today." />
             </th>
           </tr>
           <tr className="border-b bg-muted/40 text-[10px] text-muted-foreground text-center">
@@ -111,5 +131,6 @@ export default function ContractorLabourTable({
         </tbody>
       </table>
     </div>
+    </TooltipProvider>
   );
 }

@@ -100,9 +100,9 @@ export default forwardRef(function SpecialSiteVisitsPanel({
     title: 'H. Special Site Visits',
     columns: [
       { key: 'sr', label: 'Sr.' },
-      { key: 'firm_name', label: 'Firm' },
-      { key: 'visitor_name', label: 'Visitor' },
-      { key: 'purpose', label: 'Purpose' },
+      { key: 'firm_name', label: 'Firm', tooltip: 'The organization, company, or firm representing the visitor.' },
+      { key: 'visitor_name', label: 'Visitor', tooltip: 'Full name of the visiting individual or official.' },
+      { key: 'purpose', label: 'Purpose', tooltip: 'The exact reason or objective of the site visit.' },
     ],
     rows: rows
       .filter((r) => r.firm_name.trim() || r.visitor_name.trim() || r.purpose.trim())

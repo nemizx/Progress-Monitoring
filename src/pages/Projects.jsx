@@ -8,7 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Plus, Search, MapPin, Calendar, IndianRupee } from 'lucide-react';
+import { Plus, Search, MapPin, Calendar, IndianRupee, ImagePlus, X } from 'lucide-react';
 import StatusBadge from '@/components/shared/StatusBadge';
 import ProgressRing from '@/components/shared/ProgressRing';
 import EmptyState from '@/components/shared/EmptyState';
@@ -26,6 +26,9 @@ export default function Projects() {
     start_date: '', end_date: '', budget: '', project_manager: '', priority: 'medium',
     project_type: 'residential', project_code: '',
   });
+  const [elevationPhotoFile, setElevationPhotoFile] = useState(null);
+  const [elevationPhotoPreview, setElevationPhotoPreview] = useState('');
+  const [uploadingElevationPhoto, setUploadingElevationPhoto] = useState(false);
 
   const queryClient = useQueryClient();
 
@@ -39,11 +42,36 @@ export default function Projects() {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['projects'] }); setShowCreate(false); resetForm(); },
   });
 
-  const resetForm = () => setForm({
-    name: '', description: '', location: '', client: '', status: 'planning',
-    start_date: '', end_date: '', budget: '', project_manager: '', priority: 'medium',
-    project_type: 'residential', project_code: '',
-  });
+  const resetForm = () => {
+    setForm({
+      name: '', description: '', location: '', client: '', status: 'planning',
+      start_date: '', end_date: '', budget: '', project_manager: '', priority: 'medium',
+      project_type: 'residential', project_code: '',
+    });
+    setElevationPhotoFile(null);
+    setElevationPhotoPreview('');
+  };
+
+  const handleElevationPhotoChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setElevationPhotoFile(file);
+    setElevationPhotoPreview(URL.createObjectURL(file));
+  };
+
+  const handleCreateProject = async () => {
+    let elevation_photo_url = '';
+    if (elevationPhotoFile) {
+      setUploadingElevationPhoto(true);
+      try {
+        const res = await base44.integrations.Core.UploadFile({ file: elevationPhotoFile });
+        elevation_photo_url = res.file_url || '';
+      } finally {
+        setUploadingElevationPhoto(false);
+      }
+    }
+    createMutation.mutate({ ...form, budget: form.budget || 0, elevation_photo_url });
+  };
 
   const filtered = projects.filter(p => {
     const query = search.toLowerCase();
@@ -143,8 +171,44 @@ export default function Projects() {
                 <Label>Project Manager</Label>
                 <Input value={form.project_manager} onChange={e => setForm({...form, project_manager: e.target.value})} placeholder="Name" />
               </div>
-              <Button className="w-full" onClick={() => createMutation.mutate({ ...form, budget: form.budget || 0 })} disabled={!form.name || !form.project_type || createMutation.isPending}>
-                {createMutation.isPending ? 'Creating...' : 'Create Project'}
+              <div>
+                <Label>Elevation Photo</Label>
+                {elevationPhotoPreview ? (
+                  <div className="relative mt-1 rounded-lg border overflow-hidden">
+                    <img src={elevationPhotoPreview} alt="Elevation preview" className="w-full h-40 object-cover" />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="icon"
+                      className="absolute top-2 right-2 h-7 w-7"
+                      onClick={() => { setElevationPhotoFile(null); setElevationPhotoPreview(''); }}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                ) : (
+                  <label
+                    htmlFor="create-elevation-photo-input"
+                    className="mt-1 flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed py-6 text-xs text-muted-foreground cursor-pointer hover:bg-muted/40 transition-colors"
+                  >
+                    <ImagePlus className="w-5 h-5" />
+                    Click to upload building elevation photo
+                  </label>
+                )}
+                <input
+                  id="create-elevation-photo-input"
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleElevationPhotoChange}
+                />
+              </div>
+              <Button
+                className="w-full"
+                onClick={handleCreateProject}
+                disabled={!form.name || !form.project_type || createMutation.isPending || uploadingElevationPhoto}
+              >
+                {uploadingElevationPhoto ? 'Uploading Photo...' : createMutation.isPending ? 'Creating...' : 'Create Project'}
               </Button>
             </div>
           </DialogContent>
@@ -174,11 +238,18 @@ export default function Projects() {
       {filtered.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filtered.map(project => (
-            <Card 
-              key={project.id} 
-              className="cursor-pointer hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5 group"
+            <Card
+              key={project.id}
+              className="cursor-pointer hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5 group overflow-hidden"
               onClick={() => setSelectedProject(project)}
             >
+              {project.elevation_photo_url && (
+                <img
+                  src={project.elevation_photo_url}
+                  alt={`${project.name} elevation`}
+                  className="w-full h-32 object-cover"
+                />
+              )}
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">

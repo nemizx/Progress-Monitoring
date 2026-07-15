@@ -89,7 +89,7 @@ export default forwardRef(function CriticalIssuesPanel({
     title: 'I. Critical Issues',
     columns: [
       { key: 'sr', label: 'Sr.' },
-      { key: 'description', label: 'Description' },
+      { key: 'description', label: 'Description', tooltip: 'Key blockers, material shortages, utility clearance delays, or design discrepancies.' },
     ],
     rows: rows.filter((r) => r.description.trim()).map((r, i) => ({
       sr: i + 1,

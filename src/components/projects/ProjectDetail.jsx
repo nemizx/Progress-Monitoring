@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { ArrowLeft, Plus, Target, Clock, Trash2, Settings, Users, Save, Building2, Pencil } from 'lucide-react';
+import { ArrowLeft, Plus, Target, Clock, Trash2, Settings, Users, Save, Building2, Pencil, ImagePlus, X } from 'lucide-react';
 import StatusBadge from '@/components/shared/StatusBadge';
 import ProgressRing from '@/components/shared/ProgressRing';
 import { formatCurrencyINR, formatDateIndian } from '@/lib/formatters';
@@ -31,6 +31,9 @@ export default function ProjectDetail({ project, onBack }) {
   });
   
   const [selectedUserToAssign, setSelectedUserToAssign] = useState('');
+  const [elevationPhotoFile, setElevationPhotoFile] = useState(null);
+  const [elevationPhotoPreview, setElevationPhotoPreview] = useState('');
+  const [uploadingElevationPhoto, setUploadingElevationPhoto] = useState(false);
 
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -38,6 +41,8 @@ export default function ProjectDetail({ project, onBack }) {
 
   useEffect(() => {
     setProjectForm({ ...project });
+    setElevationPhotoFile(null);
+    setElevationPhotoPreview('');
   }, [project]);
 
   // Queries
@@ -96,6 +101,36 @@ export default function ProjectDetail({ project, onBack }) {
       });
     },
   });
+
+  const handleElevationPhotoChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setElevationPhotoFile(file);
+    setElevationPhotoPreview(URL.createObjectURL(file));
+  };
+
+  const handleRemoveElevationPhoto = () => {
+    setElevationPhotoFile(null);
+    setElevationPhotoPreview('');
+    setProjectForm({ ...projectForm, elevation_photo_url: '' });
+  };
+
+  const handleSaveProjectDetails = async () => {
+    let nextForm = projectForm;
+    if (elevationPhotoFile) {
+      setUploadingElevationPhoto(true);
+      try {
+        const res = await base44.integrations.Core.UploadFile({ file: elevationPhotoFile });
+        nextForm = { ...projectForm, elevation_photo_url: res.file_url || '' };
+        setProjectForm(nextForm);
+        setElevationPhotoFile(null);
+        setElevationPhotoPreview('');
+      } finally {
+        setUploadingElevationPhoto(false);
+      }
+    }
+    updateProjectMutation.mutate(nextForm);
+  };
 
   const updateMilestoneMutation = useMutation({
     mutationFn: ({ id, data }) => base44.entities.Milestone.update(id, data),
@@ -594,21 +629,64 @@ export default function ProjectDetail({ project, onBack }) {
 
                   <div>
                     <Label>Description</Label>
-                    <Textarea 
-                      value={projectForm.description || ''} 
-                      onChange={e => setProjectForm({ ...projectForm, description: e.target.value })} 
-                      rows={3} 
+                    <Textarea
+                      value={projectForm.description || ''}
+                      onChange={e => setProjectForm({ ...projectForm, description: e.target.value })}
+                      rows={3}
                     />
                   </div>
 
-                  <Button 
+                  <div>
+                    <Label>Elevation Photo</Label>
+                    {(elevationPhotoPreview || projectForm.elevation_photo_url) ? (
+                      <div className="relative mt-1 rounded-lg border overflow-hidden">
+                        <img
+                          src={elevationPhotoPreview || projectForm.elevation_photo_url}
+                          alt="Elevation"
+                          className="w-full h-40 object-cover"
+                        />
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="icon"
+                          className="absolute top-2 right-2 h-7 w-7"
+                          onClick={handleRemoveElevationPhoto}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </Button>
+                        <label
+                          htmlFor="edit-elevation-photo-input"
+                          className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-md bg-black/60 text-white text-[11px] px-2 py-1 cursor-pointer hover:bg-black/70 transition-colors"
+                        >
+                          <ImagePlus className="w-3 h-3" /> Replace
+                        </label>
+                      </div>
+                    ) : (
+                      <label
+                        htmlFor="edit-elevation-photo-input"
+                        className="mt-1 flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed py-6 text-xs text-muted-foreground cursor-pointer hover:bg-muted/40 transition-colors"
+                      >
+                        <ImagePlus className="w-5 h-5" />
+                        Click to upload building elevation photo
+                      </label>
+                    )}
+                    <input
+                      id="edit-elevation-photo-input"
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleElevationPhotoChange}
+                    />
+                  </div>
+
+                  <Button
                     type="button"
-                    className="w-full gap-2 bg-primary text-white" 
-                    onClick={() => updateProjectMutation.mutate(projectForm)}
-                    disabled={updateProjectMutation.isPending || !projectForm.name?.trim()}
+                    className="w-full gap-2 bg-primary text-white"
+                    onClick={handleSaveProjectDetails}
+                    disabled={updateProjectMutation.isPending || uploadingElevationPhoto || !projectForm.name?.trim()}
                   >
                     <Save className="w-4 h-4" />
-                    {updateProjectMutation.isPending ? 'Saving...' : 'Save Project Details'}
+                    {uploadingElevationPhoto ? 'Uploading Photo...' : updateProjectMutation.isPending ? 'Saving...' : 'Save Project Details'}
                   </Button>
                 </CardContent>
               </Card>

@@ -96,9 +96,9 @@ export default forwardRef(function NextDaysPlansPanel({
     title: "K. Next Day's Plan",
     columns: [
       { key: 'sr', label: 'Sr.' },
-      { key: 'description', label: 'Description' },
-      { key: 'unit', label: 'Unit' },
-      { key: 'quantity', label: 'Quantity' },
+      { key: 'description', label: 'Description', tooltip: 'Details of the work planned to be executed tomorrow.' },
+      { key: 'unit', label: 'Unit', tooltip: 'Optional measurement unit (e.g. Cum, Sqm, MT, Rmt).' },
+      { key: 'quantity', label: 'Quantity', tooltip: 'Optional target quantity of work to be accomplished tomorrow.' },
     ],
     rows: rows.filter((r) => r.description.trim()).map((r, i) => ({
       sr: i + 1,

@@ -30,6 +30,49 @@ export function formatNumberIndian(value) {
   return new Intl.NumberFormat('en-IN').format(num);
 }
 
+/**
+ * Formats a raw numeric string for display inside a live-typing currency input
+ * (Indian grouping, ₹ symbol, preserves an in-progress decimal as the user types).
+ * Pair with `parseCurrencyInputValue` to strip formatting back to a raw numeric string on change.
+ */
+export function formatInputCurrency(val) {
+  if (val === undefined || val === null || val === '') return '';
+  const str = String(val);
+  const match = str.match(/\.(\d*)$/);
+  const numericVal = parseFloat(str);
+  if (Number.isNaN(numericVal)) return '';
+
+  const formatter = new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0,
+  });
+
+  if (match) {
+    const decimalPart = match[1];
+    const integerPart = str.split('.')[0];
+    const parsedInt = parseFloat(integerPart) || 0;
+    const formattedInt = formatter.format(parsedInt);
+    return `${formattedInt}.${decimalPart}`;
+  }
+
+  const hasDecimal = str.includes('.');
+  const decimals = hasDecimal ? str.split('.')[1].length : 0;
+
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: Math.min(decimals, 2),
+  }).format(numericVal);
+}
+
+/** Strips a live-typing currency input's raw text value down to a plain numeric string. */
+export function parseCurrencyInputValue(rawText) {
+  const stripped = String(rawText ?? '').replace(/[^0-9.]/g, '');
+  const parts = stripped.split('.');
+  return parts[0] + (parts.length > 1 ? '.' + parts.slice(1).join('') : '');
+}
+
 export function formatDateIndian(isoDate) {
   if (!isoDate) return '—';
   const d = new Date(isoDate);

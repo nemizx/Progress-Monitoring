@@ -8,15 +8,52 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2 } from 'lucide-react';
+import { Loader2, HelpCircle } from 'lucide-react';
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import ContractorLabourTable from '@/components/progress/ContractorLabourTable';
+
+function SectionTitle({ title, tooltip }) {
+  if (!tooltip) {
+    return <h3 className="text-xs font-bold uppercase tracking-wide text-foreground">{title}</h3>;
+  }
+  return (
+    <div className="flex items-center gap-1">
+      <h3 className="text-xs font-bold uppercase tracking-wide text-foreground">{title}</h3>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <HelpCircle className="w-3 h-3 text-muted-foreground/60 hover:text-muted-foreground cursor-help normal-case" />
+        </TooltipTrigger>
+        <TooltipContent className="max-w-[220px] text-center font-normal normal-case">
+          {tooltip}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
+function ColumnHeader({ label, tooltip }) {
+  if (!tooltip) return <>{label}</>;
+  return (
+    <span className="inline-flex items-center gap-1">
+      {label}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <HelpCircle className="w-3 h-3 text-muted-foreground/60 hover:text-muted-foreground cursor-help normal-case" />
+        </TooltipTrigger>
+        <TooltipContent className="max-w-[200px] text-center font-normal normal-case">
+          {tooltip}
+        </TooltipContent>
+      </Tooltip>
+    </span>
+  );
+}
 
 function ReviewSection({ section }) {
   if (!section?.rows?.length) {
     return (
       <div className="border rounded-lg overflow-hidden">
         <div className="bg-muted/40 px-4 py-2 border-b">
-          <h3 className="text-xs font-bold uppercase tracking-wide text-foreground">{section.title}</h3>
+          <SectionTitle title={section.title} tooltip={section.tooltip} />
         </div>
         <p className="text-xs text-muted-foreground p-4">No entries for this section.</p>
       </div>
@@ -27,7 +64,7 @@ function ReviewSection({ section }) {
     return (
       <div className="border rounded-lg overflow-hidden shadow-sm">
         <div className="bg-muted/40 px-4 py-2 border-b">
-          <h3 className="text-xs font-bold uppercase tracking-wide text-foreground">{section.title}</h3>
+          <SectionTitle title={section.title} tooltip={section.tooltip} />
         </div>
         <ContractorLabourTable rows={section.rows} />
       </div>
@@ -43,7 +80,7 @@ function ReviewSection({ section }) {
   return (
     <div className="border rounded-lg overflow-hidden">
       <div className="bg-muted/40 px-4 py-2 border-b">
-        <h3 className="text-xs font-bold uppercase tracking-wide text-foreground">{section.title}</h3>
+        <SectionTitle title={section.title} tooltip={section.tooltip} />
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs min-w-max">
@@ -54,7 +91,7 @@ function ReviewSection({ section }) {
                   key={col.key}
                   className={`p-2 font-semibold text-muted-foreground whitespace-nowrap ${alignClass(col.align)}`}
                 >
-                  {col.label}
+                  <ColumnHeader label={col.label} tooltip={col.tooltip} />
                 </th>
               ))}
             </tr>
@@ -90,6 +127,7 @@ export default function DprReviewDialog({
   isSubmitting,
 }) {
   return (
+    <TooltipProvider>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-6xl max-h-[90vh] flex flex-col gap-0 p-0">
         <DialogHeader className="px-6 pt-6 pb-4 border-b shrink-0">
@@ -149,5 +187,6 @@ export default function DprReviewDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    </TooltipProvider>
   );
 }

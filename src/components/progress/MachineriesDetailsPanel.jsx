@@ -204,10 +204,10 @@ export default forwardRef(function MachineriesDetailsPanel({
     title: 'E. Machineries Details',
     columns: [
       { key: 'sr', label: 'Sr.' },
-      { key: 'machinery_name', label: 'Machinery' },
-      { key: 'nos', label: 'Nos' },
-      { key: 'todays_hours', label: "Today's Total Hours" },
-      { key: 'todays_amount', label: 'Today Amount', render: (r) => formatCurrencyINR(r.todays_amount) },
+      { key: 'machinery_name', label: 'Machinery', tooltip: 'The machinery type deployed.' },
+      { key: 'nos', label: 'Nos', tooltip: 'Number of machinery units deployed today.' },
+      { key: 'todays_hours', label: "Today's Total Hours", tooltip: "Operating hours today (hours run per machine)." },
+      { key: 'todays_amount', label: 'Today Amount', tooltip: "Cost incurred today (Nos × Today's Hours × Rate).", render: (r) => formatCurrencyINR(r.todays_amount) },
     ],
     rows: calculatedRows
       .filter((r) => r.machinery_name.trim())

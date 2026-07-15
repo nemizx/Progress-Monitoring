@@ -1,8 +1,9 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, FolderKanban, CalendarClock, ClipboardList, MessageSquare, HardHat } from 'lucide-react';
+import { LayoutDashboard, FolderKanban, CalendarClock, ClipboardList, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import ThemeToggle from './ThemeToggle';
+import planedgeLogo from '@/assets/logo-planedge.png';
 
 const mobileItems = [
   { path: '/', label: 'Home', icon: LayoutDashboard },
@@ -17,8 +18,8 @@ export default function MobileNav() {
   return (
     <>
       <div className="fixed top-0 left-0 right-0 h-14 bg-card border-b border-border flex items-center px-4 z-30">
-        <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-          <HardHat className="w-4 h-4 text-primary-foreground" />
+        <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center overflow-hidden">
+          <img src={planedgeLogo} alt="Planedge" className="w-full h-full object-cover" />
         </div>
         <span className="ml-3 font-heading font-bold text-sm">Planedge_Monitors</span>
         <div className="ml-auto">

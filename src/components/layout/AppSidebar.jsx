@@ -3,12 +3,13 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, CalendarClock, Network,
   ClipboardList, BarChart3, MessageSquare, Bell,
-  Shield, ChevronLeft, ChevronRight, HardHat, LogOut, Users, Building2
+  Shield, ChevronLeft, ChevronRight, LogOut, Users, Building2
 } from 'lucide-react';
 import { base44 } from '@/api/base44Client';
 import { cn } from '@/lib/utils';
 import ThemeToggle from './ThemeToggle';
 import { useAuth } from '@/lib/AuthContext';
+import planedgeLogo from '@/assets/logo-planedge.png';
 
 export default function AppSidebar() {
   const { user } = useAuth();
@@ -67,8 +68,8 @@ export default function AppSidebar() {
     >
       {/* Logo */}
       <div className="flex items-center gap-3 px-4 h-16 border-b border-sidebar-border shrink-0">
-        <div className="w-9 h-9 rounded-lg bg-sidebar-primary flex items-center justify-center shrink-0">
-          <HardHat className="w-5 h-5 text-sidebar-primary-foreground" />
+        <div className="w-9 h-9 rounded-lg bg-sidebar-primary flex items-center justify-center shrink-0 overflow-hidden">
+          <img src={planedgeLogo} alt="Planedge" className="w-full h-full object-cover" />
         </div>
         {hovered && (
           <div className="flex-1 flex items-center justify-between animate-in fade-in duration-200">

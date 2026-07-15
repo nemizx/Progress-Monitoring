@@ -70,7 +70,8 @@ const entityNames = [
   'SpecialSiteVisit',
   'CriticalIssue',
   'NextDaysPlan',
-  'WprReport'
+  'WprReport',
+  'MprReport'
 ];
 
 const entities = {};

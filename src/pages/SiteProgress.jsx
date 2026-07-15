@@ -11,8 +11,10 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
-import { ClipboardList, CheckCircle2, Clock, AlertTriangle, Calendar, Save, X, ChevronsUpDown } from 'lucide-react';
+import { ClipboardList, CheckCircle2, Clock, AlertTriangle, Calendar, Save, X, ChevronsUpDown, HelpCircle } from 'lucide-react';
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import EmptyState from '@/components/shared/EmptyState';
+import { cn } from '@/lib/utils';
 import { formatCompactCurrencyINR, formatCurrencyINR, normalizeDateKey } from '@/lib/formatters';
 import { useAuth } from '@/lib/AuthContext';
 import { useProjectSubProject } from '@/hooks/useProjectSubProject';
@@ -29,8 +31,10 @@ import CriticalIssuesPanel from '@/components/progress/CriticalIssuesPanel';
 import NextDaysPlansPanel from '@/components/progress/NextDaysPlansPanel';
 import DprReviewDialog from '@/components/progress/DprReviewDialog';
 import WprSheetPanel from '@/components/progress/WprSheetPanel';
+import MprSheetPanel from '@/components/progress/MprSheetPanel';
 import { filterBudgetBySubProject, filterProgressBySubProject, filterWbsBySubProject } from '@/lib/subProjectScope';
 import { buildWprWeeksList, getDefaultWprWeekId } from '@/lib/wprWeeks';
+import { getMprMonthsList, getDefaultMprMonthId } from '@/lib/mprMonths';
 
 const weatherIcons = { clear: '☀️', cloudy: '⛅', rainy: '🌧️', stormy: '⛈️', hot: '🌡️' };
 const normalizeActivityKey = (value) => String(value || '').trim().toLowerCase();
@@ -72,6 +76,23 @@ const mapForecastToWeatherCondition = (weatherCode, maxTemp) => {
   return 'cloudy';
 };
 
+function HeaderWithTooltip({ text, tooltip, align = 'center' }) {
+  const justify = align === 'right' ? 'justify-end' : align === 'left' ? 'justify-start' : 'justify-center';
+  return (
+    <div className={`flex items-center ${justify} gap-1 select-none`}>
+      <span>{text}</span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+        </TooltipTrigger>
+        <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+          {tooltip}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
 export default function SiteProgress() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -98,7 +119,7 @@ export default function SiteProgress() {
   const [sheetSubTab, setSheetSubTab] = useState('dpr'); // 'dpr', 'staff-attendance'
   const [dprState, setDprState] = useState({});
   const [manualRowIds, setManualRowIds] = useState([]);
-  const [weatherCondition, setWeatherCondition] = useState('clear');
+  const [weatherCondition, setWeatherCondition] = useState('');
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weatherInfo, setWeatherInfo] = useState('');
   const [weatherError, setWeatherError] = useState('');
@@ -163,33 +184,12 @@ export default function SiteProgress() {
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   }, [selectedReportDate]);
 
-  const getMonthsList = () => {
-    const months = [];
-    const curr = new Date();
-    for (let i = 0; i < 6; i++) {
-      const d = new Date(curr.getFullYear(), curr.getMonth() - i, 1);
-      const monthName = d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
-      const startStr = `${y}-${m}-01`;
-      const endStr = `${y}-${m}-${String(lastDay).padStart(2, '0')}`;
-
-      months.push({
-        id: `month_${i}`,
-        label: monthName,
-        startDate: startStr,
-        endDate: endStr
-      });
-    }
-    return months;
-  };
-
-  const monthsList = getMonthsList();
-
   const [selectedWeek, setSelectedWeek] = useState('');
-  const [selectedMonth, setSelectedMonth] = useState(monthsList[0]?.id || '');
   const [selectedWprMonth, setSelectedWprMonth] = useState('');
+
+  const mprMonthsList = useMemo(() => getMprMonthsList(), []);
+  const [selectedMprMonth, setSelectedMprMonth] = useState(() => getDefaultMprMonthId(mprMonthsList));
+  const currentMprMonthObj = mprMonthsList.find(m => m.id === selectedMprMonth) || mprMonthsList[0];
 
   const weeksList = useMemo(
     () => buildWprWeeksList({
@@ -523,10 +523,16 @@ export default function SiteProgress() {
     setWeatherManuallyEdited(false);
     setWeatherInfo('');
     setWeatherError('');
+    setWeatherCondition('');
   }, [projectId, subProjectId, selectedReportDate]);
 
   useEffect(() => {
-    if (!isReady || !selectedProject?.location || weatherManuallyEdited) {
+    if (weatherManuallyEdited) return;
+
+    if (!isReady || !selectedProject?.location) {
+      if (isReady && !selectedProject?.location) {
+        setWeatherError('Project has no location set — select weather manually.');
+      }
       return;
     }
 
@@ -754,6 +760,15 @@ export default function SiteProgress() {
       return;
     }
 
+    if (!weatherCondition) {
+      toast({
+        title: 'Weather Required',
+        description: 'Select a weather condition for the day before saving the DPR.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     for (const panelRef of dprPanelRefs) {
       const error = panelRef.current?.validate?.();
       if (error) {
@@ -843,6 +858,16 @@ export default function SiteProgress() {
   };
 
   const handleConfirmSubmitDpr = async () => {
+    if (!weatherCondition) {
+      setShowReviewDialog(false);
+      toast({
+        title: 'Weather Required',
+        description: 'Select a weather condition for the day before saving the DPR.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const { savedCount, deletedCount } = await persistWorksheetDpr();
@@ -928,6 +953,7 @@ export default function SiteProgress() {
       {
         key: 'activity',
         label: 'Activity',
+        tooltip: 'The WBS activity or line item this entry was logged against.',
         render: (r) => (
           <div>
             {r.code && <div className="font-mono text-[10px] text-muted-foreground">{r.code}</div>}
@@ -935,16 +961,16 @@ export default function SiteProgress() {
           </div>
         ),
       },
-      { key: 'unit', label: 'Unit' },
-      { key: 'total_qty', label: 'Total Qty' },
-      { key: 'today_qty', label: 'Today Qty' },
-      { key: 'balance_qty', label: 'Balance Qty' },
-      { key: 'cumulative_qty', label: 'Cumulative Qty' },
-      { key: 'percent_comp', label: '% Comp.' },
-      { key: 'today_vowd', label: "Today's VOWD", render: (r) => formatCurrencyINR(r.today_vowd) },
-      { key: 'cumulative_vowd', label: 'Cumulative VOWD', render: (r) => formatCurrencyINR(r.cumulative_vowd) },
-      { key: 'tomorrow_qty', label: 'QTY Plan Tomorrow' },
-      { key: 'tomorrow_vowd', label: 'VOWD Plan Tomorrow', render: (r) => formatCurrencyINR(r.tomorrow_vowd) },
+      { key: 'unit', label: 'Unit', tooltip: 'Unit of measurement for this activity (e.g. Cum, Sqm, MT, Rmt).' },
+      { key: 'total_qty', label: 'Total Qty', tooltip: 'Total planned quantity of work for this activity, from the WBS/budget.' },
+      { key: 'today_qty', label: 'Today Qty', tooltip: 'Quantity of work executed on this activity today.' },
+      { key: 'balance_qty', label: 'Balance Qty', tooltip: 'Remaining quantity of work still to be completed.' },
+      { key: 'cumulative_qty', label: 'Cumulative Qty', tooltip: "Total quantity completed till date, including today's entry." },
+      { key: 'percent_comp', label: '% Comp.', tooltip: 'Percentage of total planned quantity completed till date.' },
+      { key: 'today_vowd', label: "Today's VOWD", tooltip: 'Value of Work Done today (Today Qty × rate).', render: (r) => formatCurrencyINR(r.today_vowd) },
+      { key: 'cumulative_vowd', label: 'Cumulative VOWD', tooltip: 'Total Value of Work Done till date.', render: (r) => formatCurrencyINR(r.cumulative_vowd) },
+      { key: 'tomorrow_qty', label: 'QTY Plan Tomorrow', tooltip: 'Quantity of work planned to be executed tomorrow.' },
+      { key: 'tomorrow_vowd', label: 'VOWD Plan Tomorrow', tooltip: 'Expected Value of Work Done tomorrow, based on the planned quantity.', render: (r) => formatCurrencyINR(r.tomorrow_vowd) },
     ],
     rows: activeBudgetItems.map((row) => {
       const state = dprState[row.row_id] || {};
@@ -990,74 +1016,6 @@ export default function SiteProgress() {
     return sections;
   }, [getWorksheetReviewSection, dprPanelRefs, weatherCondition, showReviewDialog]);
 
-  // Aggregated data generator helpers for WPR/MPR
-  const buildAggregatedData = (start, end) => {
-    const data = [];
-    const scopedEntries = entries.filter(
-      (e) => {
-        const entryDate = normalizeDateKey(e.date);
-        return entryDate >= start && entryDate <= end && (e.report_type === 'daily' || !e.report_type) && !e._is_aggregated;
-      }
-    );
-    
-    const grouped = {};
-    scopedEntries.forEach((entry) => {
-      const key = entry.budget_item_id || (entry.wbs_item_id ? `wbs_${entry.wbs_item_id}` : null);
-      if (!key) return;
-
-      if (!grouped[key]) {
-        grouped[key] = {
-          qtyDone: 0,
-          value: 0,
-          laborCount: 0,
-          budgetItemId: entry.budget_item_id || '',
-          wbsItemId: entry.wbs_item_id || '',
-          activityKey: getEntryActivityKey(entry),
-        };
-      }
-
-      grouped[key].qtyDone += parseFloat(entry.quantity_done) || 0;
-      grouped[key].value += parseFloat(entry.value_of_work_done) || 0;
-      grouped[key].laborCount += parseFloat(entry.labor_count) || 0;
-      if (!grouped[key].wbsItemId && entry.wbs_item_id) grouped[key].wbsItemId = entry.wbs_item_id;
-      if (!grouped[key].activityKey) grouped[key].activityKey = getEntryActivityKey(entry);
-    });
-    
-    Object.entries(grouped).forEach(([itemId, metrics]) => {
-      const mappedRow = (
-        (metrics.budgetItemId ? worksheetRowByBudgetId.get(metrics.budgetItemId) : null) ||
-        (metrics.wbsItemId ? worksheetRowByWbsId.get(metrics.wbsItemId) : null) ||
-        (metrics.activityKey ? worksheetRowByActivityId.get(metrics.activityKey) : null)
-      );
-      const fallbackBudget = metrics.budgetItemId
-        ? budgetItems.find((b) => b.id === metrics.budgetItemId)
-        : null;
-      const row = mappedRow || fallbackBudget;
-      if (!row) return;
-
-      const parentHead = budgetItems.find((p) => p.id === row.parent_id);
-      const wbsItem = wbsItems.find((w) => w.id === (row.wbs_item_id || metrics.wbsItemId));
-      
-      data.push({
-        id: itemId,
-        title: row.title,
-        code: row.code,
-        domain: parentHead ? `${parentHead.code}: ${parentHead.title}` : '—',
-        subProject: wbsItem ? wbsItem.title || wbsItem.name : '—',
-        unit: row.unit,
-        qtyDone: metrics.qtyDone,
-        value: metrics.value,
-        laborCount: metrics.laborCount
-      });
-    });
-
-    return data.sort((a, b) =>
-      String(a.code || '').localeCompare(String(b.code || ''), undefined, { numeric: true })
-    );
-  };
-
-  const getMonthlyAggregatedData = (start, end) => buildAggregatedData(start, end);
-
   // History stats
   const filtered = entries.filter(e => !typeFilter || e.report_type === typeFilter);
   const draftCount = entries.filter(e => e.status === 'draft').length;
@@ -1077,11 +1035,8 @@ export default function SiteProgress() {
   // Weekly WPR computations
   const currentWeekObj = weeksList.find(w => w.id === selectedWeek) || weeksList[0];
 
-  // Monthly MPR computations
-  const currentMonthObj = monthsList.find(m => m.id === selectedMonth) || monthsList[0];
-  const monthlyData = currentMonthObj ? getMonthlyAggregatedData(currentMonthObj.startDate, currentMonthObj.endDate) : [];
-
   return (
+    <TooltipProvider>
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -1099,7 +1054,7 @@ export default function SiteProgress() {
         subProjectId={subProjectId}
         onProjectChange={setProjectId}
         onSubProjectChange={setSubProjectId}
-        hideSubProject={activeTab === 'wpr'}
+        hideSubProject={activeTab === 'wpr' || activeTab === 'mpr'}
       >
         {activeTab === 'sheet' && projectId && subProjectId && (
           <>
@@ -1124,9 +1079,11 @@ export default function SiteProgress() {
             <div className="h-9 w-px bg-border hidden md:block self-end mb-1" />
 
             <div className="flex flex-col gap-1 justify-end">
-              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Weather</span>
+              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+                Weather {!weatherCondition && <span className="text-destructive">*</span>}
+              </span>
               <Select
-                value={weatherCondition}
+                value={weatherCondition || undefined}
                 onValueChange={(value) => {
                   weatherManualRef.current = true;
                   setWeatherManuallyEdited(true);
@@ -1134,8 +1091,13 @@ export default function SiteProgress() {
                 }}
                 disabled={isSelectedDateLocked}
               >
-                <SelectTrigger className="w-32 h-9 text-xs px-2">
-                  <SelectValue />
+                <SelectTrigger
+                  className={cn(
+                    "w-32 h-9 text-xs px-2",
+                    !weatherCondition && !isSelectedDateLocked && "border-destructive text-destructive"
+                  )}
+                >
+                  <SelectValue placeholder={weatherLoading ? 'Fetching…' : 'Select weather'} />
                 </SelectTrigger>
                 <SelectContent>
                   {Object.entries(weatherIcons).map(([key, icon]) => (
@@ -1143,14 +1105,17 @@ export default function SiteProgress() {
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-[9px] text-muted-foreground mt-0.5 leading-none absolute translate-y-10">
+              <p className={cn(
+                "text-[9px] mt-0.5 leading-none absolute translate-y-10",
+                !weatherCondition && !weatherLoading ? "text-destructive font-semibold" : "text-muted-foreground"
+              )}>
                 {weatherLoading
                   ? 'Fetching weather...'
                   : weatherError
                     ? weatherError
                     : weatherInfo
                       ? `Auto-filled (${weatherInfo})`
-                      : 'Weather is editable.'}
+                      : 'Select weather manually.'}
               </p>
             </div>
           </>
@@ -1195,18 +1160,18 @@ export default function SiteProgress() {
           </>
         )}
 
-        {activeTab === 'mpr' && projectId && subProjectId && (
+        {activeTab === 'mpr' && projectId && (
           <>
             <div className="h-9 w-px bg-border hidden md:block self-end mb-1" />
 
             <div className="flex flex-col gap-1 justify-end flex-1 max-w-[260px]">
               <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider leading-none">Select Month</span>
-              <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+              <Select value={selectedMprMonth} onValueChange={setSelectedMprMonth}>
                 <SelectTrigger className="w-full h-9 text-xs px-2">
                   <SelectValue placeholder="Choose Month" />
                 </SelectTrigger>
                 <SelectContent>
-                  {monthsList.map(m => <SelectItem key={m.id} value={m.id} className="text-xs">{m.label}</SelectItem>)}
+                  {mprMonthsList.map(m => <SelectItem key={m.id} value={m.id} className="text-xs">{m.label}</SelectItem>)}
                 </SelectContent>
               </Select>
               <p className="text-[9px] opacity-0 mt-0.5 leading-none">&nbsp;</p>
@@ -1215,7 +1180,7 @@ export default function SiteProgress() {
         )}
       </ProjectSubProjectSelector>
 
-      <SubProjectGate projectId={projectId} subProjectId={subProjectId} subProjects={subProjects} bypassSubProject={activeTab === 'wpr'}>
+      <SubProjectGate projectId={projectId} subProjectId={subProjectId} subProjects={subProjects} bypassSubProject={activeTab === 'wpr' || activeTab === 'mpr'}>
 
 
       {/* 1. Daily DPR Sheet Tab */}
@@ -1401,7 +1366,17 @@ export default function SiteProgress() {
                   </div>
                 )}
                 <div className="flex flex-col gap-1">
-                  <Label className="text-[10px] uppercase font-bold text-muted-foreground">Search Activity</Label>
+                  <div className="flex items-center gap-1 select-none">
+                    <Label className="text-[10px] uppercase font-bold text-muted-foreground">Search Activity</Label>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <HelpCircle className="w-3 h-3 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                        Search and pick a WBS activity or line item to add to today's DPR worksheet.
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
                   <Popover
                     open={activityPickerOpen}
                     onOpenChange={(open) => {
@@ -1492,14 +1467,30 @@ export default function SiteProgress() {
                       <thead>
                         <tr className="border-b bg-muted/40">
                           <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">#</th>
-                          <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Activity / Description</th>
-                          <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Qty Done</th>
-                          <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Unit</th>
-                          <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Labourers</th>
-                          <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Value (VOWD)</th>
-                          <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Work Description</th>
-                          <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Issues</th>
-                          <th className="text-center p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">Status</th>
+                          <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">
+                            <HeaderWithTooltip text="Activity / Description" align="left" tooltip="The WBS activity this entry was logged against." />
+                          </th>
+                          <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">
+                            <HeaderWithTooltip text="Qty Done" align="right" tooltip="Quantity of work executed on this activity for the day." />
+                          </th>
+                          <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">
+                            <HeaderWithTooltip text="Unit" align="left" tooltip="Unit of measurement for this activity." />
+                          </th>
+                          <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">
+                            <HeaderWithTooltip text="Labourers" align="right" tooltip="Number of labourers deployed on this activity that day." />
+                          </th>
+                          <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">
+                            <HeaderWithTooltip text="Value (VOWD)" align="right" tooltip="Value of Work Done for this activity that day." />
+                          </th>
+                          <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">
+                            <HeaderWithTooltip text="Work Description" align="left" tooltip="Description of the work carried out on this activity." />
+                          </th>
+                          <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">
+                            <HeaderWithTooltip text="Issues" align="left" tooltip="Issues or blockers reported for this activity." />
+                          </th>
+                          <th className="text-center p-3 font-semibold text-xs text-muted-foreground uppercase tracking-wider">
+                            <HeaderWithTooltip text="Status" tooltip="Submission status of this entry: draft, submitted, or approved." />
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1578,18 +1569,42 @@ export default function SiteProgress() {
                       <thead>
                         <tr className="border-b bg-[#D9E1F2]">
                           <th className="sticky left-0 z-20 bg-[#D9E1F2] text-left p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r min-w-[260px]">
-                            Activity
+                            <HeaderWithTooltip
+                              text="Activity"
+                              align="left"
+                              tooltip="The WBS activity or line item selected from the searchable activity picker above."
+                            />
                           </th>
-                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-16">Unit</th>
-                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-24">Total Qty</th>
-                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-24">Today Qty</th>
-                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-24">Balance Qty</th>
-                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-28">Cumulative Completed Qty</th>
-                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-20">% Comp.</th>
-                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-28">Today&apos;s VOWD</th>
-                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-28">Cumulative VOWD</th>
-                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-28">QTY Plan for Tomorrow</th>
-                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-28">VOWD Plan for Tomorrow</th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-16">
+                            <HeaderWithTooltip text="Unit" tooltip="Unit of measurement for this activity (e.g. Cum, Sqm, MT, Rmt)." />
+                          </th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-24">
+                            <HeaderWithTooltip text="Total Qty" tooltip="Total planned quantity of work for this activity, from the WBS/budget." />
+                          </th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-24">
+                            <HeaderWithTooltip text="Today Qty" tooltip="Quantity of work executed on this activity today." />
+                          </th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-24">
+                            <HeaderWithTooltip text="Balance Qty" tooltip="Remaining quantity of work still to be completed (Total Qty − Cumulative Completed Qty)." />
+                          </th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-28">
+                            <HeaderWithTooltip text="Cumulative Completed Qty" tooltip="Total quantity completed till date, including today's entry." />
+                          </th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-20">
+                            <HeaderWithTooltip text="% Comp." tooltip="Percentage of total planned quantity completed till date." />
+                          </th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-28">
+                            <HeaderWithTooltip text="Today's VOWD" tooltip="Value of Work Done today (Today Qty × rate)." />
+                          </th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-28">
+                            <HeaderWithTooltip text="Cumulative VOWD" tooltip="Total Value of Work Done till date (Cumulative Completed Qty × rate)." />
+                          </th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-28">
+                            <HeaderWithTooltip text="QTY Plan for Tomorrow" tooltip="Quantity of work planned to be executed on this activity tomorrow." />
+                          </th>
+                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-28">
+                            <HeaderWithTooltip text="VOWD Plan for Tomorrow" tooltip="Expected Value of Work Done tomorrow, based on the planned quantity." />
+                          </th>
                           <th className="p-2.5 w-10 border-l bg-[#D9E1F2]"></th>
                         </tr>
                       </thead>
@@ -1763,54 +1778,18 @@ export default function SiteProgress() {
       {/* 3. Monthly MPR Sheet Tab */}
       {activeTab === 'mpr' && (
         <div className="space-y-4">
-          <div className="space-y-4">
-            <CardHeader className="p-0 pb-1">
-              <CardTitle className="text-base font-bold">Aggregated Monthly Progress Log ({currentMonthObj?.label})</CardTitle>
-            </CardHeader>
-            
-            <Card className="overflow-hidden border shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm font-sans border-collapse">
-                  <thead>
-                    <tr className="border-b bg-muted/50">
-                      <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase">Line Item</th>
-                      <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase">Domain</th>
-                      <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase">Sub-Project</th>
-                      <th className="text-center p-3 font-semibold text-xs text-muted-foreground uppercase">Unit</th>
-                      <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase">Monthly Qty Done</th>
-                      <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase">Value of Work</th>
-                      <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase">Labour Days</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {monthlyData.map(row => (
-                      <tr key={row.id} className="border-b hover:bg-muted/10 transition-colors">
-                        <td className="p-3 text-xs font-semibold whitespace-nowrap">{row.title}</td>
-                        <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">{row.domain}</td>
-                        <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">{row.subProject}</td>
-                        <td className="p-3 text-center text-xs font-bold text-muted-foreground">{row.unit}</td>
-                        <td className="p-3 text-right font-mono text-xs font-semibold">{row.qtyDone.toLocaleString()}</td>
-                        <td className="p-3 text-right font-mono text-xs text-emerald-600 font-bold">{fmtFull(row.value)}</td>
-                        <td className="p-3 text-right font-mono text-xs">{row.laborCount}</td>
-                      </tr>
-                    ))}
-                    {monthlyData.length === 0 && (
-                      <tr>
-                        <td colSpan={7} className="p-8 text-center text-muted-foreground text-xs font-sans">
-                          No daily progress logged during this month.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          </div>
+          <MprSheetPanel
+            projectId={projectId}
+            selectedProject={selectedProject}
+            month={currentMprMonthObj}
+            submittedBy={submittedBy}
+          />
         </div>
       )}
 
 
       </SubProjectGate>
     </div>
+    </TooltipProvider>
   );
 }

@@ -93,8 +93,8 @@ export default forwardRef(function StatusReportPanel({
     title: 'G. Status Report',
     columns: [
       { key: 'sr', label: 'Sr.' },
-      { key: 'description', label: 'Description' },
-      { key: 'remark', label: 'Remark' },
+      { key: 'description', label: 'Description', tooltip: 'Details of the current site status, milestones reached, or blocker updates today.' },
+      { key: 'remark', label: 'Remark', tooltip: 'Optional comments or notes related to this status update.' },
     ],
     rows: rows.filter((r) => r.description.trim()).map((r, i) => ({
       sr: i + 1,

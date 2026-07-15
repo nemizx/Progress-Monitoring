@@ -93,8 +93,8 @@ export default forwardRef(function DaysReportPanel({
     title: "F. Day's Report",
     columns: [
       { key: 'sr', label: 'Sr.' },
-      { key: 'description', label: 'Description' },
-      { key: 'remark', label: 'Remark' },
+      { key: 'description', label: 'Description', tooltip: 'Details of the work completed, weather delays, safety, or key events of the day.' },
+      { key: 'remark', label: 'Remark', tooltip: 'Optional comments, follow-ups, or notes related to this item.' },
     ],
     rows: rows
       .filter((r) => r.description.trim())

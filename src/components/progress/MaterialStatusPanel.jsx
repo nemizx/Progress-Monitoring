@@ -220,11 +220,11 @@ export default forwardRef(function MaterialStatusPanel({
     title: 'D. Material Status',
     columns: [
       { key: 'sr', label: 'Sr.' },
-      { key: 'description', label: 'Description' },
-      { key: 'unit', label: 'Unit' },
-      { key: 'today_rec', label: 'Today Rec.' },
-      { key: 'today_consumed', label: 'Today Consumed' },
-      { key: 'remarks', label: 'Remarks' },
+      { key: 'description', label: 'Description', tooltip: 'Material name or type.' },
+      { key: 'unit', label: 'Unit', tooltip: 'Unit of measurement (e.g. Bags, MT, Cum).' },
+      { key: 'today_rec', label: 'Today Rec.', tooltip: 'Quantity of this material received today.' },
+      { key: 'today_consumed', label: 'Today Consumed', tooltip: 'Quantity of this material consumed today.' },
+      { key: 'remarks', label: 'Remarks', tooltip: 'Optional notes, e.g. invoice number or delivery details.' },
     ],
     rows: calculatedRows
       .filter((r) => r.description.trim())
@@ -345,28 +345,196 @@ export default forwardRef(function MaterialStatusPanel({
                 <tr className="border-b bg-muted/60">
                   {/* Basic Fields */}
                   <th className="text-center p-3 font-semibold text-xs text-muted-foreground uppercase w-[60px] border-r">Sr. No</th>
-                  <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase w-[220px] border-r">Description *</th>
-                  <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase w-[90px] border-r">Unit</th>
+                  <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase w-[220px] border-r">
+                    <div className="flex items-center gap-1 select-none">
+                      <span>Description *</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                          Material name or type. Matches history using this name (case-insensitive).
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </th>
+                  <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase w-[90px] border-r">
+                    <div className="flex items-center gap-1 select-none">
+                      <span>Unit</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                          Unit of measurement (e.g. Bags, MT, Cum).
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </th>
 
                   {/* Received Qty fields */}
-                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[110px]">Till Date Rec Qty</th>
-                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[110px]">Today Rec Qty</th>
-                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[110px] border-r">Total Received Qty</th>
+                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[110px]">
+                    <div className="flex items-center justify-end gap-1 select-none">
+                      <span>Till Date Rec Qty</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                          Total quantity received on previous days for this material.
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </th>
+                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[110px]">
+                    <div className="flex items-center justify-end gap-1 select-none">
+                      <span>Today Rec Qty</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                          Quantity of this material received today.
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </th>
+                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[110px] border-r">
+                    <div className="flex items-center justify-end gap-1 select-none">
+                      <span>Total Received Qty</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                          Total quantity received till date (Till Date + Today).
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </th>
 
                   {/* Consumed Qty fields */}
-                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[110px]">Till Date Consumtion</th>
-                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[110px]">Today Consumption</th>
-                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[110px]">Total Consumption</th>
-                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[110px] border-r bg-emerald-50/30">Balance</th>
+                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[110px]">
+                    <div className="flex items-center justify-end gap-1 select-none">
+                      <span>Till Date Consumtion</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                          Total quantity consumed on previous days for this material.
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </th>
+                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[110px]">
+                    <div className="flex items-center justify-end gap-1 select-none">
+                      <span>Today Consumption</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                          Quantity of this material consumed today.
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </th>
+                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[110px]">
+                    <div className="flex items-center justify-end gap-1 select-none">
+                      <span>Total Consumption</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                          Total quantity consumed till date (Till Date + Today).
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </th>
+                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[110px] border-r bg-emerald-50/30">
+                    <div className="flex items-center justify-end gap-1 select-none">
+                      <span>Balance</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                          Remaining stock on site (Total Received − Total Consumed).
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </th>
 
                   {/* Amount fields */}
-                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[110px]">Rate</th>
-                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[130px]">Till Date</th>
-                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[140px]">Today Material Amount</th>
-                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[160px] border-r">Cummulative Material Amount</th>
+                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[110px]">
+                    <div className="flex items-center justify-end gap-1 select-none">
+                      <span>Rate</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                          Unit rate or cost per material unit.
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </th>
+                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[130px]">
+                    <div className="flex items-center justify-end gap-1 select-none">
+                      <span>Till Date</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                          Total cost of material consumed on previous days.
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </th>
+                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[140px]">
+                    <div className="flex items-center justify-end gap-1 select-none">
+                      <span>Today Material Amount</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                          Cost of material consumed today (Today Consumption × Rate).
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </th>
+                  <th className="text-right p-3 font-semibold text-xs text-muted-foreground uppercase w-[160px] border-r">
+                    <div className="flex items-center justify-end gap-1 select-none">
+                      <span>Cummulative Material Amount</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                          Total cost of material consumed till date.
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </th>
 
                   {/* Remarks & Actions */}
-                  <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase w-[180px]">Remarks</th>
+                  <th className="text-left p-3 font-semibold text-xs text-muted-foreground uppercase w-[180px]">
+                    <div className="flex items-center gap-1 select-none">
+                      <span>Remarks</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
+                          Optional notes, e.g. invoice number or delivery details.
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </th>
                   <th className="text-center p-3 font-semibold text-xs text-muted-foreground uppercase w-[90px]">Add/Remove</th>
                 </tr>
               </thead>
