@@ -1217,14 +1217,25 @@ async function ensureExtendedTables() {
       carpenter NUMERIC(12, 2) DEFAULT 0,
       barbender NUMERIC(12, 2) DEFAULT 0,
       mason NUMERIC(12, 2) DEFAULT 0,
+      skilled_other NUMERIC(12, 2) DEFAULT 0,
       carpenter_helper NUMERIC(12, 2) DEFAULT 0,
       barbender_helper NUMERIC(12, 2) DEFAULT 0,
+      semi_skilled_other NUMERIC(12, 2) DEFAULT 0,
       mc NUMERIC(12, 2) DEFAULT 0,
       fc NUMERIC(12, 2) DEFAULT 0,
       created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE (contractor_id, date, sub_project_id)
     )
+  `);
+
+  await db.query(`
+    ALTER TABLE contractor_labours
+    ADD COLUMN IF NOT EXISTS skilled_other NUMERIC(12, 2) DEFAULT 0
+  `);
+  await db.query(`
+    ALTER TABLE contractor_labours
+    ADD COLUMN IF NOT EXISTS semi_skilled_other NUMERIC(12, 2) DEFAULT 0
   `);
 
   await db.query(`

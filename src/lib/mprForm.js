@@ -4,8 +4,10 @@ const LABOUR_FIELDS = [
   'carpenter',
   'barbender',
   'mason',
+  'skilled_other',
   'carpenter_helper',
   'barbender_helper',
+  'semi_skilled_other',
   'mc',
   'fc',
 ];

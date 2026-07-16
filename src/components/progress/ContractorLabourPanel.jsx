@@ -98,8 +98,10 @@ export default forwardRef(function ContractorLabourPanel({
         carpenter: e.carpenter !== null ? String(e.carpenter) : '',
         barbender: e.barbender !== null ? String(e.barbender) : '',
         mason: e.mason !== null ? String(e.mason) : '',
+        skilled_other: e.skilled_other !== null ? String(e.skilled_other) : '',
         carpenter_helper: e.carpenter_helper !== null ? String(e.carpenter_helper) : '',
         barbender_helper: e.barbender_helper !== null ? String(e.barbender_helper) : '',
+        semi_skilled_other: e.semi_skilled_other !== null ? String(e.semi_skilled_other) : '',
         mc: e.mc !== null ? String(e.mc) : '',
         fc: e.fc !== null ? String(e.fc) : '',
       })));
@@ -148,8 +150,10 @@ export default forwardRef(function ContractorLabourPanel({
       carpenter: '',
       barbender: '',
       mason: '',
+      skilled_other: '',
       carpenter_helper: '',
       barbender_helper: '',
+      semi_skilled_other: '',
       mc: '',
       fc: '',
     };
@@ -178,8 +182,10 @@ export default forwardRef(function ContractorLabourPanel({
         row.carpenter !== '' ||
         row.barbender !== '' ||
         row.mason !== '' ||
+        row.skilled_other !== '' ||
         row.carpenter_helper !== '' ||
         row.barbender_helper !== '' ||
+        row.semi_skilled_other !== '' ||
         row.mc !== '' ||
         row.fc !== ''
       );
@@ -200,11 +206,17 @@ export default forwardRef(function ContractorLabourPanel({
     const currentMason = row.mason === '' ? 0 : parseFloat(row.mason) || 0;
     const dbMason = dbRow.mason === null ? 0 : parseFloat(dbRow.mason) || 0;
 
+    const currentSkilledOther = row.skilled_other === '' ? 0 : parseFloat(row.skilled_other) || 0;
+    const dbSkilledOther = dbRow.skilled_other === null ? 0 : parseFloat(dbRow.skilled_other) || 0;
+
     const currentCarpenterHelper = row.carpenter_helper === '' ? 0 : parseFloat(row.carpenter_helper) || 0;
     const dbCarpenterHelper = dbRow.carpenter_helper === null ? 0 : parseFloat(dbRow.carpenter_helper) || 0;
 
     const currentBarbenderHelper = row.barbender_helper === '' ? 0 : parseFloat(row.barbender_helper) || 0;
     const dbBarbenderHelper = dbRow.barbender_helper === null ? 0 : parseFloat(dbRow.barbender_helper) || 0;
+
+    const currentSemiSkilledOther = row.semi_skilled_other === '' ? 0 : parseFloat(row.semi_skilled_other) || 0;
+    const dbSemiSkilledOther = dbRow.semi_skilled_other === null ? 0 : parseFloat(dbRow.semi_skilled_other) || 0;
 
     const currentMc = row.mc === '' ? 0 : parseFloat(row.mc) || 0;
     const dbMc = dbRow.mc === null ? 0 : parseFloat(dbRow.mc) || 0;
@@ -217,8 +229,10 @@ export default forwardRef(function ContractorLabourPanel({
       currentCarpenter !== dbCarpenter ||
       currentBarbender !== dbBarbender ||
       currentMason !== dbMason ||
+      currentSkilledOther !== dbSkilledOther ||
       currentCarpenterHelper !== dbCarpenterHelper ||
       currentBarbenderHelper !== dbBarbenderHelper ||
+      currentSemiSkilledOther !== dbSemiSkilledOther ||
       currentMc !== dbMc ||
       currentFc !== dbFc
     );
@@ -240,8 +254,10 @@ export default forwardRef(function ContractorLabourPanel({
         carpenter: r.carpenter === '' ? 0 : parseFloat(r.carpenter) || 0,
         barbender: r.barbender === '' ? 0 : parseFloat(r.barbender) || 0,
         mason: r.mason === '' ? 0 : parseFloat(r.mason) || 0,
+        skilled_other: r.skilled_other === '' ? 0 : parseFloat(r.skilled_other) || 0,
         carpenter_helper: r.carpenter_helper === '' ? 0 : parseFloat(r.carpenter_helper) || 0,
         barbender_helper: r.barbender_helper === '' ? 0 : parseFloat(r.barbender_helper) || 0,
+        semi_skilled_other: r.semi_skilled_other === '' ? 0 : parseFloat(r.semi_skilled_other) || 0,
         mc: r.mc === '' ? 0 : parseFloat(r.mc) || 0,
         fc: r.fc === '' ? 0 : parseFloat(r.fc) || 0,
       };
@@ -262,8 +278,10 @@ export default forwardRef(function ContractorLabourPanel({
         const carpenter = parseFloat(r.carpenter) || 0;
         const barbender = parseFloat(r.barbender) || 0;
         const mason = parseFloat(r.mason) || 0;
+        const skilledOther = parseFloat(r.skilled_other) || 0;
         const carpenterHelper = parseFloat(r.carpenter_helper) || 0;
         const barbenderHelper = parseFloat(r.barbender_helper) || 0;
+        const semiSkilledOther = parseFloat(r.semi_skilled_other) || 0;
         const mc = parseFloat(r.mc) || 0;
         const fc = parseFloat(r.fc) || 0;
         return {
@@ -273,11 +291,13 @@ export default forwardRef(function ContractorLabourPanel({
           carpenter,
           barbender,
           mason,
+          skilled_other: skilledOther,
           carpenter_helper: carpenterHelper,
           barbender_helper: barbenderHelper,
+          semi_skilled_other: semiSkilledOther,
           mc,
           fc,
-          total: carpenter + barbender + mason + carpenterHelper + barbenderHelper + mc + fc,
+          total: carpenter + barbender + mason + skilledOther + carpenterHelper + barbenderHelper + semiSkilledOther + mc + fc,
         };
       }),
   }), [rows, contractorNameMap]);
@@ -300,8 +320,10 @@ export default forwardRef(function ContractorLabourPanel({
       return sum + (parseFloat(r.carpenter) || 0) +
                    (parseFloat(r.barbender) || 0) +
                    (parseFloat(r.mason) || 0) +
+                   (parseFloat(r.skilled_other) || 0) +
                    (parseFloat(r.carpenter_helper) || 0) +
                    (parseFloat(r.barbender_helper) || 0) +
+                   (parseFloat(r.semi_skilled_other) || 0) +
                    (parseFloat(r.mc) || 0) +
                    (parseFloat(r.fc) || 0);
     }, 0);
@@ -315,8 +337,10 @@ export default forwardRef(function ContractorLabourPanel({
         return sum + (parseFloat(e.carpenter) || 0) +
                      (parseFloat(e.barbender) || 0) +
                      (parseFloat(e.mason) || 0) +
+                     (parseFloat(e.skilled_other) || 0) +
                      (parseFloat(e.carpenter_helper) || 0) +
                      (parseFloat(e.barbender_helper) || 0) +
+                     (parseFloat(e.semi_skilled_other) || 0) +
                      (parseFloat(e.mc) || 0) +
                      (parseFloat(e.fc) || 0);
       }, 0);
@@ -440,11 +464,11 @@ export default forwardRef(function ContractorLabourPanel({
                   <th rowSpan={2} className="p-3 text-left font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 w-16">Sr. No</th>
                   <th rowSpan={2} className="p-3 text-left font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 min-w-[240px]">Contractor Name</th>
                   <th rowSpan={2} className="p-3 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 w-24">Unit</th>
-                  <th colSpan={3} className="p-2 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 bg-muted/20">
+                  <th colSpan={4} className="p-2 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 bg-muted/20">
                     Skilled Labour
                     <HeaderTooltip text="Skilled tradespeople deployed by this contractor today." />
                   </th>
-                  <th colSpan={2} className="p-2 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 bg-muted/30">
+                  <th colSpan={3} className="p-2 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 bg-muted/30">
                     Semi Skilled Labour
                     <HeaderTooltip text="Semi-skilled helper labour deployed by this contractor today." />
                   </th>
@@ -462,8 +486,10 @@ export default forwardRef(function ContractorLabourPanel({
                   <th className="p-2 text-center font-semibold uppercase border-r border-slate-200 bg-muted/10 w-[72px] max-w-[72px]">Carpentar</th>
                   <th className="p-2 text-center font-semibold uppercase border-r border-slate-200 bg-muted/10 w-[72px] max-w-[72px]">Barbender</th>
                   <th className="p-2 text-center font-semibold uppercase border-r border-slate-200 bg-muted/10 w-[72px] max-w-[72px]">Mason</th>
+                  <th className="p-2 text-center font-semibold uppercase border-r border-slate-200 bg-muted/10 w-[72px] max-w-[72px]">Other</th>
                   <th className="p-2 text-center font-semibold uppercase border-r border-slate-200 bg-muted/20 w-[90px] max-w-[90px]">Carpenter Helper</th>
                   <th className="p-2 text-center font-semibold uppercase border-r border-slate-200 bg-muted/20 w-[90px] max-w-[90px]">Barbender Helper</th>
+                  <th className="p-2 text-center font-semibold uppercase border-r border-slate-200 bg-muted/20 w-[90px] max-w-[90px]">Other</th>
                   <th className="p-2 text-center font-semibold uppercase border-r border-slate-200 bg-muted/10 w-[60px] max-w-[60px]">M/C</th>
                   <th className="p-2 text-center font-semibold uppercase border-r border-slate-200 bg-muted/10 w-[60px] max-w-[60px]">F/C</th>
                 </tr>
@@ -475,11 +501,13 @@ export default forwardRef(function ContractorLabourPanel({
                   const carpenterVal = parseFloat(row.carpenter) || 0;
                   const barbenderVal = parseFloat(row.barbender) || 0;
                   const masonVal = parseFloat(row.mason) || 0;
+                  const skilledOtherVal = parseFloat(row.skilled_other) || 0;
                   const carpenterHelperVal = parseFloat(row.carpenter_helper) || 0;
                   const barbenderHelperVal = parseFloat(row.barbender_helper) || 0;
+                  const semiSkilledOtherVal = parseFloat(row.semi_skilled_other) || 0;
                   const mcVal = parseFloat(row.mc) || 0;
                   const fcVal = parseFloat(row.fc) || 0;
-                  const totalLabours = carpenterVal + barbenderVal + masonVal + carpenterHelperVal + barbenderHelperVal + mcVal + fcVal;
+                  const totalLabours = carpenterVal + barbenderVal + masonVal + skilledOtherVal + carpenterHelperVal + barbenderHelperVal + semiSkilledOtherVal + mcVal + fcVal;
 
                   return (
                     <tr
@@ -539,6 +567,18 @@ export default forwardRef(function ContractorLabourPanel({
                         />
                       </td>
 
+                      {/* Skilled Other */}
+                      <td className="p-1 text-center border-r border-slate-200">
+                        <Input
+                          type="number"
+                          className="h-8 w-full min-w-0 text-xs text-center font-mono border-slate-200 px-1"
+                          placeholder="0"
+                          value={row.skilled_other}
+                          onChange={e => handleUpdateRow(row.id, 'skilled_other', e.target.value)}
+                          disabled={isDateLocked}
+                        />
+                      </td>
+
                       {/* Carpenter Helper */}
                       <td className="p-1 text-center border-r border-slate-200">
                         <Input
@@ -559,6 +599,18 @@ export default forwardRef(function ContractorLabourPanel({
                           placeholder="0"
                           value={row.barbender_helper}
                           onChange={e => handleUpdateRow(row.id, 'barbender_helper', e.target.value)}
+                          disabled={isDateLocked}
+                        />
+                      </td>
+
+                      {/* Semi Skilled Other */}
+                      <td className="p-1 text-center border-r border-slate-200">
+                        <Input
+                          type="number"
+                          className="h-8 w-full min-w-0 text-xs text-center font-mono border-slate-200 px-1"
+                          placeholder="0"
+                          value={row.semi_skilled_other}
+                          onChange={e => handleUpdateRow(row.id, 'semi_skilled_other', e.target.value)}
                           disabled={isDateLocked}
                         />
                       </td>
@@ -612,7 +664,7 @@ export default forwardRef(function ContractorLabourPanel({
 
                 {/* Sub-Project Summary Row */}
                 <tr className="border-t border-b bg-slate-50/50 font-bold border-slate-200">
-                  <td colSpan={10} className="p-3 text-right text-xs uppercase tracking-wider text-slate-700">
+                  <td colSpan={12} className="p-3 text-right text-xs uppercase tracking-wider text-slate-700">
                     {selectedSubProject?.name || 'Sub-Project Total'}
                   </td>
                   <td className="p-3 text-right font-mono text-xs font-bold text-slate-800">
@@ -623,7 +675,7 @@ export default forwardRef(function ContractorLabourPanel({
 
                 {/* Project Summary Row */}
                 <tr className="bg-slate-100/50 font-extrabold border-b border-slate-200">
-                  <td colSpan={10} className="p-3 text-right text-xs uppercase tracking-wider text-slate-800">
+                  <td colSpan={12} className="p-3 text-right text-xs uppercase tracking-wider text-slate-800">
                     Project Total
                   </td>
                   <td className="p-3 text-right font-mono text-xs font-extrabold text-primary">

@@ -25,8 +25,8 @@ function ValueBox({ value }) {
 
 /**
  * Read-only contractor labour table matching the DPR Labour Details panel layout.
- * rows: { contractor | contractor_name, unit, carpenter, barbender, mason,
- *         carpenter_helper, barbender_helper, mc, fc, total, groupLabel? }
+ * rows: { contractor | contractor_name, unit, carpenter, barbender, mason, skilled_other,
+ *         carpenter_helper, barbender_helper, semi_skilled_other, mc, fc, total, groupLabel? }
  */
 export default function ContractorLabourTable({
   rows = [],
@@ -54,11 +54,11 @@ export default function ContractorLabourTable({
             <th rowSpan={2} className="p-3 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 w-24">
               Unit
             </th>
-            <th colSpan={3} className="p-2 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 bg-muted/20">
+            <th colSpan={4} className="p-2 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 bg-muted/20">
               Skilled Labour
               <HeaderTooltip text="Skilled tradespeople deployed by this contractor today." />
             </th>
-            <th colSpan={2} className="p-2 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 bg-muted/30">
+            <th colSpan={3} className="p-2 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 bg-muted/30">
               Semi Skilled Labour
               <HeaderTooltip text="Semi-skilled helper labour deployed by this contractor today." />
             </th>
@@ -75,8 +75,10 @@ export default function ContractorLabourTable({
             <th className="p-2 text-center font-semibold uppercase border-r border-slate-200 bg-muted/10 w-[72px]">Carpentar</th>
             <th className="p-2 text-center font-semibold uppercase border-r border-slate-200 bg-muted/10 w-[72px]">Barbender</th>
             <th className="p-2 text-center font-semibold uppercase border-r border-slate-200 bg-muted/10 w-[72px]">Mason</th>
+            <th className="p-2 text-center font-semibold uppercase border-r border-slate-200 bg-muted/10 w-[72px]">Other</th>
             <th className="p-2 text-center font-semibold uppercase border-r border-slate-200 bg-muted/20 w-[90px]">Carpenter Helper</th>
             <th className="p-2 text-center font-semibold uppercase border-r border-slate-200 bg-muted/20 w-[90px]">Barbender Helper</th>
+            <th className="p-2 text-center font-semibold uppercase border-r border-slate-200 bg-muted/20 w-[90px]">Other</th>
             <th className="p-2 text-center font-semibold uppercase border-r border-slate-200 bg-muted/10 w-[60px]">M/C</th>
             <th className="p-2 text-center font-semibold uppercase border-r border-slate-200 bg-muted/10 w-[60px]">F/C</th>
           </tr>
@@ -86,7 +88,7 @@ export default function ContractorLabourTable({
             if (showGroupLabels && row._groupLabel) {
               return (
                 <tr key={`group-${row._groupLabel}-${index}`} className="bg-primary/5 font-semibold text-primary">
-                  <td colSpan={11} className="p-1.5 pl-4 text-xs font-bold border-b border-slate-200">
+                  <td colSpan={13} className="p-1.5 pl-4 text-xs font-bold border-b border-slate-200">
                     {row._groupLabel}
                   </td>
                 </tr>
@@ -98,8 +100,10 @@ export default function ContractorLabourTable({
               (Number(row.carpenter) || 0)
               + (Number(row.barbender) || 0)
               + (Number(row.mason) || 0)
+              + (Number(row.skilled_other) || 0)
               + (Number(row.carpenter_helper) || 0)
               + (Number(row.barbender_helper) || 0)
+              + (Number(row.semi_skilled_other) || 0)
               + (Number(row.mc) || 0)
               + (Number(row.fc) || 0)
             );
@@ -118,8 +122,10 @@ export default function ContractorLabourTable({
                 <td className="p-1 text-center border-r border-slate-200"><ValueBox value={row.carpenter} /></td>
                 <td className="p-1 text-center border-r border-slate-200"><ValueBox value={row.barbender} /></td>
                 <td className="p-1 text-center border-r border-slate-200"><ValueBox value={row.mason} /></td>
+                <td className="p-1 text-center border-r border-slate-200"><ValueBox value={row.skilled_other} /></td>
                 <td className="p-1 text-center border-r border-slate-200"><ValueBox value={row.carpenter_helper} /></td>
                 <td className="p-1 text-center border-r border-slate-200"><ValueBox value={row.barbender_helper} /></td>
+                <td className="p-1 text-center border-r border-slate-200"><ValueBox value={row.semi_skilled_other} /></td>
                 <td className="p-1 text-center border-r border-slate-200"><ValueBox value={row.mc} /></td>
                 <td className="p-1 text-center border-r border-slate-200"><ValueBox value={row.fc} /></td>
                 <td className="p-3 text-right font-bold text-slate-800 font-mono text-xs">

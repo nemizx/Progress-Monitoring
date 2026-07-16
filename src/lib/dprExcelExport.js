@@ -425,16 +425,16 @@ export async function buildDprExcelWorkbook({
 
     b.groupLabel(sub.name);
     const topHdr = b.tableHeader(
-      ['Sr. No', 'Contractor Name', '', '', '', '', 'Unit', 'Skilled Labour', '', '', 'Semi Skilled Labour', '', 'Unskilled Labour', '', 'Total'],
-      [[8, 10], [11, 12], [13, 14]]
+      ['Sr. No', 'Contractor Name', '', '', 'Unit', 'Skilled Labour', '', '', '', 'Semi Skilled Labour', '', '', 'Unskilled Labour', '', 'Total'],
+      [[6, 9], [10, 12], [13, 14]]
     );
     const subHdr = b.tableHeader(
-      ['', '', '', '', '', '', '', 'Carpentar', 'Barbender', 'Mason', 'Carpenter Helper', 'Barbender Helper', 'M/C', 'F/C', ''],
+      ['', '', '', '', '', 'Carpentar', 'Barbender', 'Mason', 'Other', 'Carpenter Helper', 'Barbender Helper', 'Other', 'M/C', 'F/C', ''],
       []
     );
     b.mergeRows(topHdr, 1, subHdr, 1);
-    b.mergeRows(topHdr, 2, subHdr, 6);
-    b.mergeRows(topHdr, 7, subHdr, 7);
+    b.mergeRows(topHdr, 2, subHdr, 4);
+    b.mergeRows(topHdr, 5, subHdr, 5);
     b.mergeRows(topHdr, 15, subHdr, 15);
 
     let subTotalLabour = 0;
@@ -442,11 +442,11 @@ export async function buildDprExcelWorkbook({
       subTotalLabour += num(l.total);
       b.dataRow(
         [
-          index + 1, l.contractor_name, '', '', '', '', l.unit || '',
-          num(l.carpenter), num(l.barbender), num(l.mason),
-          num(l.carpenter_helper), num(l.barbender_helper), num(l.mc), num(l.fc), num(l.total),
+          index + 1, l.contractor_name, '', '', l.unit || '',
+          num(l.carpenter), num(l.barbender), num(l.mason), num(l.skilled_other),
+          num(l.carpenter_helper), num(l.barbender_helper), num(l.semi_skilled_other), num(l.mc), num(l.fc), num(l.total),
         ],
-        [[2, 6]]
+        [[2, 4]]
       );
     });
     grandTotalLabour += subTotalLabour;

@@ -744,12 +744,14 @@ export default function Reports() {
       const carpenter = Number(row.carpenter) || 0;
       const barbender = Number(row.barbender) || 0;
       const mason = Number(row.mason) || 0;
+      const skilledOther = Number(row.skilled_other) || 0;
       const carpenterHelper = Number(row.carpenter_helper) || 0;
       const barbenderHelper = Number(row.barbender_helper) || 0;
+      const semiSkilledOther = Number(row.semi_skilled_other) || 0;
       const mc = Number(row.mc) || 0;
       const fc = Number(row.fc) || 0;
-      
-      const total = carpenter + barbender + mason + carpenterHelper + barbenderHelper + mc + fc;
+
+      const total = carpenter + barbender + mason + skilledOther + carpenterHelper + barbenderHelper + semiSkilledOther + mc + fc;
 
       return {
         ...row,
@@ -758,8 +760,10 @@ export default function Reports() {
         carpenter,
         barbender,
         mason,
+        skilled_other: skilledOther,
         carpenter_helper: carpenterHelper,
         barbender_helper: barbenderHelper,
+        semi_skilled_other: semiSkilledOther,
         mc,
         fc,
         total

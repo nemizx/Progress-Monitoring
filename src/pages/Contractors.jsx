@@ -6,14 +6,16 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import {
   Building2, Plus, Trash2, Loader2, Pencil,
-  Upload, Download, FileSpreadsheet, UserPlus, FileText,
+  Upload, Download, FileSpreadsheet, UserPlus, FileText, ChevronsUpDown,
 } from 'lucide-react';
 import EmptyState from '@/components/shared/EmptyState';
 import { useToast } from '@/components/ui/use-toast';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 
 const BUDGET_HEADS = [
@@ -37,60 +39,28 @@ const BUDGET_HEADS = [
   'Core and Shell',
 ];
 
-const CONTRACTOR_FIELDS = [
-  { key: 'vendor_code', label: 'Vendor Code', required: false, placeholder: 'Auto-generated', readOnly: true },
-  { key: 'name', label: 'Company Name', required: true, placeholder: 'e.g. Raj Civil Contractors' },
-  { key: 'contact_person', label: 'Contact Person', required: true, placeholder: 'e.g. Jane Doe' },
-  { key: 'phone', label: 'Mobile no.', required: true, placeholder: 'e.g. 9876543210' },
-  { key: 'email', label: 'Email id', required: true, placeholder: 'e.g. contact@company.com' },
-  { key: 'address', label: 'Address', required: true, placeholder: 'e.g. 123 Main St' },
-  { key: 'type_of_work', label: 'Type of work', required: true, placeholder: 'Select type of work...', type: 'select', options: BUDGET_HEADS },
-  { key: 'vendor_category', label: 'Vendor Category', required: true, placeholder: 'Select category...', type: 'select', options: ['Labour', 'Labour with material'] },
-  { key: 'remark', label: 'Remark', required: false, placeholder: 'Optional remark...' },
-];
-
 const TEMPLATE_HEADERS = [
   'Company Name',
-  'Contact Person',
-  'Mobile no.',
-  'Email id',
-  'Address',
   'Type of work',
-  'Vendor Category',
-  'Remark'
+  'Remark',
 ];
 
 const HEADER_ALIASES = {
   name: ['company name', 'name', 'company', 'contractor name', 'contractor'],
-  contact_person: ['contact person', 'contact', 'person'],
-  phone: ['mobile no.', 'mobile', 'phone', 'phone no', 'mobile number'],
-  email: ['email id', 'email', 'email address'],
-  address: ['address', 'location'],
   type_of_work: ['type of work', 'trade', 'work type'],
-  vendor_category: ['vendor category', 'category'],
   remark: ['remark', 'remarks', 'notes', 'note'],
 };
 
 const createEmptyRow = () => ({
   id: `row_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
   name: '',
-  contact_person: '',
-  phone: '',
-  email: '',
-  address: '',
-  type_of_work: '',
-  vendor_category: '',
+  type_of_work: [],
   remark: '',
 });
 
 const emptyContractor = () => ({
   name: '',
-  contact_person: '',
-  phone: '',
-  email: '',
-  address: '',
-  type_of_work: '',
-  vendor_category: '',
+  type_of_work: [],
   remark: '',
 });
 
@@ -103,14 +73,14 @@ const mapHeaderToField = (header) => {
   ))?.[0] || null;
 };
 
+const splitTypeOfWork = (value) => String(value || '')
+  .split(/[,;]/)
+  .map((v) => v.trim())
+  .filter(Boolean);
+
 const normalizeContractorRow = (row) => ({
   name: String(row.name || '').trim(),
-  contact_person: String(row.contact_person || '').trim(),
-  phone: String(row.phone || '').trim(),
-  email: String(row.email || '').trim(),
-  address: String(row.address || '').trim(),
-  type_of_work: String(row.type_of_work || '').trim(),
-  vendor_category: String(row.vendor_category || '').trim(),
+  type_of_work: (Array.isArray(row.type_of_work) ? row.type_of_work : splitTypeOfWork(row.type_of_work)).join(', '),
   remark: String(row.remark || '').trim(),
 });
 
@@ -221,21 +191,16 @@ export default function Contractors() {
 
   const getValidRows = (rows) => rows
     .map(normalizeContractorRow)
-    .filter((row) => row.name && row.contact_person && row.phone && row.email && row.address && row.type_of_work && row.vendor_category);
+    .filter((row) => row.name && row.type_of_work);
 
   const handleSubmitAdd = (e) => {
     e.preventDefault();
-    
+
     const errors = [];
     contractorRows.forEach((row, i) => {
       const idx = i + 1;
       if (!row.name) errors.push(`Contractor #${idx}: Company Name is required.`);
-      else if (!row.contact_person) errors.push(`Contractor #${idx}: Contact Person is required.`);
-      else if (!row.phone) errors.push(`Contractor #${idx}: Mobile no. is required.`);
-      else if (!row.email) errors.push(`Contractor #${idx}: Email id is required.`);
-      else if (!row.address) errors.push(`Contractor #${idx}: Address is required.`);
-      else if (!row.type_of_work) errors.push(`Contractor #${idx}: Type of work is required.`);
-      else if (!row.vendor_category) errors.push(`Contractor #${idx}: Vendor Category is required.`);
+      else if (!row.type_of_work?.length) errors.push(`Contractor #${idx}: Type of work is required.`);
     });
 
     if (errors.length > 0) {
@@ -256,12 +221,7 @@ export default function Contractors() {
     setEditForm({
       vendor_code: contractor.vendor_code || '',
       name: contractor.name || '',
-      contact_person: contractor.contact_person || '',
-      phone: contractor.phone || '',
-      email: contractor.email || '',
-      address: contractor.address || '',
-      type_of_work: contractor.type_of_work || '',
-      vendor_category: contractor.vendor_category || '',
+      type_of_work: splitTypeOfWork(contractor.type_of_work),
       remark: contractor.remark || '',
     });
     setShowEdit(true);
@@ -272,12 +232,7 @@ export default function Contractors() {
     const payload = normalizeContractorRow(editForm);
 
     if (!payload.name) return toast({ title: 'Validation Error', description: 'Company Name is required.', variant: 'destructive' });
-    if (!payload.contact_person) return toast({ title: 'Validation Error', description: 'Contact Person is required.', variant: 'destructive' });
-    if (!payload.phone) return toast({ title: 'Validation Error', description: 'Mobile no. is required.', variant: 'destructive' });
-    if (!payload.email) return toast({ title: 'Validation Error', description: 'Email id is required.', variant: 'destructive' });
-    if (!payload.address) return toast({ title: 'Validation Error', description: 'Address is required.', variant: 'destructive' });
     if (!payload.type_of_work) return toast({ title: 'Validation Error', description: 'Type of work is required.', variant: 'destructive' });
-    if (!payload.vendor_category) return toast({ title: 'Validation Error', description: 'Vendor Category is required.', variant: 'destructive' });
 
     updateContractorMutation.mutate({
       id: editingId,
@@ -297,8 +252,8 @@ export default function Contractors() {
       const XLSX = XLSXModule.default || XLSXModule;
 
       const sampleRows = [
-        ['Raj Civil Contractors', 'Jane Doe', '9876543210', 'contact@rajcivil.com', '123 Main St, Mumbai', 'RCC', 'Labour with material', 'Main civil works'],
-        ['Spark Electricals', 'John Smith', '9876543211', 'spark@elec.com', '456 Side St, Pune', 'Electric', 'Labour', ''],
+        ['Raj Civil Contractors', 'RCC, Earth Work', 'Main civil works'],
+        ['Spark Electricals', 'Electric', ''],
       ];
 
       const worksheet = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, ...sampleRows]);
@@ -341,25 +296,14 @@ export default function Contractors() {
       const container = document.createElement('div');
       container.style.cssText = `
         position: fixed; top: -9999px; left: -9999px;
-        width: 1100px; background: #ffffff; font-family: Arial, sans-serif;
+        width: 900px; background: #ffffff; font-family: Arial, sans-serif;
       `;
 
       const rowsHtml = sortedContractors.map((c, i) => `
         <tr style="background:${i % 2 === 0 ? '#ffffff' : '#f8fafc'}">
           <td style="padding:7px 10px;border:1px solid #e2e8f0;font-weight:600;color:#0f172a;white-space:nowrap;font-size:11px">${c.vendor_code || '<span style="color:#94a3b8;font-weight:400">Pending</span>'}</td>
           <td style="padding:7px 10px;border:1px solid #e2e8f0;font-weight:700;color:#0f172a;font-size:11px">${c.name || '—'}</td>
-          <td style="padding:7px 10px;border:1px solid #e2e8f0;color:#334155;font-size:11px">${c.contact_person || '—'}</td>
-          <td style="padding:7px 10px;border:1px solid #e2e8f0;color:#334155;white-space:nowrap;font-size:11px">${c.phone || '—'}</td>
-          <td style="padding:7px 10px;border:1px solid #e2e8f0;color:#334155;font-size:11px">${c.email || '—'}</td>
-          <td style="padding:7px 10px;border:1px solid #e2e8f0;color:#475569;font-size:11px">${c.address || '—'}</td>
           <td style="padding:7px 10px;border:1px solid #e2e8f0;color:#334155;font-size:11px">${c.type_of_work || '—'}</td>
-          <td style="padding:7px 10px;border:1px solid #e2e8f0;text-align:center;font-size:11px">
-            <span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;
-              background:${(c.vendor_category || '').toLowerCase().includes('material') ? '#dbeafe' : '#dcfce7'};
-              color:${(c.vendor_category || '').toLowerCase().includes('material') ? '#1d4ed8' : '#166534'}">
-              ${c.vendor_category || '—'}
-            </span>
-          </td>
           <td style="padding:7px 10px;border:1px solid #e2e8f0;color:#64748b;font-size:11px">${c.remark || '—'}</td>
         </tr>
       `).join('');
@@ -385,12 +329,7 @@ export default function Contractors() {
               <tr style="background:#1e293b;color:#fff">
                 <th style="padding:9px 10px;text-align:left;font-weight:700;font-size:10px;text-transform:uppercase;border:1px solid #334155;white-space:nowrap">Vendor Code</th>
                 <th style="padding:9px 10px;text-align:left;font-weight:700;font-size:10px;text-transform:uppercase;border:1px solid #334155">Company Name</th>
-                <th style="padding:9px 10px;text-align:left;font-weight:700;font-size:10px;text-transform:uppercase;border:1px solid #334155">Contact Person</th>
-                <th style="padding:9px 10px;text-align:left;font-weight:700;font-size:10px;text-transform:uppercase;border:1px solid #334155;white-space:nowrap">Mobile No.</th>
-                <th style="padding:9px 10px;text-align:left;font-weight:700;font-size:10px;text-transform:uppercase;border:1px solid #334155">Email ID</th>
-                <th style="padding:9px 10px;text-align:left;font-weight:700;font-size:10px;text-transform:uppercase;border:1px solid #334155">Address</th>
                 <th style="padding:9px 10px;text-align:left;font-weight:700;font-size:10px;text-transform:uppercase;border:1px solid #334155">Type of Work</th>
-                <th style="padding:9px 10px;text-align:left;font-weight:700;font-size:10px;text-transform:uppercase;border:1px solid #334155">Category</th>
                 <th style="padding:9px 10px;text-align:left;font-weight:700;font-size:10px;text-transform:uppercase;border:1px solid #334155">Remark</th>
               </tr>
             </thead>
@@ -469,12 +408,7 @@ export default function Contractors() {
 
     const missingHeaders = [];
     if (fieldIndexes.name === undefined) missingHeaders.push('Company Name');
-    if (fieldIndexes.contact_person === undefined) missingHeaders.push('Contact Person');
-    if (fieldIndexes.phone === undefined) missingHeaders.push('Mobile no.');
-    if (fieldIndexes.email === undefined) missingHeaders.push('Email id');
-    if (fieldIndexes.address === undefined) missingHeaders.push('Address');
     if (fieldIndexes.type_of_work === undefined) missingHeaders.push('Type of work');
-    if (fieldIndexes.vendor_category === undefined) missingHeaders.push('Vendor Category');
 
     if (missingHeaders.length > 0) {
       return {
@@ -493,43 +427,26 @@ export default function Contractors() {
 
       const parsed = normalizeContractorRow({
         name: cells[fieldIndexes.name],
-        contact_person: cells[fieldIndexes.contact_person],
-        phone: cells[fieldIndexes.phone],
-        email: cells[fieldIndexes.email],
-        address: cells[fieldIndexes.address],
-        type_of_work: cells[fieldIndexes.type_of_work],
-        vendor_category: cells[fieldIndexes.vendor_category],
+        type_of_work: splitTypeOfWork(cells[fieldIndexes.type_of_work]),
         remark: fieldIndexes.remark !== undefined ? cells[fieldIndexes.remark] : '',
       });
 
       if (!parsed.name) errors.push(`Row ${rowNumber}: Company Name is required.`);
-      else if (!parsed.contact_person) errors.push(`Row ${rowNumber}: Contact Person is required.`);
-      else if (!parsed.phone) errors.push(`Row ${rowNumber}: Mobile no. is required.`);
-      else if (!parsed.email) errors.push(`Row ${rowNumber}: Email id is required.`);
-      else if (!parsed.address) errors.push(`Row ${rowNumber}: Address is required.`);
       else if (!parsed.type_of_work) errors.push(`Row ${rowNumber}: Type of work is required.`);
-      else if (!parsed.vendor_category) errors.push(`Row ${rowNumber}: Vendor Category is required.`);
 
-      // Validate and standardize Type of work
+      // Validate and standardize Type of work (can be multiple, comma/semicolon separated)
       if (parsed.type_of_work) {
-        const val = String(parsed.type_of_work).trim().toLowerCase();
-        const matchedHead = BUDGET_HEADS.find(bh => bh.toLowerCase() === val);
-        if (matchedHead) {
-          parsed.type_of_work = matchedHead; // use canonical casing
-        } else {
-          errors.push(`Row ${rowNumber}: "${parsed.type_of_work}" is not a valid Type of Work. Valid options: ${BUDGET_HEADS.join(', ')}.`);
-        }
-      }
-
-      // Validate and standardize Category
-      if (parsed.vendor_category) {
-        const val = String(parsed.vendor_category).toLowerCase();
-        const matchedCat = ['Labour', 'Labour with material'].find(c => c.toLowerCase() === val);
-        if (matchedCat) {
-          parsed.vendor_category = matchedCat;
-        } else {
-          errors.push(`Row ${rowNumber}: Vendor Category must be "Labour" or "Labour with material".`);
-        }
+        const entries = splitTypeOfWork(parsed.type_of_work);
+        const canonical = [];
+        entries.forEach((entry) => {
+          const matchedHead = BUDGET_HEADS.find((bh) => bh.toLowerCase() === entry.toLowerCase());
+          if (matchedHead) {
+            canonical.push(matchedHead);
+          } else {
+            errors.push(`Row ${rowNumber}: "${entry}" is not a valid Type of Work. Valid options: ${BUDGET_HEADS.join(', ')}.`);
+          }
+        });
+        parsed.type_of_work = canonical.join(', ');
       }
 
       rows.push({
@@ -612,22 +529,18 @@ export default function Contractors() {
       }
 
       if (parsed.rows && parsed.rows.length > 0) {
-        // Map the rows to add client-side row IDs
+        // Map the rows to add client-side row IDs, converting type_of_work back to an array for the form
         const newRows = parsed.rows.map(r => ({
           ...r,
+          type_of_work: splitTypeOfWork(r.type_of_work),
           id: `row_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         }));
 
         setContractorRows(prev => {
           // Check if first row is untouched/empty
-          const isFirstRowEmpty = prev.length === 1 && 
-            !prev[0].name && 
-            !prev[0].contact_person && 
-            !prev[0].phone && 
-            !prev[0].email && 
-            !prev[0].address && 
-            !prev[0].type_of_work && 
-            !prev[0].vendor_category && 
+          const isFirstRowEmpty = prev.length === 1 &&
+            !prev[0].name &&
+            !prev[0].type_of_work?.length &&
             !prev[0].remark;
 
           if (isFirstRowEmpty) {
@@ -718,39 +631,31 @@ export default function Contractors() {
                         </Button>
                       )}
                     </div>
-                    
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {CONTRACTOR_FIELDS.map((field) => {
-                        if (field.key === 'vendor_code') return null; // Auto-generated
-                        return (
-                          <div key={field.key} className="space-y-1.5">
-                            <Label className="text-xs font-semibold">
-                              {field.label}{field.required ? ' *' : ''}
-                            </Label>
-                            {field.type === 'select' ? (
-                              <Select
-                                value={row[field.key]}
-                                onValueChange={(val) => updateRow(row.id, field.key, val)}
-                              >
-                                <SelectTrigger className="w-full bg-background">
-                                  <SelectValue placeholder={field.placeholder} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {field.options.map(opt => (
-                                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            ) : (
-                              <Input
-                                placeholder={field.placeholder}
-                                value={row[field.key]}
-                                onChange={(e) => updateRow(row.id, field.key, e.target.value)}
-                              />
-                            )}
-                          </div>
-                        );
-                      })}
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-semibold">Company Name *</Label>
+                        <Input
+                          placeholder="e.g. Raj Civil Contractors"
+                          value={row.name}
+                          onChange={(e) => updateRow(row.id, 'name', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-semibold">Type of work *</Label>
+                        <TypeOfWorkSelect
+                          value={row.type_of_work}
+                          onChange={(val) => updateRow(row.id, 'type_of_work', val)}
+                        />
+                      </div>
+                      <div className="space-y-1.5 md:col-span-2">
+                        <Label className="text-xs font-semibold">Remark</Label>
+                        <Input
+                          placeholder="Optional remark..."
+                          value={row.remark}
+                          onChange={(e) => updateRow(row.id, 'remark', e.target.value)}
+                        />
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -800,35 +705,29 @@ export default function Contractors() {
           <Card className="p-6 shadow-sm">
             <form onSubmit={handleSubmitEdit} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {CONTRACTOR_FIELDS.map((field) => (
-                  <div key={field.key} className="space-y-1.5">
-                    <Label className="text-xs font-semibold">
-                      {field.label}{field.required ? ' *' : ''}
-                    </Label>
-                    {field.type === 'select' ? (
-                      <Select
-                        value={editForm[field.key]}
-                        onValueChange={(val) => setEditForm((prev) => ({ ...prev, [field.key]: val }))}
-                      >
-                        <SelectTrigger className="w-full bg-background">
-                          <SelectValue placeholder={field.placeholder} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {field.options.map(opt => (
-                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <Input
-                        placeholder={field.placeholder}
-                        value={editForm[field.key]}
-                        disabled={field.readOnly}
-                        onChange={(e) => setEditForm((prev) => ({ ...prev, [field.key]: e.target.value }))}
-                      />
-                    )}
-                  </div>
-                ))}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold">Company Name *</Label>
+                  <Input
+                    placeholder="e.g. Raj Civil Contractors"
+                    value={editForm.name}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold">Type of work *</Label>
+                  <TypeOfWorkSelect
+                    value={editForm.type_of_work}
+                    onChange={(val) => setEditForm((prev) => ({ ...prev, type_of_work: val }))}
+                  />
+                </div>
+                <div className="space-y-1.5 md:col-span-2">
+                  <Label className="text-xs font-semibold">Remark</Label>
+                  <Input
+                    placeholder="Optional remark..."
+                    value={editForm.remark}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, remark: e.target.value }))}
+                  />
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-4 border-t">
@@ -891,18 +790,13 @@ export default function Contractors() {
           ) : (
             <Card className="shadow-sm">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm font-sans min-w-[950px]">
+                <table className="w-full text-sm font-sans min-w-[700px]">
                   <thead>
                     <tr className="border-b bg-muted/30">
                       <th className="text-left p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap w-[100px]">Vendor Code</th>
-                      <th className="text-left p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap max-w-[150px]">Company Name</th>
-                      <th className="text-left p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap max-w-[120px]">Contact Person</th>
-                      <th className="text-left p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap w-[110px]">Mobile no.</th>
-                      <th className="text-left p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap max-w-[150px]">Email id</th>
-                      <th className="text-left p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap max-w-[180px]">Address</th>
-                      <th className="text-left p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap max-w-[160px]">Type of work</th>
-                      <th className="text-left p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap w-[120px]">Vendor Category</th>
-                      <th className="text-left p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap max-w-[140px]">Remark</th>
+                      <th className="text-left p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap max-w-[200px]">Company Name</th>
+                      <th className="text-left p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground max-w-[280px]">Type of work</th>
+                      <th className="text-left p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground max-w-[200px]">Remark</th>
                       <th className="text-right p-3.5 font-semibold text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap w-[80px]">Add/Remove</th>
                     </tr>
                   </thead>
@@ -910,22 +804,18 @@ export default function Contractors() {
                     {sortedContractors.map((contractor) => (
                       <tr key={contractor.id} className="hover:bg-muted/10 transition-colors">
                         <td className="p-3.5 font-medium text-foreground w-[100px]">{contractor.vendor_code || <span className="italic text-muted-foreground/50">Pending</span>}</td>
-                        <td className="p-3.5 font-semibold text-foreground max-w-[150px] break-words">{contractor.name}</td>
-                        <td className="p-3.5 text-foreground max-w-[120px] break-words">{contractor.contact_person || '—'}</td>
-                        <td className="p-3.5 text-foreground w-[110px]">{contractor.phone || '—'}</td>
-                        <td className="p-3.5 text-foreground max-w-[150px] break-all">{contractor.email || '—'}</td>
-                        <td className="p-3.5 text-muted-foreground max-w-[180px] break-words" title={contractor.address}>{contractor.address || '—'}</td>
-                        <td className="p-3.5 text-foreground max-w-[160px] break-words">{contractor.type_of_work || '—'}</td>
-                        <td className="p-3.5 text-foreground w-[120px]">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                            (contractor.vendor_category || '').toLowerCase().includes('material') 
-                              ? 'bg-blue-100 text-blue-800' 
-                              : 'bg-green-100 text-green-800'
-                          }`}>
-                            {contractor.vendor_category || '—'}
-                          </span>
+                        <td className="p-3.5 font-semibold text-foreground max-w-[200px] break-words">{contractor.name}</td>
+                        <td className="p-3.5 text-foreground max-w-[280px] break-words">
+                          <div className="flex flex-wrap gap-1">
+                            {splitTypeOfWork(contractor.type_of_work).map((t) => (
+                              <span key={t} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
+                                {t}
+                              </span>
+                            ))}
+                            {!contractor.type_of_work && '—'}
+                          </div>
                         </td>
-                        <td className="p-3.5 text-muted-foreground max-w-[140px] break-words" title={contractor.remark}>{contractor.remark || '—'}</td>
+                        <td className="p-3.5 text-muted-foreground max-w-[200px] break-words" title={contractor.remark}>{contractor.remark || '—'}</td>
                         <td className="p-3.5 text-right w-[80px]">
                           <div className="flex items-center justify-end gap-1">
                             <Button
@@ -986,7 +876,7 @@ export default function Contractors() {
                 onChange={handleImportFileChange}
               />
               <p className="text-xs text-muted-foreground">
-                Use the default template headers. Multiple contractors can be imported in one file.
+                Use the default template headers. Multiple types of work can be listed comma-separated in one cell.
               </p>
             </div>
 
@@ -1015,16 +905,11 @@ export default function Contractors() {
                   Preview ({importRows.length} contractor{importRows.length === 1 ? '' : 's'})
                 </div>
                 <div className="overflow-x-auto max-h-64">
-                  <table className="w-full text-sm min-w-[800px]">
+                  <table className="w-full text-sm min-w-[500px]">
                     <thead>
                       <tr className="border-b bg-muted/20">
                         <th className="text-left p-2 font-semibold text-xs text-muted-foreground">Company Name</th>
-                        <th className="text-left p-2 font-semibold text-xs text-muted-foreground">Contact Person</th>
-                        <th className="text-left p-2 font-semibold text-xs text-muted-foreground">Mobile no.</th>
-                        <th className="text-left p-2 font-semibold text-xs text-muted-foreground">Email id</th>
-                        <th className="text-left p-2 font-semibold text-xs text-muted-foreground">Address</th>
                         <th className="text-left p-2 font-semibold text-xs text-muted-foreground">Type of work</th>
-                        <th className="text-left p-2 font-semibold text-xs text-muted-foreground">Category</th>
                         <th className="text-left p-2 font-semibold text-xs text-muted-foreground">Remark</th>
                       </tr>
                     </thead>
@@ -1032,13 +917,8 @@ export default function Contractors() {
                       {importRows.map((row) => (
                         <tr key={row.id} className="border-b">
                           <td className="p-2 font-medium text-foreground">{row.name}</td>
-                          <td className="p-2 text-foreground">{row.contact_person || '—'}</td>
-                          <td className="p-2 text-foreground">{row.phone || '—'}</td>
-                          <td className="p-2 text-foreground">{row.email || '—'}</td>
-                          <td className="p-2 text-muted-foreground max-w-[150px] truncate" title={row.address}>{row.address || '—'}</td>
                           <td className="p-2 text-foreground">{row.type_of_work || '—'}</td>
-                          <td className="p-2 text-foreground">{row.vendor_category || '—'}</td>
-                          <td className="p-2 text-muted-foreground max-w-[100px] truncate" title={row.remark}>{row.remark || '—'}</td>
+                          <td className="p-2 text-muted-foreground max-w-[150px] truncate" title={row.remark}>{row.remark || '—'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1062,5 +942,53 @@ export default function Contractors() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function TypeOfWorkSelect({ value, onChange, placeholder = 'Select type of work...' }) {
+  const [open, setOpen] = useState(false);
+  const selected = Array.isArray(value) ? value : [];
+
+  const toggle = (opt) => {
+    onChange(selected.includes(opt) ? selected.filter((v) => v !== opt) : [...selected, opt]);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          className="w-full justify-between font-normal bg-background"
+        >
+          <span className="truncate text-left flex-1">
+            {selected.length ? selected.join(', ') : placeholder}
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50 shrink-0" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[min(90vw,360px)] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search type of work..." />
+          <CommandList>
+            <CommandEmpty>No match found.</CommandEmpty>
+            <CommandGroup>
+              {BUDGET_HEADS.map((opt) => (
+                <CommandItem
+                  key={opt}
+                  value={opt}
+                  onSelect={() => toggle(opt)}
+                  className="gap-2 text-xs"
+                >
+                  <Checkbox checked={selected.includes(opt)} className="shrink-0" />
+                  <span>{opt}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
