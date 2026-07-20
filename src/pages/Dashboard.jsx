@@ -1,6 +1,7 @@
 import React from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
+import { useAuth } from '@/lib/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
@@ -17,9 +18,15 @@ import ProgressRing from '@/components/shared/ProgressRing';
 import WBSHealthPanel from '@/components/dashboard/WBSHealthPanel';
 
 export default function Dashboard() {
+  const { user } = useAuth();
   const { data: projects = [] } = useQuery({
     queryKey: ['projects'],
     queryFn: () => base44.entities.Project.list('-created_date', 50),
+  });
+
+  const { data: dprStats } = useQuery({
+    queryKey: ['dpr-stats'],
+    queryFn: () => base44.dprs.getStats(),
   });
 
   const { data: milestones = [] } = useQuery({
@@ -173,6 +180,47 @@ export default function Dashboard() {
         <StatCard title="Avg. Progress" value={`${avgProgress}%`} subtitle="Across all projects" icon={TrendingUp} />
         <StatCard title="Quality Score" value={`${qualityScore}%`} subtitle={`${inspections.length} inspections`} icon={ShieldCheck} />
       </div>
+
+      {/* DPR Workflow Stats Row */}
+      {dprStats && (user?.role === 'site_engineer' || user?.role === 'project_manager' || user?.role === 'admin') && (
+        <div className="space-y-3 pt-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-800 font-heading">DPR Approval Workflow</h3>
+            <Link to="/progress" className="text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1">
+              Go to Progress Worksheet <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {/* Site Engineer View */}
+            {user?.role === 'site_engineer' && (
+              <>
+                <StatCard title="Draft DPRs" value={dprStats.draft || 0} subtitle="Editable worksheets" icon={Clock} />
+                <StatCard title="Pending Approval" value={dprStats.pending || 0} subtitle="Submitted to PM" icon={Clock} />
+                <StatCard title="Approved DPRs" value={dprStats.approved || 0} subtitle="Locked reports" icon={ShieldCheck} />
+              </>
+            )}
+
+            {/* Project Manager View */}
+            {user?.role === 'project_manager' && (
+              <>
+                <StatCard title="Pending Approval" value={dprStats.pendingApproval || 0} subtitle="Waiting for your review" icon={Clock} />
+                <StatCard title="Approved Today" value={dprStats.approvedToday || 0} subtitle="Completed today" icon={ShieldCheck} />
+                <StatCard title="Pending Since Yesterday" value={dprStats.pendingSinceYesterday || 0} subtitle="Requires attention" icon={AlertTriangle} />
+              </>
+            )}
+
+            {/* Admin View */}
+            {user?.role === 'admin' && (
+              <>
+                <StatCard title="Total Drafts" value={dprStats.draft || 0} subtitle="Site Engineer drafts" icon={Clock} />
+                <StatCard title="Total Pending" value={dprStats.pending || 0} subtitle="Awaiting manager approval" icon={Clock} />
+                <StatCard title="Total Approved" value={dprStats.approved || 0} subtitle="Approved reports" icon={ShieldCheck} />
+                <StatCard title="Reopened DPRs" value={dprStats.reopened || 0} subtitle="Audit reopens" icon={AlertTriangle} />
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

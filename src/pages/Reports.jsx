@@ -144,12 +144,7 @@ export default function Reports() {
     enabled: !!projectId && !!selectedDprDate,
   });
 
-  // Next Day's Plans
-  const { data: nextDaysPlans = [] } = useQuery({
-    queryKey: ['next-days-plans-date', projectId, selectedDprDate],
-    queryFn: () => projectId && selectedDprDate ? base44.entities.NextDaysPlan.filter({ project_id: projectId, date: selectedDprDate }) : Promise.resolve([]),
-    enabled: !!projectId && !!selectedDprDate,
-  });
+
 
   // Progress entries for the specific DPR date (for Section A: Status of Work)
   const { data: dprDateProgressEntries = [], isLoading: dprProgressLoading } = useQuery({
@@ -668,11 +663,7 @@ export default function Reports() {
       const percentComp = plannedQty > 0 ? Math.min((cumulativeQty / plannedQty) * 100, 100) : 0;
       const cleanTitle = (activity.title || activity.name || '').toLowerCase();
       const cleanCode = (activity.activity_code || activity.activity_id || activity.code || '').toLowerCase();
-      const tomorrowPlan = nextDaysPlans.find(p => {
-        const desc = (p.description || '').toLowerCase();
-        return (cleanTitle && desc.includes(cleanTitle)) || (cleanCode && desc.includes(cleanCode));
-      });
-      const tomorrowQty = tomorrowPlan ? Number(tomorrowPlan.quantity || 0) : 0;
+      const tomorrowQty = 0;
 
       return {
         ...activity,
@@ -685,6 +676,7 @@ export default function Reports() {
         rate,
         today_qty: todayQty,
         cumulative_qty: cumulativeQty,
+        balance_qty: plannedQty - (cumulativeQty - todayQty),
         percent_comp: percentComp,
         today_vowd: todayQty * rate,
         cumulative_vowd: cumulativeQty * rate,
@@ -726,6 +718,7 @@ export default function Reports() {
         rate,
         today_qty: todayQty,
         cumulative_qty: cumulativeQty,
+        balance_qty: plannedQty - (cumulativeQty - todayQty),
         percent_comp: percentComp,
         today_vowd: todayQty * rate,
         cumulative_vowd: cumulativeQty * rate,
@@ -735,7 +728,7 @@ export default function Reports() {
     });
 
     return [...wbsRows, ...orphanRows];
-  }, [projectId, projectWbsItems, dprDateProgressEntries, dprHistoricalProgress, budgetItems, selectedDprDate, nextDaysPlans]);
+  }, [projectId, projectWbsItems, dprDateProgressEntries, dprHistoricalProgress, budgetItems, selectedDprDate]);
 
   // --- Dynamic Calculations for Contractor Labour ---
   const contractorLabourData = useMemo(() => {
@@ -895,7 +888,7 @@ export default function Reports() {
         statusReports,
         specialSiteVisits,
         criticalIssues,
-        nextDaysPlans,
+        nextDaysPlans: [],
         progressEntries: dprHistoricalProgress,
       });
 
@@ -1200,6 +1193,7 @@ Format with markdown. Be specific, professional, and actionable.`;
                         <th className="p-2.5 text-left font-bold min-w-[300px] border-r">Activity Name</th>
                         <th className="p-2.5 text-left font-bold w-[80px] border-r">Unit</th>
                         <th className="p-2.5 text-right font-bold w-[90px] border-r">Total Qty</th>
+                        <th className="p-2.5 text-right font-bold w-[100px] border-r">Balance Qty</th>
                         <th className="p-2.5 text-right font-bold w-[90px] border-r">Today Qty</th>
                         <th className="p-2.5 text-right font-bold w-[120px] border-r">Cumulative Qty</th>
                         <th className="p-2.5 text-right font-bold w-[80px] border-r">% Comp.</th>
@@ -1218,6 +1212,7 @@ Format with markdown. Be specific, professional, and actionable.`;
                             <td className="p-2.5 border-r font-semibold px-4">{item.title}</td>
                             <td className="p-2.5 border-r text-center">{item.unit || '—'}</td>
                             <td className="p-2.5 border-r text-right font-mono">{Number(item.planned_qty || 0).toFixed(2)}</td>
+                            <td className="p-2.5 border-r text-right font-mono text-amber-700 font-semibold bg-amber-500/5">{Number(item.balance_qty || 0).toFixed(2)}</td>
                             <td className="p-2.5 border-r text-right font-mono bg-amber-50/10 font-bold">{item.today_qty > 0 ? item.today_qty : '—'}</td>
                             <td className="p-2.5 border-r text-right font-mono">{Number(item.cumulative_qty || 0).toFixed(2)}</td>
                             <td className="p-2.5 border-r text-right font-mono font-bold text-slate-700">{Number(item.percent_comp || 0).toFixed(1)}%</td>
@@ -1238,7 +1233,7 @@ Format with markdown. Be specific, professional, and actionable.`;
                         if (dprWorksheetData.length === 0) {
                           return (
                             <tr>
-                              <td colSpan={12} className="text-center p-6 text-muted-foreground">No worksheet records or progress entries found for this date.</td>
+                              <td colSpan={13} className="text-center p-6 text-muted-foreground">No worksheet records or progress entries found for this date.</td>
                             </tr>
                           );
                         }
@@ -1249,7 +1244,7 @@ Format with markdown. Be specific, professional, and actionable.`;
                             {subSections.map(({ sub, items }) => (
                               <React.Fragment key={sub.id}>
                                 <tr className="bg-primary/5 font-semibold text-primary">
-                                  <td colSpan={12} className="p-2 pl-4 text-xs font-bold border-b">{sub.name}</td>
+                                  <td colSpan={13} className="p-2 pl-4 text-xs font-bold border-b">{sub.name}</td>
                                 </tr>
                                 {items.map((item) => <DprRow key={item.id} item={item} index={++srCounter} />)}
                               </React.Fragment>
@@ -1258,7 +1253,7 @@ Format with markdown. Be specific, professional, and actionable.`;
                               <React.Fragment>
                                 {subSections.length > 0 && (
                                   <tr className="bg-muted/30 font-semibold text-muted-foreground">
-                                    <td colSpan={12} className="p-2 pl-4 text-xs font-bold border-b">Other / Unassigned</td>
+                                    <td colSpan={13} className="p-2 pl-4 text-xs font-bold border-b">Other / Unassigned</td>
                                   </tr>
                                 )}
                                 {unassignedItems.map((item) => <DprRow key={item.id} item={item} index={++srCounter} />)}
@@ -1574,39 +1569,6 @@ Format with markdown. Be specific, professional, and actionable.`;
                 </CardContent>
               </Card>
 
-              {/* Next Day's Plan (K) */}
-              <Card className="shadow-sm border">
-                <CardHeader className="pb-2 border-b bg-muted/20">
-                  <CardTitle className="text-sm font-semibold">K. NEXT DAY'S PLAN</CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-muted/40 border-b">
-                        <th className="p-2 text-center w-[60px] border-r">Sr. No</th>
-                        <th className="p-2 text-left border-r font-bold">Planned Description</th>
-                        <th className="p-2 text-center border-r font-bold w-[70px]">Unit</th>
-                        <th className="p-2 text-right font-bold w-[90px]">Quantity</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {nextDaysPlans.map((item, index) => (
-                        <tr key={item.id} className="border-b">
-                          <td className="p-2 text-center text-muted-foreground border-r">{index + 1}</td>
-                          <td className="p-2 border-r font-semibold text-slate-800">{item.description}</td>
-                          <td className="p-2 border-r text-center text-muted-foreground">{item.unit || '—'}</td>
-                          <td className="p-2 text-right font-mono font-bold text-slate-700">{item.quantity !== null && item.quantity !== undefined ? item.quantity : '—'}</td>
-                        </tr>
-                      ))}
-                      {nextDaysPlans.length === 0 && (
-                        <tr>
-                          <td colSpan={4} className="text-center p-6 text-muted-foreground">No plans logged for tomorrow.</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </CardContent>
-              </Card>
             </div>
           </TabsContent>
           {/* WPR Reports Tab */}

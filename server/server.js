@@ -91,7 +91,13 @@ const tableMap = {
   'CriticalIssue': 'critical_issues',
   'NextDaysPlan': 'next_days_plans',
   'WprReport': 'wpr_reports',
-  'MprReport': 'mpr_reports'
+  'MprReport': 'mpr_reports',
+  'Role': 'roles',
+  'Module': 'modules',
+  'RolePermission': 'role_permissions',
+  'Dpr': 'dprs',
+  'WbsHeader': 'wbs_headers',
+  'WbsApprovalHistory': 'wbs_approval_history'
 };
 
 const TABLES_WITH_CREATED_BY = new Set(['projects']);
@@ -343,6 +349,99 @@ const getCollectionProcessed = async (name, items) => {
   return items;
 };
 
+// --- Projects Transactional API ---
+app.post('/api/projects/save-with-subprojects', authenticateToken, async (req, res) => {
+  const { id, projectId, projectData, subProjectChanges } = req.body;
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    let finalProjectId = projectId || id;
+    const allowedColumns = [
+      'name', 'description', 'location', 'client', 'status',
+      'start_date', 'end_date', 'budget', 'project_manager', 'priority',
+      'project_type', 'project_code', 'elevation_photo_url'
+    ];
+
+    // 1. Save or Update Project
+    if (finalProjectId) {
+      const setClauses = [];
+      const values = [];
+      let i = 1;
+      for (const col of allowedColumns) {
+        if (projectData[col] !== undefined) {
+          setClauses.push(`${col} = $${i}`);
+          values.push(projectData[col]);
+          i++;
+        }
+      }
+      values.push(finalProjectId);
+      const updateQuery = `UPDATE projects SET ${setClauses.join(', ')} WHERE id = $${i}`;
+      await client.query(updateQuery, values);
+    } else {
+      const columns = [];
+      const placeholders = [];
+      const values = [];
+      let i = 1;
+      
+      finalProjectId = 'proj_' + Math.random().toString(36).substr(2, 9);
+      columns.push('id');
+      placeholders.push(`$${i}`);
+      values.push(finalProjectId);
+      i++;
+
+      for (const col of allowedColumns) {
+        if (projectData[col] !== undefined) {
+          columns.push(col);
+          placeholders.push(`$${i}`);
+          values.push(projectData[col]);
+          i++;
+        }
+      }
+      const insertQuery = `INSERT INTO projects (${columns.join(', ')}) VALUES (${placeholders.join(', ')})`;
+      await client.query(insertQuery, values);
+    }
+
+    // 2. Handle Sub Project Changes
+    if (subProjectChanges) {
+      const { added = [], updated = [], deleted = [] } = subProjectChanges;
+
+      // Delete Sub Projects
+      for (const sp of deleted) {
+        if (sp.id) {
+          await client.query('DELETE FROM sub_projects WHERE id = $1', [sp.id]);
+        }
+      }
+
+      // Update Sub Projects
+      for (const sp of updated) {
+        if (sp.id && sp.name) {
+          await client.query('UPDATE sub_projects SET name = $1 WHERE id = $2', [sp.name, sp.id]);
+        }
+      }
+
+      // Add Sub Projects
+      for (const sp of added) {
+        const newSubId = 'sub_' + Math.random().toString(36).substr(2, 9);
+        await client.query(
+          `INSERT INTO sub_projects (id, project_id, name, built_up_area, floors_count, flats_per_floor) 
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [newSubId, finalProjectId, sp.name, 0, 1, 0]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, projectId: finalProjectId });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Project save transaction failed:', error);
+    res.status(500).json({ error: error.message || 'Transaction failed' });
+  } finally {
+    client.release();
+  }
+});
+
 // --- Authentication API ---
 
 app.post('/api/auth/register', async (req, res) => {
@@ -376,6 +475,38 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
+// Helper for fetching role permissions
+async function getRolePermissions(roleId) {
+  const result = await db.query(`
+    SELECT m.id AS module_id, 
+           COALESCE(rp.can_view, FALSE) AS can_view,
+           COALESCE(rp.can_add, FALSE) AS can_add,
+           COALESCE(rp.can_edit, FALSE) AS can_edit,
+           COALESCE(rp.can_delete, FALSE) AS can_delete,
+           COALESCE(rp.can_approve, FALSE) AS can_approve,
+           COALESCE(rp.can_export, FALSE) AS can_export,
+           COALESCE(rp.can_print, FALSE) AS can_print,
+           COALESCE(rp.can_admin, FALSE) AS can_admin
+    FROM modules m
+    LEFT JOIN role_permissions rp ON rp.module_id = m.id AND rp.role_id = $1
+  `, [roleId]);
+
+  const permissions = {};
+  result.rows.forEach(row => {
+    permissions[row.module_id] = {
+      can_view: row.can_view,
+      can_add: row.can_add,
+      can_edit: row.can_edit,
+      can_delete: row.can_delete,
+      can_approve: row.can_approve,
+      can_export: row.can_export,
+      can_print: row.can_print,
+      can_admin: row.can_admin
+    };
+  });
+  return permissions;
+}
+
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
@@ -389,13 +520,36 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const user = userRes.rows[0];
+    if (user.status === 'inactive') {
+      return res.status(400).json({ error: 'This user account is inactive. Please contact administration.' });
+    }
+
     const validPassword = await bcrypt.compare(password, user.password_hash);
     if (!validPassword) {
       return res.status(400).json({ error: 'Invalid email or password.' });
     }
 
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
-    const profile = { id: user.id, email: user.email, role: user.role };
+    const token = jwt.sign(
+      { 
+        id: user.id, 
+        email: user.email, 
+        role: user.role,
+        company_access: user.company_access,
+        project_access_id: user.project_access_id
+      }, 
+      JWT_SECRET, 
+      { expiresIn: '24h' }
+    );
+    const profile = { 
+      id: user.id, 
+      email: user.email, 
+      role: user.role,
+      company_access: user.company_access,
+      project_access_id: user.project_access_id
+    };
+
+    // Load permissions for this role
+    profile.permissions = await getRolePermissions(user.role);
 
     res.json({ user: profile, access_token: token });
   } catch (error) {
@@ -405,11 +559,19 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.get('/api/auth/me', authenticateToken, async (req, res) => {
   try {
-    const userRes = await db.query('SELECT id, email, role FROM users WHERE id = $1', [req.user.id]);
+    const userRes = await db.query('SELECT id, email, role, company_access, project_access_id, mobile, status FROM users WHERE id = $1', [req.user.id]);
     if (userRes.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
-    res.json(userRes.rows[0]);
+    const user = userRes.rows[0];
+    if (user.status === 'inactive') {
+      return res.status(401).json({ error: 'User account is inactive' });
+    }
+
+    // Load permissions for this role
+    user.permissions = await getRolePermissions(user.role);
+
+    res.json(user);
   } catch (error) {
     res.status(500).json({ error: formatDbError(error) });
   }
@@ -417,6 +579,1053 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
 
 app.post('/api/auth/logout', (req, res) => {
   res.json({ success: true });
+});
+
+app.post('/api/auth/sync-modules', authenticateToken, async (req, res) => {
+  const clientModules = req.body;
+  if (!Array.isArray(clientModules)) {
+    return res.status(400).json({ error: 'Body must be an array of modules' });
+  }
+
+  try {
+    await db.query('BEGIN');
+    
+    // Fetch all existing roles to auto-populate default permissions
+    const rolesRes = await db.query('SELECT id FROM roles');
+    const roles = rolesRes.rows.map(r => r.id);
+
+    for (const m of clientModules) {
+      // Upsert into modules table
+      await db.query(`
+        INSERT INTO modules (id, parent_module_id, module_name, route, display_order, is_active)
+        VALUES ($1, $2, $3, $4, $5, TRUE)
+        ON CONFLICT (id) DO UPDATE SET
+          parent_module_id = EXCLUDED.parent_module_id,
+          module_name = EXCLUDED.module_name,
+          route = EXCLUDED.route,
+          display_order = EXCLUDED.display_order
+      `, [m.id, m.parent_module_id, m.module_name, m.route, m.display_order || 0]);
+
+      // Seed default permissions for this module for all roles if not already present
+      for (const roleId of roles) {
+        // Admins get true by default, others get false
+        const defaultAccess = (roleId === 'admin');
+        await db.query(`
+          INSERT INTO role_permissions (role_id, module_id, can_view, can_add, can_edit, can_delete, can_approve, can_export, can_print, can_admin)
+          VALUES ($1, $2, $3, $3, $3, $3, $3, $3, $3, $3)
+          ON CONFLICT (role_id, module_id) DO NOTHING
+        `, [roleId, m.id, defaultAccess]);
+      }
+    }
+
+    // Deactivate/delete modules that are not present in the frontend navigation list
+    const clientModuleIds = clientModules.map(m => m.id);
+    if (clientModuleIds.length > 0) {
+      const placeholders = clientModuleIds.map((_, i) => `$${i + 1}`).join(', ');
+      await db.query(`
+        DELETE FROM modules 
+        WHERE id NOT IN (${placeholders})
+      `, clientModuleIds);
+    }
+
+    await db.query('COMMIT');
+    res.json({ success: true, message: 'Modules and permissions synchronized successfully.' });
+  } catch (error) {
+    await db.query('ROLLBACK');
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/role-permissions/batch', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Only administrators can update permissions.' });
+  }
+  const permissions = req.body;
+  if (!Array.isArray(permissions)) {
+    return res.status(400).json({ error: 'Body must be an array of permissions' });
+  }
+
+  try {
+    await db.query('BEGIN');
+    for (const p of permissions) {
+      await db.query(`
+        INSERT INTO role_permissions (role_id, module_id, can_view, can_add, can_edit, can_delete, can_approve, can_export, can_print, can_admin)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ON CONFLICT (role_id, module_id) DO UPDATE SET
+          can_view = EXCLUDED.can_view,
+          can_add = EXCLUDED.can_add,
+          can_edit = EXCLUDED.can_edit,
+          can_delete = EXCLUDED.can_delete,
+          can_approve = EXCLUDED.can_approve,
+          can_export = EXCLUDED.can_export,
+          can_print = EXCLUDED.can_print,
+          can_admin = EXCLUDED.can_admin
+      `, [
+        p.role_id, p.module_id, 
+        p.can_view || false, p.can_add || false, p.can_edit || false, p.can_delete || false,
+        p.can_approve || false, p.can_export || false, p.can_print || false, p.can_admin || false
+      ]);
+    }
+    await db.query('COMMIT');
+    res.json({ success: true, message: 'Permissions updated successfully.' });
+  } catch (error) {
+    await db.query('ROLLBACK');
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Helper for notifications creation
+const createNotification = async (projectId, title, message, type, targetUserId, link) => {
+  const id = `not_${Math.random().toString(36).substring(2, 11)}`;
+  try {
+    await db.query(`
+      INSERT INTO notifications (id, project_id, title, message, type, is_read, target_user_id, link)
+      VALUES ($1, $2, $3, $4, $5, FALSE, $6, $7)
+    `, [id, projectId, title, message, type, targetUserId, link]);
+  } catch (err) {
+    console.error('Failed to create notification:', err);
+  }
+};
+
+app.post('/api/dprs/submit', authenticateToken, async (req, res) => {
+  const { project_id, sub_project_id, date } = req.body;
+  if (!project_id || !sub_project_id || !date) {
+    return res.status(400).json({ error: 'project_id, sub_project_id, and date are required.' });
+  }
+
+  try {
+    await db.query('BEGIN');
+
+    // Fetch project name
+    const prjRes = await db.query('SELECT name FROM projects WHERE id = $1', [project_id]);
+    const projectName = prjRes.rows[0]?.name || 'Project';
+
+    // Find if record exists
+    const dprCheck = await db.query(
+      'SELECT * FROM dprs WHERE project_id = $1 AND sub_project_id = $2 AND date = $3',
+      [project_id, sub_project_id, date]
+    );
+
+    const dprId = dprCheck.rows[0]?.id || `dpr_${Math.random().toString(36).substring(2, 11)}`;
+
+    if (dprCheck.rows.length === 0) {
+      await db.query(`
+        INSERT INTO dprs (id, project_id, sub_project_id, date, status, created_by, created_date, submitted_by, submitted_date, last_updated_by, last_updated_date)
+        VALUES ($1, $2, $3, $4, 'pending', $5, CURRENT_TIMESTAMP, $5, CURRENT_TIMESTAMP, $5, CURRENT_TIMESTAMP)
+      `, [dprId, project_id, sub_project_id, date, req.user.email]);
+    } else {
+      const currentStatus = dprCheck.rows[0].status;
+      if (currentStatus === 'approved') {
+        await db.query('ROLLBACK');
+        return res.status(400).json({ error: 'This DPR is already approved and locked.' });
+      }
+      await db.query(`
+        UPDATE dprs SET
+          status = 'pending',
+          submitted_by = $1,
+          submitted_date = CURRENT_TIMESTAMP,
+          last_updated_by = $1,
+          last_updated_date = CURRENT_TIMESTAMP
+        WHERE id = $2
+      `, [req.user.email, dprId]);
+    }
+
+    await db.query('COMMIT');
+
+    // Send notifications to Project Managers of this project
+    const pmUsers = await db.query(`
+      SELECT id FROM users 
+      WHERE role = 'project_manager' 
+        AND (project_access_id IS NULL OR project_access_id = '' OR project_access_id LIKE $1)
+    `, [`%${project_id}%`]);
+
+    for (const pm of pmUsers.rows) {
+      await createNotification(
+        project_id,
+        'DPR Waiting for Approval',
+        `A new DPR is waiting for your approval on ${projectName} (${date}).`,
+        'info',
+        pm.id,
+        `/progress?tab=dpr&date=${date}&project_id=${project_id}&sub_project_id=${sub_project_id}`
+      );
+    }
+
+    res.json({ success: true, message: 'DPR submitted for approval successfully.' });
+  } catch (error) {
+    await db.query('ROLLBACK');
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/dprs/approve', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'project_manager' && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Only Project Managers or Admins can approve DPRs.' });
+  }
+
+  const { project_id, sub_project_id, date } = req.body;
+  if (!project_id || !sub_project_id || !date) {
+    return res.status(400).json({ error: 'project_id, sub_project_id, and date are required.' });
+  }
+
+  try {
+    await db.query('BEGIN');
+
+    const dprCheck = await db.query(
+      'SELECT * FROM dprs WHERE project_id = $1 AND sub_project_id = $2 AND date = $3',
+      [project_id, sub_project_id, date]
+    );
+
+    if (dprCheck.rows.length === 0) {
+      await db.query('ROLLBACK');
+      return res.status(404).json({ error: 'DPR record not found.' });
+    }
+
+    const dpr = dprCheck.rows[0];
+
+    await db.query(`
+      UPDATE dprs SET
+        status = 'approved',
+        approved_by = $1,
+        approved_date = CURRENT_TIMESTAMP,
+        last_updated_by = $1,
+        last_updated_date = CURRENT_TIMESTAMP
+      WHERE id = $2
+    `, [req.user.email, dpr.id]);
+
+    await db.query('COMMIT');
+
+    // Notify the submitter
+    const submitterEmail = dpr.submitted_by || dpr.created_by;
+    if (submitterEmail) {
+      const subUser = await db.query('SELECT id FROM users WHERE email = $1', [submitterEmail]);
+      if (subUser.rows.length > 0) {
+        await createNotification(
+          project_id,
+          'DPR Approved',
+          `Your DPR for ${date} has been approved.`,
+          'info',
+          subUser.rows[0].id,
+          `/progress?tab=dpr&date=${date}&project_id=${project_id}&sub_project_id=${sub_project_id}`
+        );
+      }
+    }
+
+    res.json({ success: true, message: 'DPR approved successfully.' });
+  } catch (error) {
+    await db.query('ROLLBACK');
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/dprs/reopen', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Only Administrators can reopen DPRs.' });
+  }
+
+  const { project_id, sub_project_id, date, reason } = req.body;
+  if (!project_id || !sub_project_id || !date) {
+    return res.status(400).json({ error: 'project_id, sub_project_id, and date are required.' });
+  }
+
+  try {
+    await db.query('BEGIN');
+
+    const dprCheck = await db.query(
+      'SELECT * FROM dprs WHERE project_id = $1 AND sub_project_id = $2 AND date = $3',
+      [project_id, sub_project_id, date]
+    );
+
+    if (dprCheck.rows.length === 0) {
+      await db.query('ROLLBACK');
+      return res.status(404).json({ error: 'DPR record not found.' });
+    }
+
+    const dpr = dprCheck.rows[0];
+
+    await db.query(`
+      UPDATE dprs SET
+        status = 'draft',
+        reopened_by = $1,
+        reopened_date = CURRENT_TIMESTAMP,
+        reopen_reason = $2,
+        last_updated_by = $1,
+        last_updated_date = CURRENT_TIMESTAMP
+      WHERE id = $3
+    `, [req.user.email, reason || '', dpr.id]);
+
+    await db.query('COMMIT');
+
+    // Notify the submitter
+    const submitterEmail = dpr.submitted_by || dpr.created_by;
+    if (submitterEmail) {
+      const subUser = await db.query('SELECT id FROM users WHERE email = $1', [submitterEmail]);
+      if (subUser.rows.length > 0) {
+        await createNotification(
+          project_id,
+          'DPR Reopened',
+          `Your DPR for ${date} has been reopened and is available for editing. Reason: ${reason || 'Not specified'}`,
+          'info',
+          subUser.rows[0].id,
+          `/progress?tab=dpr&date=${date}&project_id=${project_id}&sub_project_id=${sub_project_id}`
+        );
+      }
+    }
+
+    res.json({ success: true, message: 'DPR reopened successfully.' });
+  } catch (error) {
+    await db.query('ROLLBACK');
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// --- WBS Approval Workflow transactional API ---
+
+const getAssignedReviewer = (code, title) => {
+  const normTitle = String(title || '').toLowerCase();
+  const rootId = String(code).split('.')[0];
+
+  if (
+    rootId === '1' || rootId === '2' || rootId === '3' || rootId === '4' ||
+    normTitle.includes('earth') || normTitle.includes('rcc') ||
+    normTitle.includes('masonry') || normTitle.includes('plaster') ||
+    normTitle.includes('waterproofing')
+  ) {
+    return 'civil.head@planedge.co';
+  }
+  if (
+    rootId === '5' || rootId === '6' || rootId === '7' || rootId === '8' || rootId === '9' ||
+    normTitle.includes('wood') || normTitle.includes('door') ||
+    normTitle.includes('window') || normTitle.includes('sliding') ||
+    normTitle.includes('floor') || normTitle.includes('tile') ||
+    normTitle.includes('tiling') || normTitle.includes('paint') ||
+    normTitle.includes('polish') || normTitle.includes('grill') ||
+    normTitle.includes('railing') || normTitle.includes('facade') ||
+    normTitle.includes('glazing')
+  ) {
+    return 'finishing.head@planedge.co';
+  }
+  if (rootId === '10' || normTitle.includes('plumb') || normTitle.includes('drain')) {
+    return 'mep.head@planedge.co';
+  }
+  if (rootId === '11' || normTitle.includes('elect')) {
+    return 'electrical.head@planedge.co';
+  }
+  if (rootId === '12' || rootId === '13' || normTitle.includes('lift') || normTitle.includes('fire')) {
+    return 'mep.head@planedge.co';
+  }
+  return 'planning.head@planedge.co';
+};
+
+app.post('/api/wbs/upload', authenticateToken, async (req, res) => {
+  const { project_id, sub_project_id, upload_type, rows } = req.body;
+  if (!project_id || !sub_project_id || !Array.isArray(rows)) {
+    return res.status(400).json({ error: 'project_id, sub_project_id, and rows array are required.' });
+  }
+
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Fetch existing WBS items for this project/sub-project
+    const existingRes = await client.query(
+      'SELECT * FROM wbs_items WHERE project_id = $1 AND sub_project_id = $2',
+      [project_id, sub_project_id]
+    );
+    const existingItems = existingRes.rows;
+    const existingByCode = new Map(existingItems.map(item => [item.code, item]));
+
+    // Determine locked L1 parent categories
+    const lockedL1Codes = new Set();
+    existingItems.forEach(item => {
+      if (item.level === 1 && (item.status === 'pending_approval' || item.status === 'approved')) {
+        lockedL1Codes.add(item.code);
+      }
+    });
+    existingItems.forEach(item => {
+      if (item.level > 1) {
+        const rootCode = item.code.split('.')[0];
+        const rootItem = existingItems.find(i => i.level === 1 && i.code === rootCode);
+        if (rootItem && (rootItem.status === 'pending_approval' || rootItem.status === 'approved')) {
+          lockedL1Codes.add(rootCode);
+        }
+      }
+    });
+
+    // 2. Diffing
+    const incomingByCode = new Map(rows.map(r => [r.code, r]));
+
+    // Determine deletes (exist in DB, but not in new rows, and not locked)
+    const toDeleteIds = existingItems
+      .filter(item => {
+        const rootCode = item.code.split('.')[0];
+        return !incomingByCode.has(item.code) && !lockedL1Codes.has(rootCode);
+      })
+      .map(item => item.id);
+
+    if (toDeleteIds.length > 0) {
+      await client.query('DELETE FROM wbs_items WHERE id = ANY($1)', [toDeleteIds]);
+    }
+
+    // Determine inserts and updates
+    let createdCount = 0;
+    let updatedCount = 0;
+    const codeToId = new Map(existingItems.map(item => [item.code, item.id]));
+
+    // Sort rows so parents (levels 1 & 2) are processed before child rows (level 3)
+    const sortedRows = [...rows].sort((a, b) => {
+      const aLen = a.code.split('.').length;
+      const bLen = b.code.split('.').length;
+      return aLen - bLen;
+    });
+
+    for (const row of sortedRows) {
+      const rootCode = row.code.split('.')[0];
+      // Skip if this category belongs to a locked category
+      if (lockedL1Codes.has(rootCode)) {
+        continue;
+      }
+
+      const parentCode = row.code.split('.').slice(0, -1).join('.');
+      const parentId = parentCode ? codeToId.get(parentCode) || null : null;
+      const existing = existingByCode.get(row.code);
+      const isL1 = row.code.split('.').filter(Boolean).length === 1;
+
+      const payload = {
+        project_id,
+        sub_project_id,
+        code: row.code,
+        activity_id: row.activity_id || '',
+        activity_code: row.activity_code || null,
+        title: row.title,
+        description: row.description || '',
+        level: row.code.split('.').filter(Boolean).length,
+        parent_id: parentId,
+        planned_quantity: parseFloat(row.planned_quantity) || 0,
+        actual_quantity: parseFloat(row.actual_quantity) || 0,
+        unit: row.unit || '',
+        lumsum_rate: parseFloat(row.lumsum_rate) || 0,
+        total_days: parseInt(row.total_days) || 0,
+        level_label: row.level_label || '',
+        source_upload_type: row.source_upload_type || upload_type,
+        progress: existing ? parseFloat(existing.progress) || 0 : 0,
+        budget_amount: parseFloat(row.budget_amount) || 0,
+        order_index: row.order_index || 0,
+        status: existing ? existing.status || 'draft' : 'draft',
+        assigned_reviewer: isL1 ? getAssignedReviewer(row.code, row.title) : null
+      };
+
+      let itemId;
+      if (existing) {
+        itemId = existing.id;
+        const hasChanges = 
+          existing.title !== payload.title ||
+          existing.description !== payload.description ||
+          parseFloat(existing.planned_quantity) !== payload.planned_quantity ||
+          existing.unit !== payload.unit ||
+          parseFloat(existing.lumsum_rate) !== payload.lumsum_rate ||
+          parseInt(existing.total_days) !== payload.total_days ||
+          parseFloat(existing.budget_amount) !== payload.budget_amount ||
+          existing.level_label !== payload.level_label ||
+          existing.parent_id !== payload.parent_id ||
+          existing.assigned_reviewer !== payload.assigned_reviewer;
+
+        if (hasChanges) {
+          await client.query(`
+            UPDATE wbs_items SET
+              activity_id = $1, activity_code = $2, title = $3, description = $4,
+              level = $5, parent_id = $6, planned_quantity = $7, actual_quantity = $8,
+              unit = $9, lumsum_rate = $10, total_days = $11, level_label = $12,
+              source_upload_type = $13, budget_amount = $14, order_index = $15,
+              assigned_reviewer = $16, updated_date = CURRENT_TIMESTAMP
+            WHERE id = $17
+          `, [
+            payload.activity_id, payload.activity_code, payload.title, payload.description,
+            payload.level, payload.parent_id, payload.planned_quantity, payload.actual_quantity,
+            payload.unit, payload.lumsum_rate, payload.total_days, payload.level_label,
+            payload.source_upload_type, payload.budget_amount, payload.order_index,
+            payload.assigned_reviewer, itemId
+          ]);
+          updatedCount += 1;
+        }
+      } else {
+        itemId = `wbs_${Math.random().toString(36).substring(2, 11)}`;
+        await client.query(`
+          INSERT INTO wbs_items (
+            id, project_id, sub_project_id, code, activity_id, activity_code, title,
+            description, level, parent_id, planned_quantity, actual_quantity,
+            unit, lumsum_rate, total_days, level_label, source_upload_type,
+            progress, budget_amount, order_index, status, assigned_reviewer
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+        `, [
+          itemId, payload.project_id, payload.sub_project_id, payload.code,
+          payload.activity_id, payload.activity_code, payload.title, payload.description,
+          payload.level, payload.parent_id, payload.planned_quantity, payload.actual_quantity,
+          payload.unit, payload.lumsum_rate, payload.total_days, payload.level_label,
+          payload.source_upload_type, payload.progress, payload.budget_amount, payload.order_index,
+          payload.status, payload.assigned_reviewer
+        ]);
+        createdCount += 1;
+      }
+      codeToId.set(row.code, itemId);
+    }
+
+    // 3. Manage WBS Header state & versioning
+    const headerRes = await client.query(
+      'SELECT * FROM wbs_headers WHERE project_id = $1 AND sub_project_id = $2',
+      [project_id, sub_project_id]
+    );
+
+    let versionNo = 1;
+    let headerId = `wbh_${Math.random().toString(36).substring(2, 11)}`;
+    let remark = 'Initial Upload';
+
+    if (headerRes.rows.length > 0) {
+      const existingHeader = headerRes.rows[0];
+      headerId = existingHeader.id;
+      versionNo = existingHeader.version_no;
+      
+      if (existingHeader.status === 'changes_requested') {
+        versionNo += 1;
+        remark = `Uploaded Version ${versionNo}`;
+      } else {
+        remark = `Updated Version ${versionNo}`;
+      }
+
+      await client.query(`
+        UPDATE wbs_headers SET
+          status = 'draft',
+          version_no = $1,
+          last_uploaded_by = $2,
+          last_uploaded_date = CURRENT_TIMESTAMP
+        WHERE id = $3
+      `, [versionNo, req.user.email, headerId]);
+    } else {
+      await client.query(`
+        INSERT INTO wbs_headers (
+          id, project_id, sub_project_id, status, version_no,
+          last_uploaded_by, last_uploaded_date
+        ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+      `, [headerId, project_id, sub_project_id, 'draft', versionNo, req.user.email]);
+    }
+
+    // 4. Record to Approval History
+    await client.query(`
+      INSERT INTO wbs_approval_history (
+        id, project_id, sub_project_id, user_email, action, remarks, version_no
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `, [
+      `wah_${Math.random().toString(36).substring(2, 11)}`,
+      project_id, sub_project_id, req.user.email,
+      `Uploaded Version ${versionNo}`, remark, versionNo
+    ]);
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      created: createdCount,
+      updated: updatedCount,
+      deleted: toDeleteIds.length,
+      version: versionNo
+    });
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/api/wbs/header', authenticateToken, async (req, res) => {
+  const { project_id, sub_project_id } = req.query;
+  if (!project_id || !sub_project_id) {
+    return res.status(400).json({ error: 'project_id and sub_project_id are required.' });
+  }
+  try {
+    let headerRes = await db.query(
+      'SELECT * FROM wbs_headers WHERE project_id = $1 AND sub_project_id = $2',
+      [project_id, sub_project_id]
+    );
+
+    if (headerRes.rows.length === 0) {
+      const id = `wbh_${Math.random().toString(36).substring(2, 11)}`;
+      await db.query(`
+        INSERT INTO wbs_headers (id, project_id, sub_project_id, status, version_no)
+        VALUES ($1, $2, $3, 'draft', 1)
+      `, [id, project_id, sub_project_id]);
+
+      headerRes = await db.query('SELECT * FROM wbs_headers WHERE id = $1', [id]);
+    }
+
+    const header = headerRes.rows[0];
+
+    // Fetch individual L1 categories status
+    const l1Res = await db.query(
+      'SELECT id, code, title, status, assigned_reviewer, return_reason, returned_by FROM wbs_items WHERE project_id = $1 AND sub_project_id = $2 AND level = 1',
+      [project_id, sub_project_id]
+    );
+    const l1Items = l1Res.rows;
+
+    let computedStatus = 'draft';
+    if (l1Items.length > 0) {
+      const allApproved = l1Items.every(item => item.status === 'approved');
+      const allDraft = l1Items.every(item => item.status === 'draft');
+      if (allApproved) {
+        computedStatus = 'approved';
+      } else if (allDraft) {
+        computedStatus = 'draft';
+      } else {
+        computedStatus = 'partially_approved';
+      }
+    }
+
+    if (header.status !== computedStatus) {
+      await db.query(
+        'UPDATE wbs_headers SET status = $1 WHERE id = $2',
+        [computedStatus, header.id]
+      );
+      header.status = computedStatus;
+    }
+
+    res.json({
+      ...header,
+      l1_items: l1Items
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/wbs/submit-approval', authenticateToken, async (req, res) => {
+  const { project_id, sub_project_id, codes, reviewers } = req.body;
+  if (!project_id || !sub_project_id || !Array.isArray(codes) || codes.length === 0 || !Array.isArray(reviewers) || reviewers.length === 0) {
+    return res.status(400).json({ error: 'project_id, sub_project_id, codes, and reviewers list are required.' });
+  }
+
+  try {
+    await db.query('BEGIN');
+
+    const headerRes = await db.query(
+      'SELECT * FROM wbs_headers WHERE project_id = $1 AND sub_project_id = $2',
+      [project_id, sub_project_id]
+    );
+
+    if (headerRes.rows.length === 0) {
+      await db.query('ROLLBACK');
+      return res.status(400).json({ error: 'No WBS uploaded yet.' });
+    }
+
+    const header = headerRes.rows[0];
+
+    // Fetch the target L1 items
+    const l1Res = await db.query(
+      'SELECT id, code, title, status, assigned_reviewer FROM wbs_items WHERE project_id = $1 AND sub_project_id = $2 AND level = 1 AND code = ANY($3)',
+      [project_id, sub_project_id, codes]
+    );
+    const targetL1Items = l1Res.rows;
+
+    if (targetL1Items.length === 0) {
+      await db.query('ROLLBACK');
+      return res.status(400).json({ error: 'None of the selected WBS Heads exist.' });
+    }
+
+    // Filter to only those L1 items that are in draft or changes_requested
+    const itemsToSubmit = targetL1Items.filter(item => item.status === 'draft' || item.status === 'changes_requested');
+    
+    if (itemsToSubmit.length === 0) {
+      await db.query('ROLLBACK');
+      return res.status(400).json({ error: 'Selected WBS Heads are already submitted or approved.' });
+    }
+
+    const submittedReviewers = new Set();
+    for (const item of itemsToSubmit) {
+      const defaultReviewer = getAssignedReviewer(item.code, item.title);
+      // Route to default reviewer if selected in popup, otherwise default to first selected reviewer
+      const reviewerEmail = reviewers.includes(defaultReviewer) ? defaultReviewer : reviewers[0];
+      submittedReviewers.add(reviewerEmail);
+
+      await db.query(
+        "UPDATE wbs_items SET status = 'pending_approval', assigned_reviewer = $1, return_reason = NULL, returned_by = NULL WHERE id = $2",
+        [reviewerEmail, item.id]
+      );
+    }
+
+    // Dynamic Overall status computation
+    const allL1Res = await db.query(
+      'SELECT status FROM wbs_items WHERE project_id = $1 AND sub_project_id = $2 AND level = 1',
+      [project_id, sub_project_id]
+    );
+    const allL1Items = allL1Res.rows;
+
+    let computedStatus = 'partially_approved';
+    const allApproved = allL1Items.every(item => item.status === 'approved');
+    const allDraft = allL1Items.every(item => item.status === 'draft');
+    if (allApproved) {
+      computedStatus = 'approved';
+    } else if (allDraft) {
+      computedStatus = 'draft';
+    }
+
+    const reviewersList = Array.from(submittedReviewers);
+
+    await db.query(`
+      UPDATE wbs_headers SET
+        status = $1,
+        submitted_by = $2,
+        submitted_date = CURRENT_TIMESTAMP,
+        reviewers = $3,
+        approved_reviewers = '[]'::jsonb
+      WHERE id = $4
+    `, [computedStatus, req.user.email, JSON.stringify(reviewersList), header.id]);
+
+    const itemsTitles = itemsToSubmit.map(i => i.title).join(', ');
+
+    await db.query(`
+      INSERT INTO wbs_approval_history (
+        id, project_id, sub_project_id, user_email, action, remarks, version_no
+      ) VALUES ($1, $2, $3, $4, 'Submitted for Approval', $5, $6)
+    `, [
+      `wah_${Math.random().toString(36).substring(2, 11)}`,
+      project_id, sub_project_id, req.user.email,
+      `Submitted categories: ${itemsTitles}. Pending review from: ${reviewersList.join(', ')}`,
+      header.version_no
+    ]);
+
+    await db.query('COMMIT');
+
+    // Notify assigned reviewers
+    const usersRes = await db.query(
+      'SELECT id, email FROM users WHERE email = ANY($1)',
+      [reviewersList]
+    );
+
+    for (const u of usersRes.rows) {
+      const itemsForReviewer = itemsToSubmit
+        .filter(i => (i.assigned_reviewer || '').toLowerCase() === u.email.toLowerCase())
+        .map(i => i.title)
+        .join(', ');
+
+      await createNotification(
+        project_id,
+        'WBS Head Awaiting Review',
+        `The following WBS categories are awaiting your review: ${itemsForReviewer}. Submitted by: ${req.user.email}.`,
+        'info',
+        u.id,
+        `/scheduler?project_id=${project_id}&sub_project_id=${sub_project_id}`
+      );
+    }
+
+    res.json({ success: true, message: 'WBS Heads submitted for approval successfully.' });
+  } catch (error) {
+    await db.query('ROLLBACK');
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/wbs/review', authenticateToken, async (req, res) => {
+  const { project_id, sub_project_id, status, comment } = req.body;
+  const codes = req.body.codes || (req.body.code ? [req.body.code] : null);
+
+  if (!project_id || !sub_project_id || !status || !Array.isArray(codes) || codes.length === 0) {
+    return res.status(400).json({ error: 'project_id, sub_project_id, codes, and status are required.' });
+  }
+
+  if (status === 'changes_requested' && (!comment || !comment.trim())) {
+    return res.status(400).json({ error: 'Reason for return is mandatory.' });
+  }
+
+  try {
+    await db.query('BEGIN');
+
+    const headerRes = await db.query(
+      'SELECT * FROM wbs_headers WHERE project_id = $1 AND sub_project_id = $2',
+      [project_id, sub_project_id]
+    );
+
+    if (headerRes.rows.length === 0) {
+      await db.query('ROLLBACK');
+      return res.status(404).json({ error: 'WBS Header record not found.' });
+    }
+
+    const header = headerRes.rows[0];
+
+    // Fetch the target L1 categories
+    const l1Res = await db.query(
+      'SELECT * FROM wbs_items WHERE project_id = $1 AND sub_project_id = $2 AND code = ANY($3) AND level = 1',
+      [project_id, sub_project_id, codes]
+    );
+    const targetL1Items = l1Res.rows;
+
+    if (targetL1Items.length === 0) {
+      await db.query('ROLLBACK');
+      return res.status(404).json({ error: `None of the WBS categories were found.` });
+    }
+
+    const userEmail = req.user.email;
+
+    // Check if user is the assigned reviewer or admin for all requested categories
+    for (const item of targetL1Items) {
+      if ((item.assigned_reviewer || '').toLowerCase() !== userEmail.toLowerCase() && req.user.role !== 'admin') {
+        await db.query('ROLLBACK');
+        return res.status(403).json({ error: `You are not assigned as the reviewer for category: ${item.title}` });
+      }
+    }
+
+    const plannerRes = await db.query("SELECT id FROM users WHERE role = 'planning_team' OR email = $1", [header.submitted_by]);
+    const plannerIds = plannerRes.rows.map(r => r.id);
+
+    if (status === 'changes_requested') {
+      for (const item of targetL1Items) {
+        await db.query(`
+          UPDATE wbs_items SET
+            status = 'changes_requested',
+            approval_status = 'changes_requested',
+            returned_by = $1,
+            returned_date = CURRENT_TIMESTAMP,
+            return_reason = $2,
+            approved_by = NULL,
+            approved_date = NULL,
+            remarks = NULL
+          WHERE id = $3
+        `, [userEmail, comment, item.id]);
+
+        await db.query(`
+          INSERT INTO wbs_approval_history (
+            id, project_id, sub_project_id, user_email, action, remarks, version_no
+          ) VALUES ($1, $2, $3, $4, 'Changes Requested', $5, $6)
+        `, [
+          `wah_${Math.random().toString(36).substring(2, 11)}`,
+          project_id, sub_project_id, userEmail,
+          `Category: ${item.title}. Return Reason: ${comment}`,
+          header.version_no
+        ]);
+
+        for (const pid of plannerIds) {
+          await createNotification(
+            project_id,
+            'WBS Category Returned',
+            `Category "${item.title}" returned for changes by ${userEmail}. Reason: ${comment}`,
+            'warning',
+            pid,
+            `/scheduler?project_id=${project_id}&sub_project_id=${sub_project_id}`
+          );
+        }
+      }
+    } else if (status === 'approved') {
+      for (const item of targetL1Items) {
+        await db.query(`
+          UPDATE wbs_items SET
+            status = 'approved',
+            approval_status = 'approved',
+            approved_by = $1,
+            approved_date = CURRENT_TIMESTAMP,
+            remarks = $2,
+            returned_by = NULL,
+            returned_date = NULL,
+            return_reason = NULL
+          WHERE id = $3
+        `, [userEmail, comment || '', item.id]);
+
+        await db.query(`
+          INSERT INTO wbs_approval_history (
+            id, project_id, sub_project_id, user_email, action, remarks, version_no
+          ) VALUES ($1, $2, $3, $4, 'Approved', $5, $6)
+        `, [
+          `wah_${Math.random().toString(36).substring(2, 11)}`,
+          project_id, sub_project_id, userEmail,
+          `Approved category: ${item.title}. Remarks: ${comment || ''}`,
+          header.version_no
+        ]);
+
+        for (const pid of plannerIds) {
+          await createNotification(
+            project_id,
+            'WBS Category Approved',
+            `Category "${item.title}" approved by ${userEmail}.`,
+            'success',
+            pid,
+            `/scheduler?project_id=${project_id}&sub_project_id=${sub_project_id}`
+          );
+        }
+      }
+    }
+
+    // Dynamic Overall status computation
+    const allL1Res = await db.query(
+      'SELECT status FROM wbs_items WHERE project_id = $1 AND sub_project_id = $2 AND level = 1',
+      [project_id, sub_project_id]
+    );
+    const allL1Items = allL1Res.rows;
+
+    let computedStatus = 'partially_approved';
+    const allApproved = allL1Items.every(item => item.status === 'approved');
+    const allDraft = allL1Items.every(item => item.status === 'draft');
+    if (allApproved) {
+      computedStatus = 'approved';
+    } else if (allDraft) {
+      computedStatus = 'draft';
+    }
+
+    const updateQuery = computedStatus === 'approved' ? `
+      UPDATE wbs_headers SET
+        status = 'approved',
+        approved_by = $1,
+        approved_date = CURRENT_TIMESTAMP
+      WHERE id = $2
+    ` : `
+      UPDATE wbs_headers SET
+        status = $1
+      WHERE id = $2
+    `;
+
+    const updateParams = computedStatus === 'approved' ? [userEmail, header.id] : [computedStatus, header.id];
+    await db.query(updateQuery, updateParams);
+
+    await db.query('COMMIT');
+    res.json({ success: true, message: 'WBS categories reviewed successfully.' });
+  } catch (error) {
+    await db.query('ROLLBACK');
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/wbs/reopen', authenticateToken, async (req, res) => {
+  const { project_id, sub_project_id } = req.body;
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Only administrators can reopen approved WBS.' });
+  }
+
+  try {
+    await db.query('BEGIN');
+
+    const headerRes = await db.query(
+      'SELECT * FROM wbs_headers WHERE project_id = $1 AND sub_project_id = $2',
+      [project_id, sub_project_id]
+    );
+
+    if (headerRes.rows.length === 0) {
+      await db.query('ROLLBACK');
+      return res.status(404).json({ error: 'WBS record not found.' });
+    }
+
+    const header = headerRes.rows[0];
+
+    await db.query(`
+      UPDATE wbs_headers SET
+        status = 'draft'
+      WHERE id = $1
+    `, [header.id]);
+
+    await db.query(`
+      UPDATE wbs_items SET
+        status = 'draft',
+        return_reason = NULL,
+        returned_by = NULL
+      WHERE project_id = $1 AND sub_project_id = $2 AND level = 1
+    `, [project_id, sub_project_id]);
+
+    await db.query(`
+      INSERT INTO wbs_approval_history (
+        id, project_id, sub_project_id, user_email, action, remarks, version_no
+      ) VALUES ($1, $2, $3, $4, 'Reopened to Draft', $5, $6)
+    `, [
+      `wah_${Math.random().toString(36).substring(2, 11)}`,
+      project_id, sub_project_id, req.user.email,
+      'Approval cancelled by admin, reopened for edits',
+      header.version_no
+    ]);
+
+    await db.query('COMMIT');
+    res.json({ success: true, message: 'WBS reopened to draft successfully.' });
+  } catch (error) {
+    await db.query('ROLLBACK');
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/wbs/approval-history', authenticateToken, async (req, res) => {
+  const { project_id, sub_project_id } = req.query;
+  if (!project_id || !sub_project_id) {
+    return res.status(400).json({ error: 'project_id and sub_project_id are required.' });
+  }
+  try {
+    const historyRes = await db.query(
+      'SELECT * FROM wbs_approval_history WHERE project_id = $1 AND sub_project_id = $2 ORDER BY date DESC',
+      [project_id, sub_project_id]
+    );
+    res.json(historyRes.rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/dprs/stats', authenticateToken, async (req, res) => {
+  try {
+    const role = req.user.role;
+    const projectAccess = req.user.project_access_id;
+    let assignedProjects = [];
+    if (projectAccess) {
+      assignedProjects = projectAccess.split(',').map(p => p.trim()).filter(Boolean);
+    }
+
+    const hasProjectFilter = assignedProjects.length > 0 && role !== 'admin';
+
+    // Site Engineer Stats
+    if (role === 'site_engineer') {
+      let query = 'SELECT status, COUNT(*)::int AS count FROM dprs';
+      const params = [];
+      if (hasProjectFilter) {
+        query += ' WHERE project_id = ANY($1)';
+        params.push(assignedProjects);
+      }
+      query += ' GROUP BY status';
+      
+      const statsRes = await db.query(query, params);
+      const stats = { draft: 0, pending: 0, approved: 0 };
+      statsRes.rows.forEach(r => {
+        stats[r.status] = r.count;
+      });
+      return res.json(stats);
+    }
+
+    // Project Manager Stats
+    if (role === 'project_manager') {
+      let pendingQuery = "SELECT COUNT(*)::int FROM dprs WHERE status = 'pending'";
+      let approvedTodayQuery = "SELECT COUNT(*)::int FROM dprs WHERE status = 'approved' AND approved_date >= CURRENT_DATE";
+      let pendingSinceYesterdayQuery = "SELECT COUNT(*)::int FROM dprs WHERE status = 'pending' AND created_date < CURRENT_DATE";
+
+      const params = [];
+      if (hasProjectFilter) {
+        pendingQuery += ' AND project_id = ANY($1)';
+        approvedTodayQuery += ' AND project_id = ANY($1)';
+        pendingSinceYesterdayQuery += ' AND project_id = ANY($1)';
+        params.push(assignedProjects);
+      }
+
+      const pendingRes = await db.query(pendingQuery, params);
+      const approvedTodayRes = await db.query(approvedTodayQuery, params);
+      const pendingSinceYesterdayRes = await db.query(pendingSinceYesterdayQuery, params);
+
+      return res.json({
+        pendingApproval: pendingRes.rows[0].count,
+        approvedToday: approvedTodayRes.rows[0].count,
+        pendingSinceYesterday: pendingSinceYesterdayRes.rows[0].count
+      });
+    }
+
+    // Admin Stats
+    const totalRes = await db.query("SELECT status, COUNT(*)::int AS count FROM dprs GROUP BY status");
+    const reopenedRes = await db.query("SELECT COUNT(*)::int AS count FROM dprs WHERE reopened_date IS NOT NULL");
+
+    const stats = { draft: 0, pending: 0, approved: 0, reopened: reopenedRes.rows[0].count };
+    totalRes.rows.forEach(r => {
+      stats[r.status] = r.count;
+    });
+    return res.json(stats);
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // --- Dynamic CRUD API for Entities ---
@@ -526,6 +1735,22 @@ app.post('/api/entities/:entity', authenticateToken, async (req, res) => {
       data.created_by_id = req.user.id;
     }
 
+    if (entity === 'User') {
+      if (!data.email || !data.email.trim()) {
+        return res.status(400).json({ error: 'User ID is required.' });
+      }
+      if (!data.password || !data.password.trim()) {
+        return res.status(400).json({ error: 'Password is required.' });
+      }
+      const checkUser = await db.query('SELECT * FROM users WHERE email = $1', [data.email.trim()]);
+      if (checkUser.rows.length > 0) {
+        return res.status(400).json({ error: 'User ID already exists.' });
+      }
+      const salt = await bcrypt.genSalt(10);
+      data.password_hash = await bcrypt.hash(data.password, salt);
+      delete data.password;
+    }
+
     // Dynamic insert query builder
     const keys = Object.keys(data);
     const columns = keys.map(k => `"${k}"`).join(', ');
@@ -608,6 +1833,20 @@ app.put('/api/entities/:entity/:id', authenticateToken, async (req, res) => {
           return res.status(400).json({ error: 'Cost Control Lock: Approved progress quantity/cost cannot be decreased.' });
         }
       }
+    }
+
+    if (entity === 'User') {
+      if (data.email) {
+        const checkUser = await db.query('SELECT * FROM users WHERE email = $1 AND id <> $2', [data.email.trim(), id]);
+        if (checkUser.rows.length > 0) {
+          return res.status(400).json({ error: 'User ID already exists.' });
+        }
+      }
+      if (data.password && data.password.trim()) {
+        const salt = await bcrypt.genSalt(10);
+        data.password_hash = await bcrypt.hash(data.password, salt);
+      }
+      delete data.password;
     }
 
     // Separate id and strip metadata / auto-managed keys
@@ -1005,6 +2244,118 @@ app.post('/api/wbs-template/reset', authenticateToken, requireAdmin, async (req,
   }
 });
 
+app.get('/api/analytics/labour-productivity', authenticateToken, async (req, res) => {
+  const { project_id, sub_project_id, from_date, to_date, contractor_id, type_of_work } = req.query;
+
+  if (!project_id) {
+    return res.status(400).json({ error: 'project_id is required.' });
+  }
+
+  try {
+    let paramIndex = 1;
+    const queryParams = [project_id];
+
+    let qtyFilters = '';
+    let labourFilters = '';
+
+    if (sub_project_id) {
+      paramIndex++;
+      queryParams.push(sub_project_id);
+      qtyFilters += ` AND pe.sub_project_id = $${paramIndex}`;
+      labourFilters += ` AND cl.sub_project_id = $${paramIndex}`;
+    }
+
+    if (from_date) {
+      paramIndex++;
+      queryParams.push(from_date);
+      qtyFilters += ` AND pe.date >= $${paramIndex}`;
+      labourFilters += ` AND cl.date >= $${paramIndex}`;
+    }
+
+    if (to_date) {
+      paramIndex++;
+      queryParams.push(to_date);
+      qtyFilters += ` AND pe.date <= $${paramIndex}`;
+      labourFilters += ` AND cl.date <= $${paramIndex}`;
+    }
+
+    let mainFilters = '';
+    if (contractor_id) {
+      paramIndex++;
+      queryParams.push(contractor_id);
+      mainFilters += ` AND lab.contractor_id = $${paramIndex}`;
+    }
+
+    if (type_of_work) {
+      paramIndex++;
+      queryParams.push(type_of_work);
+      mainFilters += ` AND LOWER(TRIM(lab.type_of_work)) = LOWER(TRIM($${paramIndex}))`;
+    }
+
+    const queryText = `
+      WITH RECURSIVE wbs_hierarchy AS (
+        SELECT id AS level2_id, id AS current_id, title AS level2_title, code AS level2_code
+        FROM wbs_items
+        WHERE level = 2 AND project_id = $1
+        
+        UNION ALL
+        
+        SELECT h.level2_id, w.id, h.level2_title, h.level2_code
+        FROM wbs_hierarchy h
+        JOIN wbs_items w ON w.parent_id = h.current_id
+      ),
+      qty_aggregation AS (
+        SELECT
+          pe.project_id,
+          h.level2_title AS sub_activity_name,
+          pe.unit,
+          COALESCE(SUM(pe.quantity_done), 0) AS total_qty
+        FROM progress_entries pe
+        JOIN wbs_hierarchy h ON pe.wbs_item_id = h.current_id
+        WHERE pe.project_id = $1
+          AND pe.status IN ('submitted', 'approved')
+          ${qtyFilters}
+        GROUP BY pe.project_id, h.level2_title, pe.unit
+      ),
+      labour_aggregation AS (
+        SELECT
+          cl.project_id,
+          cl.contractor_id,
+          c.name AS contractor_name,
+          cl.type_of_work,
+          COALESCE(SUM(cl.carpenter + cl.barbender + cl.mason + cl.skilled_other + cl.carpenter_helper + cl.barbender_helper + cl.semi_skilled_other + cl.mc + cl.fc), 0) AS total_labour
+        FROM contractor_labours cl
+        JOIN contractors c ON cl.contractor_id = c.id
+        WHERE cl.project_id = $1
+          ${labourFilters}
+        GROUP BY cl.project_id, cl.contractor_id, c.name, cl.type_of_work
+      )
+      SELECT
+        COALESCE(lab.contractor_id, c.id, '') AS contractor_id,
+        COALESCE(lab.contractor_name, c.name, 'Unassigned Contractor') AS contractor_name,
+        COALESCE(lab.type_of_work, qty.sub_activity_name) AS type_of_work,
+        COALESCE(qty.unit, '—') AS unit,
+        ROUND(COALESCE(qty.total_qty, 0), 2) AS executed_qty,
+        COALESCE(lab.total_labour, 0) AS total_labour,
+        CASE
+          WHEN COALESCE(lab.total_labour, 0) > 0 THEN ROUND(COALESCE(qty.total_qty, 0) / lab.total_labour, 2)
+          ELSE 0
+        END AS productivity
+      FROM labour_aggregation lab
+      FULL OUTER JOIN qty_aggregation qty ON LOWER(TRIM(qty.sub_activity_name)) = LOWER(TRIM(lab.type_of_work))
+      LEFT JOIN contractors c ON LOWER(TRIM(c.type_of_work)) LIKE '%' || LOWER(TRIM(qty.sub_activity_name)) || '%'
+      WHERE 1=1
+        ${mainFilters}
+      ORDER BY contractor_name ASC, type_of_work ASC
+    `;
+
+    const result = await db.query(queryText, queryParams);
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: formatDbError(error) });
+  }
+});
+
 // Ensure tables added after initial schema setup
 async function ensureExtendedTables() {
   await db.query(`
@@ -1212,6 +2563,7 @@ async function ensureExtendedTables() {
       project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
       sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
       contractor_id VARCHAR(50) REFERENCES contractors(id) ON DELETE CASCADE,
+      type_of_work VARCHAR(255),
       date DATE NOT NULL,
       unit VARCHAR(50),
       carpenter NUMERIC(12, 2) DEFAULT 0,
@@ -1225,7 +2577,7 @@ async function ensureExtendedTables() {
       fc NUMERIC(12, 2) DEFAULT 0,
       created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE (contractor_id, date, sub_project_id)
+      UNIQUE (contractor_id, date, sub_project_id, type_of_work)
     )
   `);
 
@@ -1313,6 +2665,26 @@ async function ensureExtendedTables() {
     ADD CONSTRAINT technical_staff_attendance_staff_date_sub_project_key UNIQUE (technical_staff_id, date, sub_project_id)
   `);
 
+  // Contractor Labours migrations for Contractor + Type of Work mapping
+  await db.query(`
+    ALTER TABLE contractor_labours
+    ADD COLUMN IF NOT EXISTS type_of_work VARCHAR(255)
+  `);
+  await db.query(`
+    ALTER TABLE contractor_labours
+    DROP CONSTRAINT IF EXISTS contractor_labours_contractor_id_date_sub_project_id_key
+  `);
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS contractor_labours_contractor_date_sub_work_key
+    ON contractor_labours (contractor_id, date, sub_project_id, type_of_work)
+    WHERE sub_project_id IS NOT NULL
+  `);
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS contractor_labours_contractor_date_null_sub_work_key
+    ON contractor_labours (contractor_id, date, type_of_work)
+    WHERE sub_project_id IS NULL
+  `);
+
   // Add partial unique index for project-wide WPR (sub_project_id IS NULL)
   // Standard UNIQUE constraint doesn't enforce uniqueness for NULLs in PostgreSQL
   await db.query(`
@@ -1320,6 +2692,32 @@ async function ensureExtendedTables() {
     ON wpr_reports (project_id, week_id)
     WHERE sub_project_id IS NULL
   `);
+
+  // Seed dummy contractors if empty
+  const contractorsCheck = await db.query("SELECT COUNT(*) FROM contractors");
+  if (parseInt(contractorsCheck.rows[0].count) === 0) {
+    console.log("Seeding dummy contractors...");
+    await db.query(`
+      INSERT INTO contractors (id, name, contact_person, phone, email, trade, gst_number, address, remark, vendor_code, type_of_work, vendor_category) VALUES
+      ('c1', 'Apex RCC Structures', 'Rajesh Kumar', '9876543210', 'apex@example.com', 'RCC Work', '27AAAAA0000A1Z1', 'Mumbai', 'Primary RCC contractor', 'V-001', 'RCC Concrete Work', 'Class A'),
+      ('c2', 'Deluxe Masonry & Plastering', 'Vijay Yadav', '9876543211', 'deluxe@example.com', 'Masonry, Plaster Work', '27BBBBB1111B1Z2', 'Thane', 'Masonry contractor', 'V-002', 'Brickwork and internal plastering', 'Class B'),
+      ('c3', 'Star Electricals & Wiring', 'Ramesh Patel', '9876543212', 'star@example.com', 'Electrical Work', '27CCCCC2222C1Z3', 'Navi Mumbai', 'Electrical conduit and wiring contractor', 'V-003', 'Electrical wiring and fixtures', 'Class A'),
+      ('c4', 'Sterling & Wilson Plumbing', 'Amit Patel', '9876543213', 'sterling@example.com', 'Plumbing, Drainage Work', '27DDDDD3333D1Z4', 'Pune', 'Plumbing and MEP contractor', 'V-004', 'Sanitary routing and drainage pipes', 'Class A')
+    `);
+  }
+
+  // Seed dummy technical staff if empty
+  const staffCheck = await db.query("SELECT COUNT(*) FROM technical_staff");
+  if (parseInt(staffCheck.rows[0].count) === 0) {
+    console.log("Seeding dummy technical staff...");
+    await db.query(`
+      INSERT INTO technical_staff (id, project_id, name, designation, remark) VALUES
+      ('s1', 'prj_emerald', 'Suresh Sharma', 'Project Manager', 'Lead project manager'),
+      ('s2', 'prj_emerald', 'Rohan Mehta', 'Site Engineer', 'R.C.C. block supervision'),
+      ('s3', 'prj_emerald', 'Priya Sharma', 'QC Auditor', 'Quality control and structural checks'),
+      ('s4', 'prj_emerald', 'Vijay Yadav', 'Safety Officer', 'Health and safety coordinator')
+    `);
+  }
 }
 
 // Start listening

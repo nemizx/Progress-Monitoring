@@ -114,6 +114,21 @@ export default function Contractors() {
     queryFn: () => base44.entities.Contractor.list('-created_date', 1000),
   });
 
+  const { data: wbsSubActivities = [] } = useQuery({
+    queryKey: ['wbs-sub-activities'],
+    queryFn: () => base44.entities.WBSItem.filter({ level: 2 }),
+  });
+
+  const dynamicTypeOfWorks = useMemo(() => {
+    const set = new Set();
+    wbsSubActivities.forEach((item) => {
+      if (item.title) {
+        set.add(item.title.trim());
+      }
+    });
+    return Array.from(set).sort();
+  }, [wbsSubActivities]);
+
   const sortedContractors = useMemo(
     () => [...contractors].sort((a, b) => new Date(b.created_date || 0) - new Date(a.created_date || 0)),
     [contractors]
@@ -439,11 +454,14 @@ export default function Contractors() {
         const entries = splitTypeOfWork(parsed.type_of_work);
         const canonical = [];
         entries.forEach((entry) => {
-          const matchedHead = BUDGET_HEADS.find((bh) => bh.toLowerCase() === entry.toLowerCase());
+          const matchedHead = dynamicTypeOfWorks.find((bh) => bh.toLowerCase() === entry.toLowerCase());
           if (matchedHead) {
             canonical.push(matchedHead);
           } else {
-            errors.push(`Row ${rowNumber}: "${entry}" is not a valid Type of Work. Valid options: ${BUDGET_HEADS.join(', ')}.`);
+            const validOptionsStr = dynamicTypeOfWorks.length > 0 
+              ? `Valid options: ${dynamicTypeOfWorks.join(', ')}`
+              : 'No Level-2 WBS Sub Activities are configured. Configure WBS first.';
+            errors.push(`Row ${rowNumber}: "${entry}" is not a valid Type of Work. ${validOptionsStr}`);
           }
         });
         parsed.type_of_work = canonical.join(', ');
@@ -644,6 +662,7 @@ export default function Contractors() {
                       <div className="space-y-1.5">
                         <Label className="text-xs font-semibold">Type of work *</Label>
                         <TypeOfWorkSelect
+                          options={dynamicTypeOfWorks}
                           value={row.type_of_work}
                           onChange={(val) => updateRow(row.id, 'type_of_work', val)}
                         />
@@ -716,6 +735,7 @@ export default function Contractors() {
                 <div className="space-y-1.5">
                   <Label className="text-xs font-semibold">Type of work *</Label>
                   <TypeOfWorkSelect
+                    options={dynamicTypeOfWorks}
                     value={editForm.type_of_work}
                     onChange={(val) => setEditForm((prev) => ({ ...prev, type_of_work: val }))}
                   />
@@ -945,9 +965,18 @@ export default function Contractors() {
   );
 }
 
-function TypeOfWorkSelect({ value, onChange, placeholder = 'Select type of work...' }) {
+function TypeOfWorkSelect({ value, onChange, options = [], placeholder = 'Select type of work...' }) {
   const [open, setOpen] = useState(false);
   const selected = Array.isArray(value) ? value : [];
+
+  // Combine dynamic options with already selected values so we don't lose pre-existing custom work types
+  const allOptions = useMemo(() => {
+    const combined = new Set(options);
+    selected.forEach((item) => {
+      if (item && item.trim()) combined.add(item.trim());
+    });
+    return Array.from(combined).sort();
+  }, [options, selected]);
 
   const toggle = (opt) => {
     onChange(selected.includes(opt) ? selected.filter((v) => v !== opt) : [...selected, opt]);
@@ -962,7 +991,7 @@ function TypeOfWorkSelect({ value, onChange, placeholder = 'Select type of work.
           role="combobox"
           className="w-full justify-between font-normal bg-background"
         >
-          <span className="truncate text-left flex-1">
+          <span className="truncate text-left flex-1 text-xs">
             {selected.length ? selected.join(', ') : placeholder}
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50 shrink-0" />
@@ -972,20 +1001,28 @@ function TypeOfWorkSelect({ value, onChange, placeholder = 'Select type of work.
         <Command>
           <CommandInput placeholder="Search type of work..." />
           <CommandList>
-            <CommandEmpty>No match found.</CommandEmpty>
-            <CommandGroup>
-              {BUDGET_HEADS.map((opt) => (
-                <CommandItem
-                  key={opt}
-                  value={opt}
-                  onSelect={() => toggle(opt)}
-                  className="gap-2 text-xs"
-                >
-                  <Checkbox checked={selected.includes(opt)} className="shrink-0" />
-                  <span>{opt}</span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
+            {allOptions.length === 0 ? (
+              <CommandEmpty className="py-6 text-center text-xs text-muted-foreground">
+                No WBS Sub-Activities configured. Please set them up in WBS Management first.
+              </CommandEmpty>
+            ) : (
+              <>
+                <CommandEmpty>No match found.</CommandEmpty>
+                <CommandGroup>
+                  {allOptions.map((opt) => (
+                    <CommandItem
+                      key={opt}
+                      value={opt}
+                      onSelect={() => toggle(opt)}
+                      className="gap-2 text-xs"
+                    >
+                      <Checkbox checked={selected.includes(opt)} className="shrink-0" />
+                      <span>{opt}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            )}
           </CommandList>
         </Command>
       </PopoverContent>

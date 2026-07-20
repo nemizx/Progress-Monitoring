@@ -18,8 +18,7 @@ import ScheduleMonitor from '@/pages/ScheduleMonitor';
 import WBSManagement from '@/pages/WBSManagement';
 import SiteProgress from '@/pages/SiteProgress';
 import Reports from '@/pages/Reports';
-import Analytics from '@/pages/Reports';
-// reuse Reports as placeholder for Analytics for now
+import LabourProductivity from '@/pages/LabourProductivity';
 import BudgetCost from '@/pages/BudgetCost';
 import CostControls from '@/pages/CostControls';
 import ChangeComms from '@/pages/ChangeComms';
@@ -28,6 +27,7 @@ import AdminPanel from '@/pages/AdminPanel';
 import LaborTracking from '@/pages/LaborTracking';
 import TechnicalStaff from '@/pages/TechnicalStaff';
 import Contractors from '@/pages/Contractors';
+import ModuleRouteGuard from '@/components/ModuleRouteGuard';
 
 const PUBLIC_AUTH_PATHS = new Set(['/login', '/register', '/forgot-password', '/reset-password']);
 
@@ -60,22 +60,22 @@ const AuthenticatedApp = () => {
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} />}>
         <Route element={<AppLayout />}>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/projects" element={<Projects />} />
-          <Route path="/scheduler" element={<ScheduleBuilder />} />
-          <Route path="/schedule-monitor" element={<ScheduleMonitor />} />
-          <Route path="/wbs" element={<WBSManagement />} />
+          <Route path="/" element={<ModuleRouteGuard moduleId="dashboard"><Dashboard /></ModuleRouteGuard>} />
+          <Route path="/projects" element={<ModuleRouteGuard moduleId="project_master"><Projects /></ModuleRouteGuard>} />
+          <Route path="/scheduler" element={<ModuleRouteGuard moduleId="wbs_management"><ScheduleBuilder /></ModuleRouteGuard>} />
+          <Route path="/schedule-monitor" element={<ModuleRouteGuard moduleId="schedule_monitor"><ScheduleMonitor /></ModuleRouteGuard>} />
+          <Route path="/wbs" element={<ModuleRouteGuard moduleId="wbs_management"><WBSManagement /></ModuleRouteGuard>} />
           <Route path="/progress" element={<SiteProgress />} />
-          <Route path="/attendance" element={<LaborTracking />} />
-          <Route path="/technical-staff" element={<TechnicalStaff />} />
-          <Route path="/contractors" element={<Contractors />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/analytics" element={<Analytics />} />
-          <Route path="/budget" element={<BudgetCost />} />
-          <Route path="/cost" element={<CostControls />} />
-          <Route path="/collaboration" element={<ChangeComms />} />
+          <Route path="/attendance" element={<ModuleRouteGuard moduleId="labour_details"><LaborTracking /></ModuleRouteGuard>} />
+          <Route path="/technical-staff" element={<ModuleRouteGuard moduleId="technical_staff"><TechnicalStaff /></ModuleRouteGuard>} />
+          <Route path="/contractors" element={<ModuleRouteGuard moduleId="contractor_master"><Contractors /></ModuleRouteGuard>} />
+          <Route path="/reports" element={<ModuleRouteGuard moduleId="dpr_reports"><Reports /></ModuleRouteGuard>} />
+          <Route path="/analytics/labour-productivity" element={<ModuleRouteGuard moduleId="labour_productivity"><LabourProductivity /></ModuleRouteGuard>} />
+          <Route path="/budget" element={<ModuleRouteGuard moduleId="budget"><BudgetCost /></ModuleRouteGuard>} />
+          <Route path="/cost" element={<ModuleRouteGuard moduleId="cost_controls"><CostControls /></ModuleRouteGuard>} />
+          <Route path="/collaboration" element={<ModuleRouteGuard moduleId="collaboration"><ChangeComms /></ModuleRouteGuard>} />
           <Route path="/notifications" element={<Notifications />} />
-          <Route path="/admin" element={<AdminPanel />} />
+          <Route path="/admin" element={<ModuleRouteGuard moduleId="admin_panel"><AdminPanel /></ModuleRouteGuard>} />
         </Route>
       </Route>
       <Route path="*" element={<PageNotFound />} />

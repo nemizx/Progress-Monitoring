@@ -30,8 +30,17 @@ export default function MobileNav() {
         <div className="flex items-center justify-around py-2">
           {mobileItems.map(item => {
             const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path));
+            const isExactActive = location.pathname === item.path;
             return (
-              <Link key={item.path} to={item.path} className={cn("flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg transition-colors", isActive ? "text-accent" : "text-muted-foreground")}>
+              <Link key={item.path} to={item.path}
+                onClick={(e) => {
+                  if (isExactActive) {
+                    e.preventDefault();
+                    window.location.reload();
+                  }
+                }}
+                className={cn("flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg transition-colors", isActive ? "text-accent" : "text-muted-foreground")}
+              >
                 <item.icon className="w-5 h-5" />
                 <span className="text-[10px] font-medium">{item.label}</span>
               </Link>

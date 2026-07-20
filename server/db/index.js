@@ -11,9 +11,14 @@ const { Pool } = pg;
 // Use DATABASE_URL if available, otherwise fallback to individual config
 const isProduction = process.env.NODE_ENV === 'production';
 
-const poolConfig = process.env.DATABASE_URL
+const dbUrl = process.env.DATABASE_URL;
+const isValidDbUrl = dbUrl && 
+  (dbUrl.startsWith('postgres://') || dbUrl.startsWith('postgresql://')) && 
+  !dbUrl.includes('psycopg2');
+
+const poolConfig = isValidDbUrl
   ? {
-      connectionString: process.env.DATABASE_URL,
+      connectionString: dbUrl,
       ssl: isProduction ? { rejectUnauthorized: false } : false,
     }
   : {

@@ -1,9 +1,9 @@
 import ExcelJS from 'exceljs';
 import { normalizeDateKey } from '@/lib/formatters';
 
-const COL_COUNT = 15;
+const COL_COUNT = 16;
 
-const COL_WIDTHS = [8, 22, 18, 12, 12, 10, 10, 12, 12, 14, 14, 16, 18, 16, 18];
+const COL_WIDTHS = [8, 22, 18, 12, 12, 10, 10, 12, 12, 12, 14, 14, 16, 18, 16, 18];
 
 const BORDER_THIN = {
   top: { style: 'thin', color: { argb: 'FF000000' } },
@@ -237,7 +237,7 @@ export async function buildDprExcelWorkbook({
   statusReports,
   specialSiteVisits,
   criticalIssues,
-  nextDaysPlans,
+  nextDaysPlans = [],
   progressEntries,
 }) {
   const workbook = new ExcelJS.Workbook();
@@ -341,7 +341,7 @@ export async function buildDprExcelWorkbook({
   }
 
   const activityHeaderCells = [
-    'Sr. No', 'Activity ID', 'Activity Name', '', '', '', 'Unit', 'Total Qty', 'Today Qty',
+    'Sr. No', 'Activity ID', 'Activity Name', '', '', '', 'Unit', 'Total Qty', 'Balance Qty', 'Today Qty',
     'Cumulative Completed Qty', '% Comp.', "Today's VOWD", 'Cumulative VOWD',
     'QTY Plan for Tomorrow', 'VOWD Plan for Tomorrow',
   ];
@@ -372,6 +372,7 @@ export async function buildDprExcelWorkbook({
           '', '', '',
           item.unit || '',
           num(item.planned_qty),
+          num(item.balance_qty),
           num(item.today_qty) || '',
           num(item.cumulative_qty),
           `${num(item.percent_comp).toFixed(1)}%`,
@@ -386,8 +387,8 @@ export async function buildDprExcelWorkbook({
     });
 
     const subR = b.subtotalRow(
-      ['', '', '', '', '', '', '', '', '', '', label, subTodayVowd, subCumulativeVowd, subTomorrowQty, subTomorrowVowd],
-      [[1, 10]]
+      ['', '', '', '', '', '', '', '', '', '', '', label, subTodayVowd, subCumulativeVowd, subTomorrowQty, subTomorrowVowd],
+      [[1, 11]]
     );
     b.borderTable(tableStart, subR);
     b.spacer(6);
@@ -395,8 +396,8 @@ export async function buildDprExcelWorkbook({
 
   if (dprWorksheetData.length > 0) {
     b.subtotalRow(
-      ['', '', '', '', '', '', 'Project Total', '', '', '', '', totalTodayVowd, totalCumulativeVowd, '', totalTomorrowVowd],
-      [[7, 11]]
+      ['', '', '', '', '', '', 'Project Total', '', '', '', '', '', totalTodayVowd, totalCumulativeVowd, '', totalTomorrowVowd],
+      [[7, 12]]
     );
   }
   b.spacer(10);
@@ -425,15 +426,16 @@ export async function buildDprExcelWorkbook({
 
     b.groupLabel(sub.name);
     const topHdr = b.tableHeader(
-      ['Sr. No', 'Contractor Name', '', '', 'Unit', 'Skilled Labour', '', '', '', 'Semi Skilled Labour', '', '', 'Unskilled Labour', '', 'Total'],
-      [[6, 9], [10, 12], [13, 14]]
+      ['Sr. No', 'Contractor Name', '', 'Type of Work', 'Unit', 'Skilled Labour', '', '', '', 'Semi Skilled Labour', '', '', 'Unskilled Labour', '', 'Total'],
+      [[2, 3], [6, 9], [10, 12], [13, 14]]
     );
     const subHdr = b.tableHeader(
       ['', '', '', '', '', 'Carpentar', 'Barbender', 'Mason', 'Other', 'Carpenter Helper', 'Barbender Helper', 'Other', 'M/C', 'F/C', ''],
       []
     );
     b.mergeRows(topHdr, 1, subHdr, 1);
-    b.mergeRows(topHdr, 2, subHdr, 4);
+    b.mergeRows(topHdr, 2, subHdr, 3);
+    b.mergeRows(topHdr, 4, subHdr, 4);
     b.mergeRows(topHdr, 5, subHdr, 5);
     b.mergeRows(topHdr, 15, subHdr, 15);
 
@@ -442,21 +444,21 @@ export async function buildDprExcelWorkbook({
       subTotalLabour += num(l.total);
       b.dataRow(
         [
-          index + 1, l.contractor_name, '', '', l.unit || '',
+          index + 1, l.contractor_name, '', l.type_of_work || '—', l.unit || '',
           num(l.carpenter), num(l.barbender), num(l.mason), num(l.skilled_other),
           num(l.carpenter_helper), num(l.barbender_helper), num(l.semi_skilled_other), num(l.mc), num(l.fc), num(l.total),
         ],
-        [[2, 4]]
+        [[2, 3]]
       );
     });
     grandTotalLabour += subTotalLabour;
-    const subTotR = b.subtotalRow(['', '', '', '', '', '', '', '', '', '', '', '', sub.name, subTotalLabour, ''], [[1, 12]]);
+    const subTotR = b.subtotalRow(['', '', '', '', '', '', '', '', '', '', '', '', '', sub.name, subTotalLabour], [[1, 13]]);
     b.borderTable(topHdr, subTotR);
     b.spacer(6);
   });
 
   if (grandTotalLabour > 0) {
-    b.subtotalRow(['', '', '', '', '', '', '', '', '', '', '', '', 'Project Total', grandTotalLabour, ''], [[1, 12]]);
+    b.subtotalRow(['', '', '', '', '', '', '', '', '', '', '', '', '', 'Project Total', grandTotalLabour], [[1, 13]]);
   }
   b.spacer(10);
 
@@ -575,18 +577,7 @@ export async function buildDprExcelWorkbook({
   b.borderTable(weatherHdr, weatherR, 1, 7);
   b.spacer(10);
 
-  // --- K. Next Day's Plan ---
-  b.sectionTitle("K. NEXT DAY'S PLAN", 8);
-  const planHdr = b.tableHeader(['Sr. No', 'Description', '', '', '', '', 'Unit', 'Quantity'], [[2, 6]]);
-  if (nextDaysPlans.length === 0) {
-    const er = b.dataRow([1, 'No activity plan logged for tomorrow.', '', '', '', '', '', ''], [[2, 6]]);
-    b.borderTable(planHdr, er, 1, 8);
-  } else {
-    nextDaysPlans.forEach((plan, index) => {
-      b.dataRow([index + 1, plan.description, '', '', '', '', plan.unit || '', plan.quantity ?? ''], [[2, 6]]);
-    });
-    b.borderTable(planHdr, b.row - 1, 1, 8);
-  }
+
 
   // Freeze top rows for scrolling
   sheet.views = [{ state: 'frozen', ySplit: 3, showGridLines: false }];

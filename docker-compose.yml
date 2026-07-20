@@ -3,7 +3,7 @@ services:
     image: postgres:15-alpine
     container_name: planedge_db
     ports:
-      - '5432:5432'
+      - '5433:5432'
     environment:
       POSTGRES_DB: progress_monitoring
       POSTGRES_USER: postgres

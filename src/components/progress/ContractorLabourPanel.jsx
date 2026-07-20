@@ -12,6 +12,7 @@ import { Loader2, Plus, Trash2, Users, ChevronsUpDown, HelpCircle } from 'lucide
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { useToast } from '@/components/ui/use-toast';
 import { useDprPanelRef } from '@/components/progress/useDprPanelRef';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 
 function HeaderTooltip({ text }) {
   return (
@@ -26,6 +27,11 @@ function HeaderTooltip({ text }) {
   );
 }
 
+const splitTypeOfWork = (value) => String(value || '')
+  .split(/[,;]/)
+  .map((v) => v.trim())
+  .filter(Boolean);
+
 export default forwardRef(function ContractorLabourPanel({
   projectId,
   subProjectId,
@@ -38,6 +44,9 @@ export default forwardRef(function ContractorLabourPanel({
   const [searchOpen, setSearchOpen] = useState(false);
   const [deletedIds, setDeletedIds] = useState([]);
   const [loadedKey, setLoadedKey] = useState('');
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [selectedAddContractorId, setSelectedAddContractorId] = useState('');
+  const [selectedTypesOfWork, setSelectedTypesOfWork] = useState([]);
 
   // 1. Fetch Contractors from Contractor module
   const { data: contractors = [], isLoading: contractorsLoading } = useQuery({
@@ -94,6 +103,7 @@ export default forwardRef(function ContractorLabourPanel({
       setRows(dateEntries.map(e => ({
         id: e.id,
         contractor_id: e.contractor_id,
+        type_of_work: e.type_of_work || '',
         unit: 'Nos',
         carpenter: e.carpenter !== null ? String(e.carpenter) : '',
         barbender: e.barbender !== null ? String(e.barbender) : '',
@@ -119,11 +129,8 @@ export default forwardRef(function ContractorLabourPanel({
     return map;
   }, [contractors]);
 
-  // List of contractors not yet added to current sheet
-  const availableContractors = useMemo(() => {
-    const addedIds = new Set(rows.map(r => r.contractor_id));
-    return contractors.filter(c => !addedIds.has(c.id));
-  }, [contractors, rows]);
+  // List of contractors from Contractor Master
+  const availableContractors = contractors;
 
   // Row update handler
   const handleUpdateRow = (rowId, field, value) => {
@@ -131,34 +138,57 @@ export default forwardRef(function ContractorLabourPanel({
     setRows(prev => prev.map(r => r.id === rowId ? { ...r, [field]: value } : r));
   };
 
-  // Add contractor to worksheet
-  const handleAddContractor = (contractorId) => {
-    if (isDateLocked) return;
-    if (rows.some(r => r.contractor_id === contractorId)) {
+  // Create labour rows after validating duplicates
+  const handleCreateLabourRows = () => {
+    if (!selectedAddContractorId) return;
+
+    let addedCount = 0;
+    const duplicateWarnings = [];
+    const updatedRows = [...rows];
+
+    selectedTypesOfWork.forEach((type) => {
+      const exists = updatedRows.some(
+        (r) => r.contractor_id === selectedAddContractorId && r.type_of_work === type
+      );
+
+      if (exists) {
+        duplicateWarnings.push(type);
+      } else {
+        const newRow = {
+          id: `temp_${Date.now()}_${Math.round(Math.random() * 1e5)}`,
+          contractor_id: selectedAddContractorId,
+          type_of_work: type,
+          unit: 'Nos',
+          carpenter: '',
+          barbender: '',
+          mason: '',
+          skilled_other: '',
+          carpenter_helper: '',
+          barbender_helper: '',
+          semi_skilled_other: '',
+          mc: '',
+          fc: '',
+        };
+        updatedRows.push(newRow);
+        addedCount++;
+      }
+    });
+
+    if (duplicateWarnings.length > 0) {
       toast({
-        title: 'Already Added',
-        description: 'This contractor is already in the list.',
+        title: 'Duplicate Entry',
+        description: `Labour entry already exists for this Contractor and Type of Work: ${duplicateWarnings.join(', ')}`,
         variant: 'destructive',
       });
-      return;
     }
 
-    const newRow = {
-      id: `temp_${Date.now()}_${Math.round(Math.random() * 1e5)}`,
-      contractor_id: contractorId,
-      unit: 'Nos',
-      carpenter: '',
-      barbender: '',
-      mason: '',
-      skilled_other: '',
-      carpenter_helper: '',
-      barbender_helper: '',
-      semi_skilled_other: '',
-      mc: '',
-      fc: '',
-    };
-    setRows(prev => [...prev, newRow]);
-    setSearchOpen(false);
+    if (addedCount > 0) {
+      setRows(updatedRows);
+    }
+
+    setIsAddModalOpen(false);
+    setSelectedAddContractorId('');
+    setSelectedTypesOfWork([]);
   };
 
   // Remove contractor row
@@ -197,6 +227,9 @@ export default forwardRef(function ContractorLabourPanel({
     const currentUnit = row.unit || '';
     const dbUnit = dbRow.unit || '';
 
+    const currentTypeOfWork = row.type_of_work || '';
+    const dbTypeOfWork = dbRow.type_of_work || '';
+
     const currentCarpenter = row.carpenter === '' ? 0 : parseFloat(row.carpenter) || 0;
     const dbCarpenter = dbRow.carpenter === null ? 0 : parseFloat(dbRow.carpenter) || 0;
 
@@ -226,6 +259,7 @@ export default forwardRef(function ContractorLabourPanel({
 
     return (
       currentUnit !== dbUnit ||
+      currentTypeOfWork !== dbTypeOfWork ||
       currentCarpenter !== dbCarpenter ||
       currentBarbender !== dbBarbender ||
       currentMason !== dbMason ||
@@ -249,6 +283,7 @@ export default forwardRef(function ContractorLabourPanel({
         project_id: projectId,
         sub_project_id: subProjectId,
         contractor_id: r.contractor_id,
+        type_of_work: r.type_of_work || null,
         date: selectedDate,
         unit: r.unit || null,
         carpenter: r.carpenter === '' ? 0 : parseFloat(r.carpenter) || 0,
@@ -287,6 +322,7 @@ export default forwardRef(function ContractorLabourPanel({
         return {
           sr: i + 1,
           contractor_name: contractorNameMap.get(r.contractor_id) || '—',
+          type_of_work: r.type_of_work || '—',
           unit: r.unit || 'Nos',
           carpenter,
           barbender,
@@ -369,33 +405,18 @@ export default forwardRef(function ContractorLabourPanel({
           </Badge>
         )}
         {rows.length > 0 && !isDateLocked && (
-          <Popover open={searchOpen} onOpenChange={setSearchOpen}>
-            <PopoverTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1.5 h-9 font-semibold text-xs border border-dashed border-slate-400 bg-slate-200 text-slate-800 hover:bg-slate-300 hover:text-slate-900 transition-colors shadow-sm">
-                <Plus className="w-3.5 h-3.5" /> Add Contractor
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[min(90vw,360px)] p-0" align="end">
-              <Command>
-                <CommandInput placeholder="Search contractor..." />
-                <CommandList>
-                  <CommandEmpty>No available contractors.</CommandEmpty>
-                  <CommandGroup>
-                    {availableContractors.map((c) => (
-                      <CommandItem
-                        key={c.id}
-                        value={c.name}
-                        onSelect={() => handleAddContractor(c.id)}
-                        className="text-xs"
-                      >
-                        {c.name}
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setSelectedAddContractorId('');
+              setSelectedTypesOfWork([]);
+              setIsAddModalOpen(true);
+            }}
+            className="gap-1.5 h-9 font-semibold text-xs border border-dashed border-slate-400 bg-slate-200 text-slate-800 hover:bg-slate-300 hover:text-slate-900 transition-colors shadow-sm"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add Contractor
+          </Button>
         )}
       </div>
 
@@ -414,44 +435,21 @@ export default forwardRef(function ContractorLabourPanel({
           <div className="space-y-1">
             <h3 className="text-sm font-bold font-heading uppercase tracking-wide text-muted-foreground">Select Contractor</h3>
             <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-              Choose a contractor company from the search selector to begin filling in the daily labor counts.
+              Choose a contractor company and select the types of work to begin filling in the daily labor counts.
             </p>
           </div>
-          <div className="flex flex-col gap-1 text-left max-w-xs mx-auto">
-            <Label className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-1">Company Name</Label>
-            <Popover open={searchOpen} onOpenChange={setSearchOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  className="w-full justify-between font-normal text-xs h-9 px-3"
-                  disabled={isDateLocked}
-                >
-                  Select contractor...
-                  <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50 shrink-0" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[320px] p-0" align="center">
-                <Command>
-                  <CommandInput placeholder="Search company name..." />
-                  <CommandList>
-                    <CommandEmpty>No contractors found.</CommandEmpty>
-                    <CommandGroup>
-                      {availableContractors.map((c) => (
-                        <CommandItem
-                          key={c.id}
-                          value={c.name}
-                          onSelect={() => handleAddContractor(c.id)}
-                          className="text-xs"
-                        >
-                          {c.name}
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
+          <div className="max-w-xs mx-auto">
+            <Button
+              className="w-full"
+              disabled={isDateLocked}
+              onClick={() => {
+                setSelectedAddContractorId('');
+                setSelectedTypesOfWork([]);
+                setIsAddModalOpen(true);
+              }}
+            >
+              Add Contractor & Type of Work
+            </Button>
           </div>
         </div>
       ) : (
@@ -463,6 +461,7 @@ export default forwardRef(function ContractorLabourPanel({
                 <tr className="border-b bg-muted/60 text-muted-foreground text-center">
                   <th rowSpan={2} className="p-3 text-left font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 w-16">Sr. No</th>
                   <th rowSpan={2} className="p-3 text-left font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 min-w-[240px]">Contractor Name</th>
+                  <th rowSpan={2} className="p-3 text-left font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 min-w-[180px]">Type of Work</th>
                   <th rowSpan={2} className="p-3 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 w-24">Unit</th>
                   <th colSpan={4} className="p-2 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 bg-muted/20">
                     Skilled Labour
@@ -524,6 +523,11 @@ export default forwardRef(function ContractorLabourPanel({
                       {/* Contractor Name */}
                       <td className="p-3 text-xs font-bold text-foreground border-r border-slate-200">
                         {companyName}
+                      </td>
+
+                      {/* Type of Work */}
+                      <td className="p-3 text-xs text-foreground border-r border-slate-200">
+                        {row.type_of_work || '—'}
                       </td>
 
                       {/* Unit */}
@@ -664,7 +668,7 @@ export default forwardRef(function ContractorLabourPanel({
 
                 {/* Sub-Project Summary Row */}
                 <tr className="border-t border-b bg-slate-50/50 font-bold border-slate-200">
-                  <td colSpan={12} className="p-3 text-right text-xs uppercase tracking-wider text-slate-700">
+                  <td colSpan={13} className="p-3 text-right text-xs uppercase tracking-wider text-slate-700">
                     {selectedSubProject?.name || 'Sub-Project Total'}
                   </td>
                   <td className="p-3 text-right font-mono text-xs font-bold text-slate-800">
@@ -675,7 +679,7 @@ export default forwardRef(function ContractorLabourPanel({
 
                 {/* Project Summary Row */}
                 <tr className="bg-slate-100/50 font-extrabold border-b border-slate-200">
-                  <td colSpan={12} className="p-3 text-right text-xs uppercase tracking-wider text-slate-800">
+                  <td colSpan={13} className="p-3 text-right text-xs uppercase tracking-wider text-slate-800">
                     Project Total
                   </td>
                   <td className="p-3 text-right font-mono text-xs font-extrabold text-primary">
@@ -688,6 +692,148 @@ export default forwardRef(function ContractorLabourPanel({
           </div>
         </Card>
       )}
+
+      {/* Enhanced Add Contractor & Type of Work Dialog */}
+      <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
+        <DialogContent className="max-w-md font-sans">
+          <DialogHeader>
+            <DialogTitle>Add Contractor & Type of Work</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {/* Step 1: Select Contractor */}
+            <div className="space-y-2">
+              <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Contractor</Label>
+              <select
+                value={selectedAddContractorId}
+                onChange={(e) => {
+                  const cid = e.target.value;
+                  setSelectedAddContractorId(cid);
+                  
+                  if (!cid) {
+                    setSelectedTypesOfWork([]);
+                    return;
+                  }
+                  
+                  const contractor = contractors.find(c => c.id === cid);
+                  const types = contractor ? splitTypeOfWork(contractor.type_of_work) : [];
+                  
+                  if (types.length === 1) {
+                    const singleType = types[0];
+                    const exists = rows.some(
+                      (r) => r.contractor_id === cid && r.type_of_work === singleType
+                    );
+                    
+                    if (exists) {
+                      toast({
+                        title: 'Duplicate Entry',
+                        description: `Labour entry already exists for this Contractor and Type of Work: ${singleType}`,
+                        variant: 'destructive',
+                      });
+                    } else {
+                      const newRow = {
+                        id: `temp_${Date.now()}_${Math.round(Math.random() * 1e5)}`,
+                        contractor_id: cid,
+                        type_of_work: singleType,
+                        unit: 'Nos',
+                        carpenter: '',
+                        barbender: '',
+                        mason: '',
+                        skilled_other: '',
+                        carpenter_helper: '',
+                        barbender_helper: '',
+                        semi_skilled_other: '',
+                        mc: '',
+                        fc: '',
+                      };
+                      setRows(prev => [...prev, newRow]);
+                      toast({
+                        title: 'Success',
+                        description: 'Labour row added successfully.',
+                      });
+                    }
+                    
+                    setIsAddModalOpen(false);
+                    setSelectedAddContractorId('');
+                    setSelectedTypesOfWork([]);
+                  } else {
+                    setSelectedTypesOfWork([]);
+                  }
+                }}
+                className="w-full border border-slate-200 rounded-lg p-2.5 text-xs bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="">Select contractor...</option>
+                {contractors.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Step 2 & 3: Select Types of Work */}
+            {selectedAddContractorId && (() => {
+              const contractor = contractors.find(c => c.id === selectedAddContractorId);
+              const types = contractor ? splitTypeOfWork(contractor.type_of_work) : [];
+              if (types.length === 1) return null; // Auto-created already, hide checkboxes
+              if (types.length === 0) {
+                return (
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Available Types of Work</Label>
+                    <p className="text-xs text-muted-foreground italic">No types of work defined for this contractor in the master.</p>
+                  </div>
+                );
+              }
+              return (
+                <div className="space-y-2">
+                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Available Types of Work</Label>
+                  <div className="space-y-2 max-h-48 overflow-y-auto border border-slate-100 rounded-lg p-3 bg-muted/10">
+                    {types.map((type) => (
+                      <label key={type} className="flex items-center space-x-2 text-xs font-medium cursor-pointer text-slate-700 hover:text-slate-900">
+                        <input
+                          type="checkbox"
+                          checked={selectedTypesOfWork.includes(type)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedTypesOfWork(prev => [...prev, type]);
+                            } else {
+                              setSelectedTypesOfWork(prev => prev.filter(t => t !== type));
+                            }
+                          }}
+                          className="rounded border-slate-300 text-primary focus:ring-primary h-4 w-4 cursor-pointer"
+                        />
+                        <span>{type}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsAddModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            {(() => {
+              const contractor = contractors.find(c => c.id === selectedAddContractorId);
+              const types = contractor ? splitTypeOfWork(contractor.type_of_work) : [];
+              if (types.length <= 1) return null; // Hide Create button for single or no work type
+              return (
+                <Button
+                  size="sm"
+                  onClick={handleCreateLabourRows}
+                  disabled={selectedTypesOfWork.length === 0}
+                >
+                  Create Labour Rows
+                </Button>
+              );
+            })()}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
     </TooltipProvider>
   );

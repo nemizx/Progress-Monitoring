@@ -16,6 +16,7 @@ import ProgressRing from '@/components/shared/ProgressRing';
 import { formatCurrencyINR, formatDateIndian } from '@/lib/formatters';
 import { useToast } from '@/components/ui/use-toast';
 import { PROJECT_TYPES, getProjectTypeLabel } from '@/lib/projectTypes';
+import { COMPANIES } from '@/lib/companies';
 
 export default function ProjectDetail({ project, onBack }) {
   const [showAddMilestone, setShowAddMilestone] = useState(false);
@@ -54,6 +55,11 @@ export default function ProjectDetail({ project, onBack }) {
   const { data: subProjects = [], isLoading: loadingSubProjects } = useQuery({
     queryKey: ['subprojects', project.id],
     queryFn: () => base44.entities.SubProject.filter({ project_id: project.id }, '-created_date', 100),
+  });
+
+  const { data: allProjects = [] } = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => base44.entities.Project.list('-created_date', 100),
   });
 
   const { data: users = [] } = useQuery({
@@ -116,12 +122,48 @@ export default function ProjectDetail({ project, onBack }) {
   };
 
   const handleSaveProjectDetails = async () => {
-    let nextForm = projectForm;
+    if (!projectForm.project_code || !projectForm.project_code.trim()) {
+      toast({ title: 'Validation failed', description: 'Project Code is required.', variant: 'destructive' });
+      return;
+    }
+
+    if (!projectForm.name || !projectForm.name.trim()) {
+      toast({ title: 'Validation failed', description: 'Project Name is required.', variant: 'destructive' });
+      return;
+    }
+
+    if (!projectForm.client || !projectForm.client.trim()) {
+      toast({ title: 'Validation failed', description: 'Name of Company is required.', variant: 'destructive' });
+      return;
+    }
+
+    if (!projectForm.project_type || !projectForm.project_type.trim()) {
+      toast({ title: 'Validation failed', description: 'Project Type is required.', variant: 'destructive' });
+      return;
+    }
+
+    // Uniqueness validation on project code (case-insensitive)
+    const isDuplicate = allProjects.some(
+      p => p.project_code?.trim().toLowerCase() === projectForm.project_code.trim().toLowerCase() && p.id !== project.id
+    );
+    if (isDuplicate) {
+      toast({ title: 'Validation failed', description: 'Project Code must be unique. A project with this code already exists.', variant: 'destructive' });
+      return;
+    }
+
+    let nextForm = {
+      ...projectForm,
+      project_code: projectForm.project_code.trim(),
+      name: projectForm.name.trim(),
+      client: projectForm.client.trim(),
+      project_type: projectForm.project_type,
+    };
+
     if (elevationPhotoFile) {
       setUploadingElevationPhoto(true);
       try {
         const res = await base44.integrations.Core.UploadFile({ file: elevationPhotoFile });
-        nextForm = { ...projectForm, elevation_photo_url: res.file_url || '' };
+        nextForm = { ...nextForm, elevation_photo_url: res.file_url || '' };
         setProjectForm(nextForm);
         setElevationPhotoFile(null);
         setElevationPhotoPreview('');
@@ -495,33 +537,19 @@ export default function ProjectDetail({ project, onBack }) {
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <Label>Project Name *</Label>
-                      <Input 
-                        value={projectForm.name || ''} 
-                        onChange={e => setProjectForm({ ...projectForm, name: e.target.value })} 
-                      />
+                      <Label>Name of Company *</Label>
+                      <Select
+                        value={projectForm.client || undefined}
+                        onValueChange={v => setProjectForm({ ...projectForm, client: v })}
+                      >
+                        <SelectTrigger className="bg-white border-slate-200"><SelectValue placeholder="Select company" /></SelectTrigger>
+                        <SelectContent>
+                          {COMPANIES.map(c => (
+                            <SelectItem key={c} value={c}>{c}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
-                    <div>
-                      <Label>Project Code</Label>
-                      <Input
-                        value={projectForm.project_code || ''}
-                        onChange={e => setProjectForm({ ...projectForm, project_code: e.target.value })}
-                        placeholder="e.g. PRJ-001"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label>Client Name</Label>
-                      <Input 
-                        value={projectForm.client || ''} 
-                        onChange={e => setProjectForm({ ...projectForm, client: e.target.value })} 
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <Label>Project Type *</Label>
                       <Select
@@ -536,6 +564,33 @@ export default function ProjectDetail({ project, onBack }) {
                         </SelectContent>
                       </Select>
                     </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label>Project Name *</Label>
+                      <Input 
+                        value={projectForm.name || ''} 
+                        onChange={e => setProjectForm({ ...projectForm, name: e.target.value })} 
+                      />
+                    </div>
+                    <div>
+                      <Label>Project Code *</Label>
+                      <Input
+                        value={projectForm.project_code || ''}
+                        onChange={e => setProjectForm({ ...projectForm, project_code: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label>Location</Label>
+                      <Input 
+                        value={projectForm.location || ''} 
+                        onChange={e => setProjectForm({ ...projectForm, location: e.target.value })} 
+                      />
+                    </div>
                     <div>
                       <Label>Project Manager</Label>
                       <Input 
@@ -543,14 +598,6 @@ export default function ProjectDetail({ project, onBack }) {
                         onChange={e => setProjectForm({ ...projectForm, project_manager: e.target.value })} 
                       />
                     </div>
-                  </div>
-
-                  <div>
-                    <Label>Location</Label>
-                    <Input 
-                      value={projectForm.location || ''} 
-                      onChange={e => setProjectForm({ ...projectForm, location: e.target.value })} 
-                    />
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

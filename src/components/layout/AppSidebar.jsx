@@ -1,15 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import {
-  LayoutDashboard, CalendarClock, Network,
-  ClipboardList, BarChart3, MessageSquare, Bell,
-  Shield, ChevronLeft, ChevronRight, LogOut, Users, Building2
-} from 'lucide-react';
+import { Bell, ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
 import { base44 } from '@/api/base44Client';
 import { cn } from '@/lib/utils';
 import ThemeToggle from './ThemeToggle';
 import { useAuth } from '@/lib/AuthContext';
 import planedgeLogo from '@/assets/logo-planedge.png';
+import { navigationItems } from '@/lib/navigation';
 
 export default function AppSidebar() {
   const { user } = useAuth();
@@ -18,36 +15,60 @@ export default function AppSidebar() {
   const navigate = useNavigate();
   const [hovered, setHovered] = useState(false);
 
-  const dynamicNavStructure = React.useMemo(() => {
-    return [
-      { type: 'link', path: '/', label: 'Dashboard', icon: LayoutDashboard },
-      { type: 'group', label: 'Progress', icon: ClipboardList, children: [
-        { path: '/progress', tab: 'dpr', label: 'DPR' },
-        { path: '/progress', tab: 'wpr', label: 'WPR' },
-        { path: '/progress', tab: 'mpr', label: 'MPR' },
-      ]},
-      { type: 'link', path: '/technical-staff', label: 'Technical Staff', icon: Users },
-      { type: 'link', path: '/contractors', label: 'Contractors', icon: Building2 },
-      { type: 'group', label: 'Schedule', icon: CalendarClock, children: [
-        { path: '/scheduler', label: 'Schedule Builder' },
-        { path: '/schedule-monitor', label: 'Schedule Monitor' },
-      ]},
-      { type: 'group', label: 'Analytics', icon: BarChart3, children: [
-        { path: '/reports', label: 'Reports' },
-        { path: '/analytics', label: 'Analytics' },
-      ]},
-      { type: 'group', label: 'WBS', icon: Network, children: [
-        { path: '/wbs', label: 'WBS' },
-        { path: '/budget', label: 'Budget' },
-        { path: '/cost', label: 'Cost Controls' },
-      ]},
-      { type: 'group', label: 'Admin', icon: Shield, children: [
-        { path: '/admin', label: 'Administration' },
-        { path: '/projects', label: 'Projects' },
-      ]},
-      { type: 'link', path: '/collaboration', label: 'Collaboration', icon: MessageSquare },
-    ];
+  useEffect(() => {
+    if (isAdmin) {
+      // Synchronize navigation structure with modules table on backend
+      const flatModules = [];
+      navigationItems.forEach((item, index) => {
+        flatModules.push({
+          id: item.id,
+          parent_module_id: null,
+          module_name: item.label,
+          route: item.path || null,
+          display_order: index
+        });
+        if (item.children) {
+          item.children.forEach((child, childIndex) => {
+            flatModules.push({
+              id: child.id,
+              parent_module_id: item.id,
+              module_name: child.label,
+              route: child.tab ? `${child.path}?tab=${child.tab}` : child.path,
+              display_order: childIndex
+            });
+          });
+        }
+      });
+      base44.modules.sync(flatModules).catch(err => {
+        console.error('Failed to sync modules:', err);
+      });
+    }
   }, [isAdmin]);
+
+  const filteredNavStructure = React.useMemo(() => {
+    if (isAdmin) return navigationItems;
+    if (!user || !user.permissions) return [];
+
+    return navigationItems.map(item => {
+      if (item.type === 'link') {
+        const canView = user.permissions[item.id]?.can_view;
+        return canView ? item : null;
+      }
+      if (item.type === 'group') {
+        const visibleChildren = item.children.filter(child => {
+          return user.permissions[child.id]?.can_view;
+        });
+        if (visibleChildren.length > 0) {
+          return {
+            ...item,
+            children: visibleChildren
+          };
+        }
+        return null;
+      }
+      return null;
+    }).filter(Boolean);
+  }, [user, isAdmin]);
 
   const [openGroups, setOpenGroups] = useState(() => ({
     'Progress': true,
@@ -86,12 +107,19 @@ export default function AppSidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
-        {dynamicNavStructure.map((node) => {
+        {filteredNavStructure.map((node) => {
           if (node.type === 'link') {
             const isActive = location.pathname === node.path || (node.path !== '/' && location.pathname.startsWith(node.path));
+            const isExactActive = location.pathname === node.path;
             const Icon = node.icon;
             return (
               <Link key={node.path} to={node.path} title={!hovered ? node.label : undefined}
+                onClick={(e) => {
+                  if (isExactActive) {
+                    e.preventDefault();
+                    window.location.reload();
+                  }
+                }}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150",
                   isActive ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm" : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
@@ -123,10 +151,19 @@ export default function AppSidebar() {
                     const isChildActive = child.tab
                       ? location.pathname === child.path && progressTab === child.tab
                       : location.pathname === child.path || location.pathname.startsWith(`${child.path}/`);
+                    const isExactChildActive = child.tab
+                      ? location.pathname === child.path && progressTab === child.tab
+                      : location.pathname === child.path;
                     return (
                       <Link
                         key={childTo}
                         to={childTo}
+                        onClick={(e) => {
+                          if (isExactChildActive) {
+                            e.preventDefault();
+                            window.location.reload();
+                          }
+                        }}
                         className={cn(
                           "flex items-center gap-2 px-2 py-1 rounded-md text-sm transition-colors",
                           isChildActive

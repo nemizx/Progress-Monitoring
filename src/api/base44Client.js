@@ -71,7 +71,13 @@ const entityNames = [
   'CriticalIssue',
   'NextDaysPlan',
   'WprReport',
-  'MprReport'
+  'MprReport',
+  'Role',
+  'Module',
+  'RolePermission',
+  'Dpr',
+  'WbsHeader',
+  'WbsApprovalHistory'
 ];
 
 const entities = {};
@@ -355,6 +361,23 @@ export const base44 = {
       return handleResponse(res);
     },
   },
+  analytics: {
+    getLabourProductivity: async ({ project_id, sub_project_id, from_date, to_date, contractor_id, type_of_work }) => {
+      const params = [];
+      if (project_id) params.push(`project_id=${encodeURIComponent(project_id)}`);
+      if (sub_project_id) params.push(`sub_project_id=${encodeURIComponent(sub_project_id)}`);
+      if (from_date) params.push(`from_date=${encodeURIComponent(from_date)}`);
+      if (to_date) params.push(`to_date=${encodeURIComponent(to_date)}`);
+      if (contractor_id) params.push(`contractor_id=${encodeURIComponent(contractor_id)}`);
+      if (type_of_work) params.push(`type_of_work=${encodeURIComponent(type_of_work)}`);
+      
+      let url = `/api/analytics/labour-productivity`;
+      if (params.length > 0) url += `?${params.join('&')}`;
+
+      const res = await apiFetch(url, { headers: getHeaders() });
+      return handleResponse(res);
+    }
+  },
   integrations: {
     Core: {
       InvokeLLM: invokeLLM,
@@ -364,6 +387,120 @@ export const base44 = {
       generate: generateScheduleClient,
       finalize: finalizeScheduleClient,
       getModelParameters: getModelParametersClient
+    }
+  },
+  rolePermissions: {
+    saveBatch: async (permissions) => {
+      const res = await apiFetch('/api/role-permissions/batch', {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(permissions)
+      });
+      return handleResponse(res);
+    }
+  },
+  modules: {
+    sync: async (clientModules) => {
+      const res = await apiFetch('/api/auth/sync-modules', {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(clientModules)
+      });
+      return handleResponse(res);
+    }
+  },
+  dprs: {
+    submit: async (projectId, subProjectId, date) => {
+      const res = await apiFetch('/api/dprs/submit', {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ project_id: projectId, sub_project_id: subProjectId, date })
+      });
+      return handleResponse(res);
+    },
+    approve: async (projectId, subProjectId, date) => {
+      const res = await apiFetch('/api/dprs/approve', {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ project_id: projectId, sub_project_id: subProjectId, date })
+      });
+      return handleResponse(res);
+    },
+    reopen: async (projectId, subProjectId, date, reason) => {
+      const res = await apiFetch('/api/dprs/reopen', {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ project_id: projectId, sub_project_id: subProjectId, date, reason })
+      });
+      return handleResponse(res);
+    },
+    getStats: async () => {
+      const res = await apiFetch('/api/dprs/stats', {
+        headers: getHeaders()
+      });
+      return handleResponse(res);
+    }
+  },
+  projects: {
+    saveWithSubprojects: async (projectId, projectData, subProjectChanges) => {
+      const res = await apiFetch('/api/projects/save-with-subprojects', {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ id: projectId, projectId, projectData, subProjectChanges })
+      });
+      return handleResponse(res);
+    }
+  },
+  wbs: {
+    upload: async (projectId, subProjectId, uploadType, rows) => {
+      const res = await apiFetch('/api/wbs/upload', {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ project_id: projectId, sub_project_id: subProjectId, upload_type: uploadType, rows })
+      });
+      return handleResponse(res);
+    },
+    getHeader: async (projectId, subProjectId) => {
+      const res = await apiFetch(`/api/wbs/header?project_id=${projectId}&sub_project_id=${subProjectId}`, {
+        headers: getHeaders()
+      });
+      return handleResponse(res);
+    },
+    submitApproval: async (projectId, subProjectId, codes, reviewers) => {
+      const res = await apiFetch('/api/wbs/submit-approval', {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ project_id: projectId, sub_project_id: subProjectId, codes, reviewers })
+      });
+      return handleResponse(res);
+    },
+    review: async (projectId, subProjectId, status, comment, codes) => {
+      const res = await apiFetch('/api/wbs/review', {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({
+          project_id: projectId,
+          sub_project_id: subProjectId,
+          status,
+          comment,
+          codes: Array.isArray(codes) ? codes : [codes]
+        })
+      });
+      return handleResponse(res);
+    },
+    reopen: async (projectId, subProjectId) => {
+      const res = await apiFetch('/api/wbs/reopen', {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ project_id: projectId, sub_project_id: subProjectId })
+      });
+      return handleResponse(res);
+    },
+    getHistory: async (projectId, subProjectId) => {
+      const res = await apiFetch(`/api/wbs/approval-history?project_id=${projectId}&sub_project_id=${subProjectId}`, {
+        headers: getHeaders()
+      });
+      return handleResponse(res);
     }
   }
 };

@@ -1,18 +1,29 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { base44 } from '@/api/base44Client';
+import { useAuth } from '@/lib/AuthContext';
 
 /**
  * Shared Project → Sub Project selection state for feature pages.
  */
 export function useProjectSubProject({ fetchWbs = false } = {}) {
+  const { user } = useAuth();
   const [projectId, setProjectId] = useState('');
   const [subProjectId, setSubProjectId] = useState('');
 
-  const { data: projects = [] } = useQuery({
+  const { data: rawProjects = [] } = useQuery({
     queryKey: ['projects'],
     queryFn: () => base44.entities.Project.list('-created_date', 100),
   });
+
+  const projects = useMemo(() => {
+    if (!user || user.role === 'admin') return rawProjects;
+    return rawProjects.filter(p => {
+      const matchCompany = !user.company_access || p.client === user.company_access;
+      const matchProject = !user.project_access_id || p.id === user.project_access_id;
+      return matchCompany && matchProject;
+    });
+  }, [rawProjects, user]);
 
   const { data: subProjects = [], isLoading: loadingSubProjects } = useQuery({
     queryKey: ['subprojects', projectId],

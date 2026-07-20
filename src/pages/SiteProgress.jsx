@@ -11,7 +11,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
-import { ClipboardList, CheckCircle2, Clock, AlertTriangle, Calendar, Save, X, ChevronsUpDown, HelpCircle } from 'lucide-react';
+import { ClipboardList, CheckCircle2, Clock, AlertTriangle, Calendar, Save, X, ChevronsUpDown, HelpCircle, Printer } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import EmptyState from '@/components/shared/EmptyState';
 import { cn } from '@/lib/utils';
@@ -28,13 +28,13 @@ import DaysReportPanel from '@/components/progress/DaysReportPanel';
 import StatusReportPanel from '@/components/progress/StatusReportPanel';
 import SpecialSiteVisitsPanel from '@/components/progress/SpecialSiteVisitsPanel';
 import CriticalIssuesPanel from '@/components/progress/CriticalIssuesPanel';
-import NextDaysPlansPanel from '@/components/progress/NextDaysPlansPanel';
 import DprReviewDialog from '@/components/progress/DprReviewDialog';
 import WprSheetPanel from '@/components/progress/WprSheetPanel';
 import MprSheetPanel from '@/components/progress/MprSheetPanel';
 import { filterBudgetBySubProject, filterProgressBySubProject, filterWbsBySubProject } from '@/lib/subProjectScope';
 import { buildWprWeeksList, getDefaultWprWeekId } from '@/lib/wprWeeks';
 import { getMprMonthsList, getDefaultMprMonthId } from '@/lib/mprMonths';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 
 const weatherIcons = { clear: '☀️', cloudy: '⛅', rainy: '🌧️', stormy: '⛈️', hot: '🌡️' };
 const normalizeActivityKey = (value) => String(value || '').trim().toLowerCase();
@@ -141,7 +141,6 @@ export default function SiteProgress() {
   const statusReportRef = useRef(null);
   const siteVisitsRef = useRef(null);
   const criticalIssuesRef = useRef(null);
-  const nextDaysPlanRef = useRef(null);
 
   const dprPanelRefs = useMemo(
     () => [
@@ -153,7 +152,6 @@ export default function SiteProgress() {
       statusReportRef,
       siteVisitsRef,
       criticalIssuesRef,
-      nextDaysPlanRef,
     ],
     []
   );
@@ -459,21 +457,410 @@ export default function SiteProgress() {
       ),
     [entries, selectedReportDate]
   );
-  const isScopeLockedLocally = scopeKey ? Boolean(lockedScopes[scopeKey]) : false;
-  const isSelectedDateLocked =
-    dprEntriesForSelectedDate.length > 0 || (isScopeLockedLocally && !entriesLoading);
+  const { data: dprRecord, isLoading: dprLoading } = useQuery({
+    queryKey: ['dprHeader', projectId, subProjectId, selectedReportDate],
+    queryFn: async () => {
+      if (!projectId || !subProjectId || !selectedReportDate) return null;
+      const res = await base44.entities.Dpr.filter({
+        project_id: projectId,
+        sub_project_id: subProjectId,
+        date: selectedReportDate
+      });
+      return res[0] || null;
+    },
+    enabled: !!projectId && !!subProjectId && !!selectedReportDate
+  });
 
-  useEffect(() => {
-    if (!scopeKey || entriesLoading) return;
-    if (lockedScopes[scopeKey] && dprEntriesForSelectedDate.length === 0) {
-      setLockedScopes((prev) => {
-        if (!prev[scopeKey]) return prev;
-        const next = { ...prev };
-        delete next[scopeKey];
-        return next;
+  const { data: wbsHeader } = useQuery({
+    queryKey: ['wbs-header', projectId, subProjectId],
+    queryFn: () => base44.wbs.getHeader(projectId, subProjectId),
+    enabled: !!projectId && !!subProjectId,
+  });
+
+  const isWbsUnapproved = useMemo(() => {
+    if (!projectId || !subProjectId) return false;
+    if (!wbsHeader) return true;
+    if (wbsHeader.status === 'draft') return true;
+    return false;
+  }, [wbsHeader, projectId, subProjectId]);
+
+  const isSelectedDateLocked = useMemo(() => {
+    if (isWbsUnapproved) return true;
+    if (user?.role === 'admin') return false;
+    const status = dprRecord?.status || 'draft';
+    return status === 'pending' || status === 'approved';
+  }, [dprRecord, user, isWbsUnapproved]);
+
+  const isAssignedPM = user?.role === 'project_manager' && projects.some(p => p.id === projectId);
+  const canApprove = isAssignedPM || user?.role === 'admin';
+
+  const [showReopenDialog, setShowReopenDialog] = useState(false);
+  const [reopenReason, setReopenReason] = useState('');
+
+  const handleSubmitForApproval = async () => {
+    setIsSubmitting(true);
+    try {
+      // First save all current changes automatically
+      await handleConfirmSubmitDpr();
+
+      // Now submit
+      await base44.dprs.submit(projectId, subProjectId, selectedReportDate);
+      await queryClient.invalidateQueries({ queryKey: ['dprHeader', projectId, subProjectId, selectedReportDate] });
+      
+      toast({
+        title: 'DPR Submitted',
+        description: 'DPR has been locked and submitted for Project Manager approval.',
+      });
+    } catch (e) {
+      toast({
+        title: 'Submission Failed',
+        description: e.message || 'Unable to submit DPR.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleApproveDpr = async () => {
+    setIsSubmitting(true);
+    try {
+      await base44.dprs.approve(projectId, subProjectId, selectedReportDate);
+      await queryClient.invalidateQueries({ queryKey: ['dprHeader', projectId, subProjectId, selectedReportDate] });
+
+      toast({
+        title: 'DPR Approved',
+        description: 'DPR has been successfully approved and locked.',
+      });
+    } catch (e) {
+      toast({
+        title: 'Approval Failed',
+        description: e.message || 'Unable to approve DPR.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleReopenDpr = async () => {
+    if (!reopenReason.trim()) {
+      toast({
+        title: 'Reason Required',
+        description: 'Please enter a reason for reopening the DPR.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await base44.dprs.reopen(projectId, subProjectId, selectedReportDate, reopenReason);
+      await queryClient.invalidateQueries({ queryKey: ['dprHeader', projectId, subProjectId, selectedReportDate] });
+      setShowReopenDialog(false);
+      setReopenReason('');
+
+      toast({
+        title: 'DPR Reopened',
+        description: 'DPR has been returned to Draft status and unlocked.',
+      });
+    } catch (e) {
+      toast({
+        title: 'Reopen Failed',
+        description: e.message || 'Unable to reopen DPR.',
+        variant: 'destructive',
       });
     }
-  }, [scopeKey, entriesLoading, dprEntriesForSelectedDate.length, lockedScopes]);
+  };
+
+  const handlePrintDpr = async () => {
+    toast({ title: 'Exporting Excel...', description: 'Fetching and assembling progress datasets.' });
+    try {
+      const [
+        dprDateProgressEntries,
+        dprHistoricalProgress,
+        budgetItems,
+        projectWbsItems,
+        contractors,
+        technicalStaff,
+        contractorLabours,
+        staffAttendance,
+        materialStatusEntries,
+        materialStatusHistory,
+        machineryDetailsEntries,
+        machineryDetailsHistory,
+        daysReports,
+        statusReports,
+        specialSiteVisits,
+        criticalIssues
+      ] = await Promise.all([
+        base44.entities.ProgressEntry.filter({ project_id: projectId, date: selectedReportDate }),
+        base44.entities.ProgressEntry.filter({ project_id: projectId }),
+        base44.entities.BudgetItem.filter({ project_id: projectId }),
+        base44.entities.WBSItem.filter({ project_id: projectId }),
+        base44.entities.Contractor.list('-created_date', 100),
+        base44.entities.TechnicalStaff.list('-created_date', 100),
+        base44.entities.ContractorLabour.filter({ project_id: projectId, date: selectedReportDate }),
+        base44.entities.TechnicalStaffAttendance.filter({ project_id: projectId, date: selectedReportDate }),
+        base44.entities.MaterialStatus.filter({ project_id: projectId, date: selectedReportDate }),
+        base44.entities.MaterialStatus.filter({ project_id: projectId }),
+        base44.entities.MachineryDetail.filter({ project_id: projectId, date: selectedReportDate }),
+        base44.entities.MachineryDetail.filter({ project_id: projectId }),
+        base44.entities.DaysReport.filter({ project_id: projectId, date: selectedReportDate }),
+        base44.entities.StatusReport.filter({ project_id: projectId, date: selectedReportDate }),
+        base44.entities.SpecialSiteVisit.filter({ project_id: projectId, date: selectedReportDate }),
+        base44.entities.CriticalIssue.filter({ project_id: projectId, date: selectedReportDate })
+      ]);
+
+      const wbsActivityItems = projectWbsItems.filter(item => {
+        const levelNumber = Number(item.level);
+        const levelText = String(item.level || '').trim().toLowerCase();
+        const hasActivityId = Boolean(item.activity_id_key);
+        return levelNumber === 3 || levelText === 'l3' || hasActivityId;
+      });
+
+      const budgetMapByWbs = new Map();
+      budgetItems.forEach(b => { if (b.wbs_item_id) budgetMapByWbs.set(b.wbs_item_id, b); });
+
+      const budgetMapById = new Map();
+      budgetItems.forEach(b => { budgetMapById.set(b.id, b); });
+
+      const wbsMapById = new Map();
+      projectWbsItems.forEach(w => { wbsMapById.set(w.id, w); });
+
+      const wbsRowMap = new Map();
+      const wbsRows = wbsActivityItems.map(activity => {
+        const linkedBudget = budgetMapByWbs.get(activity.id);
+        const plannedQty = Number(linkedBudget?.quantity ?? activity.planned_quantity ?? 0) || 0;
+        const rate = Number(linkedBudget?.cost_per_unit ?? activity.lumsum_rate ?? 0) || 0;
+
+        const todayEntry = dprDateProgressEntries.find(e =>
+          e.wbs_item_id === activity.id ||
+          (e.budget_item_id && e.budget_item_id === linkedBudget?.id)
+        );
+        const todayQty = todayEntry ? Number(todayEntry.quantity_done || 0) : 0;
+
+        const matchedHistory = dprHistoricalProgress.filter(e =>
+          (e.wbs_item_id === activity.id || (e.budget_item_id && e.budget_item_id === linkedBudget?.id)) &&
+          normalizeDateKey(e.date) <= selectedReportDate
+        );
+        const cumulativeQty = matchedHistory.reduce((sum, e) => sum + Number(e.quantity_done || 0), 0);
+
+        if (linkedBudget?.id) wbsRowMap.set(linkedBudget.id, true);
+
+        const percentComp = plannedQty > 0 ? Math.min((cumulativeQty / plannedQty) * 100, 100) : 0;
+        const tomorrowQty = 0;
+
+        return {
+          ...activity,
+          _row_type: 'wbs',
+          sub_project_id: activity.sub_project_id || null,
+          activity_code: activity.activity_code || activity.activity_id || activity.code || '',
+          title: linkedBudget?.title || activity.title || activity.name || 'Activity',
+          unit: linkedBudget?.unit || activity.unit || '',
+          planned_qty: plannedQty,
+          rate,
+          today_qty: todayQty,
+          cumulative_qty: cumulativeQty,
+          balance_qty: plannedQty - (cumulativeQty - todayQty),
+          percent_comp: percentComp,
+          today_vowd: todayQty * rate,
+          cumulative_vowd: cumulativeQty * rate,
+          tomorrow_qty: tomorrowQty,
+          tomorrow_vowd: tomorrowQty * rate,
+        };
+      }).filter((item) => item.today_qty > 0 || item.tomorrow_qty > 0);
+
+      const orphanEntries = dprDateProgressEntries.filter(e => {
+        if (e.wbs_item_id && projectWbsItems.some(w => w.id === e.wbs_item_id)) return false;
+        if (e.budget_item_id && wbsRowMap.has(e.budget_item_id)) return false;
+        return true;
+      });
+
+      const orphanRows = orphanEntries.map((entry, idx) => {
+        const budget = entry.budget_item_id ? budgetMapById.get(entry.budget_item_id) : null;
+        const wbs = entry.wbs_item_id ? wbsMapById.get(entry.wbs_item_id) : null;
+        const rate = Number(budget?.cost_per_unit || 0);
+        const todayQty = Number(entry.quantity_done || 0);
+
+        const cumHistory = dprHistoricalProgress.filter(e2 =>
+          ((entry.budget_item_id && e2.budget_item_id === entry.budget_item_id) ||
+          (entry.wbs_item_id && e2.wbs_item_id === entry.wbs_item_id)) &&
+          normalizeDateKey(e2.date) <= selectedReportDate
+        );
+        const cumulativeQty = cumHistory.reduce((s, e2) => s + Number(e2.quantity_done || 0), 0);
+        const plannedQty = Number(budget?.quantity || 0);
+        const percentComp = plannedQty > 0 ? Math.min((cumulativeQty / plannedQty) * 100, 100) : 0;
+
+        return {
+          id: entry.id + '_orphan',
+          _row_type: 'orphan',
+          sub_project_id: null,
+          activity_code: budget?.code || wbs?.activity_code || wbs?.code || '',
+          title: budget?.title || wbs?.title || wbs?.name || entry.work_done_description || `Entry #${idx + 1}`,
+          unit: entry.unit || budget?.unit || '',
+          planned_qty: plannedQty,
+          rate,
+          today_qty: todayQty,
+          cumulative_qty: cumulativeQty,
+          balance_qty: plannedQty - (cumulativeQty - todayQty),
+          percent_comp: percentComp,
+          today_vowd: todayQty * rate,
+          cumulative_vowd: cumulativeQty * rate,
+          tomorrow_qty: 0,
+          tomorrow_vowd: 0,
+        };
+      });
+
+      const dprWorksheetData = [...wbsRows, ...orphanRows];
+
+      const contractorLabourData = contractorLabours.map(row => {
+        const matchedContractor = contractors.find(c => c.id === row.contractor_id);
+        const carpenter = Number(row.carpenter) || 0;
+        const barbender = Number(row.barbender) || 0;
+        const mason = Number(row.mason) || 0;
+        const skilledOther = Number(row.skilled_other) || 0;
+        const carpenterHelper = Number(row.carpenter_helper) || 0;
+        const barbenderHelper = Number(row.barbender_helper) || 0;
+        const semiSkilledOther = Number(row.semi_skilled_other) || 0;
+        const mc = Number(row.mc) || 0;
+        const fc = Number(row.fc) || 0;
+        const total = carpenter + barbender + mason + skilledOther + carpenterHelper + barbenderHelper + semiSkilledOther + mc + fc;
+
+        return {
+          ...row,
+          contractor_name: matchedContractor?.name || 'Unknown Contractor',
+          unit: row.unit || 'Nos',
+          carpenter,
+          barbender,
+          mason,
+          skilled_other: skilledOther,
+          carpenter_helper: carpenterHelper,
+          barbender_helper: barbenderHelper,
+          semi_skilled_other: semiSkilledOther,
+          mc,
+          fc,
+          total
+        };
+      });
+
+      const materialStatusData = materialStatusEntries.map(row => {
+        const desc = row.description?.trim() || '';
+        const todayRecVal = Number(row.today_rec) || 0;
+        const todayConsumedVal = Number(row.today_consumed) || 0;
+        const rateVal = Number(row.rate) || 0;
+
+        let tillDateRec = 0;
+        let tillDateConsumed = 0;
+
+        if (desc) {
+          const previousEntries = materialStatusHistory.filter(e => 
+            e.description.toLowerCase() === desc.toLowerCase() &&
+            normalizeDateKey(e.date) < selectedReportDate &&
+            e.id !== row.id
+          );
+          tillDateRec = previousEntries.reduce((sum, e) => sum + (Number(e.today_rec) || 0), 0);
+          tillDateConsumed = previousEntries.reduce((sum, e) => sum + (Number(e.today_consumed) || 0), 0);
+        }
+
+        const totalReceived = tillDateRec + todayRecVal;
+        const totalConsumed = tillDateConsumed + todayConsumedVal;
+        const balance = totalReceived - totalConsumed;
+
+        return {
+          ...row,
+          till_date_rec: tillDateRec,
+          today_rec_val: todayRecVal,
+          total_received: totalReceived,
+          till_date_consumed: tillDateConsumed,
+          today_consumed_val: todayConsumedVal,
+          total_consumed: totalConsumed,
+          balance,
+          rate_val: rateVal,
+          till_date_amount: tillDateConsumed * rateVal,
+          today_amount: todayConsumedVal * rateVal,
+          cumulative_amount: totalConsumed * rateVal,
+        };
+      });
+
+      const machineryDetailsData = machineryDetailsEntries.map(row => {
+        const name = row.machinery_name?.trim() || '';
+        const nosVal = Number(row.nos) || 0;
+        const todaysHoursVal = Number(row.todays_hours) || 0;
+        const rateVal = Number(row.rate) || 0;
+
+        let tillDateHours = 0;
+        let tillDateAmount = 0;
+
+        if (name) {
+          const previousEntries = machineryDetailsHistory.filter(e => 
+            e.machinery_name.toLowerCase() === name.toLowerCase() &&
+            normalizeDateKey(e.date) < selectedReportDate &&
+            e.id !== row.id
+          );
+          tillDateHours = previousEntries.reduce((sum, e) => sum + (Number(e.todays_hours) || 0), 0);
+          tillDateAmount = previousEntries.reduce((sum, e) => sum + (Number(e.todays_amount) || 0), 0);
+        }
+
+        const todaysAmount = nosVal * todaysHoursVal * rateVal;
+        const cumulativeHours = tillDateHours + todaysHoursVal;
+        const cumulativeAmount = tillDateAmount + todaysAmount;
+
+        return {
+          ...row,
+          till_date_hours: tillDateHours,
+          cumulative_hours: cumulativeHours,
+          rate_val: rateVal,
+          till_date_amount: tillDateAmount,
+          todays_amount: todaysAmount,
+          cumulative_amount: cumulativeAmount
+        };
+      });
+
+      const formatAttendanceStatus = (status) => {
+        if (status === 'present') return 'Present';
+        if (status === 'absent') return 'Absent';
+        return 'Not marked';
+      };
+
+      const technicalStaffData = staffAttendance
+        .filter((row) => row.status === 'present' || row.status === 'absent')
+        .map((row, i) => {
+          const matchedStaff = technicalStaff.find(s => s.id === row.technical_staff_id);
+          return {
+            ...row,
+            srNo: i + 1,
+            name: matchedStaff?.name || 'Unknown Employee',
+            designation: matchedStaff?.designation || 'Staff',
+            remarks: formatAttendanceStatus(row.status),
+          };
+        });
+
+      const { buildDprExcelWorkbook, downloadDprExcelWorkbook } = await import('@/lib/dprExcelExport');
+      const { workbook, filename } = await buildDprExcelWorkbook({
+        selectedProject,
+        selectedDprDate: selectedReportDate,
+        subProjects,
+        dprWorksheetData,
+        technicalStaffData,
+        contractorLabourData,
+        materialStatusData,
+        machineryDetailsData,
+        daysReports,
+        statusReports,
+        specialSiteVisits,
+        criticalIssues,
+        nextDaysPlans: [],
+        progressEntries: dprHistoricalProgress,
+      });
+
+      await downloadDprExcelWorkbook(workbook, filename);
+      toast({ title: 'DPR Excel Exported', description: `Saved as ${filename}` });
+    } catch (err) {
+      console.error(err);
+      toast({ title: 'Export Failed', description: err.message || 'Could not export DPR Excel.', variant: 'destructive' });
+    }
+  };
 
   useEffect(() => {
     setActivityPickerOpen(false);
@@ -523,10 +910,17 @@ export default function SiteProgress() {
     setWeatherManuallyEdited(false);
     setWeatherInfo('');
     setWeatherError('');
-    setWeatherCondition('');
-  }, [projectId, subProjectId, selectedReportDate]);
 
-  useEffect(() => {
+    // Check if we have database entries first to prefill
+    const firstEntry = dprEntriesForSelectedDate.find(e => e.weather_condition);
+    if (firstEntry?.weather_condition) {
+      setWeatherCondition(firstEntry.weather_condition);
+      setWeatherInfo('Loaded from saved entries');
+      return;
+    }
+
+    setWeatherCondition('');
+
     if (weatherManuallyEdited) return;
 
     if (!isReady || !selectedProject?.location) {
@@ -599,7 +993,7 @@ export default function SiteProgress() {
     return () => {
       cancelled = true;
     };
-  }, [isReady, selectedProject?.location, selectedReportDate, weatherManuallyEdited]);
+  }, [isReady, selectedProject?.location, selectedReportDate, weatherManuallyEdited, dprEntriesForSelectedDate]);
 
   // Sync state for tabular DPR sheet fields
   useEffect(() => {
@@ -850,7 +1244,7 @@ export default function SiteProgress() {
     queryClient.invalidateQueries({ queryKey: ['wbs'] });
 
     if (savedCount > 0 && scopeKey) {
-      setLockedScopes((prev) => ({ ...prev, [scopeKey]: true }));
+      queryClient.invalidateQueries({ queryKey: ['dprHeader', projectId, subProjectId, selectedReportDate] });
     }
 
     setLoadedScope(null);
@@ -908,10 +1302,10 @@ export default function SiteProgress() {
     const selectedDateEntry = dprEntriesForSelectedDate.find((entry) => rowMatchesEntry(row, entry));
     
     const currentQty = state.qty_executed === '' ? 0 : parseFloat(state.qty_executed) || 0;
-    const dbQty = selectedDateEntry ? selectedDateEntry.quantity_done || 0 : 0;
+    const dbQty = selectedDateEntry ? parseFloat(selectedDateEntry.quantity_done) || 0 : 0;
     
     const currentLabor = state.labor_count === '' ? 0 : parseFloat(state.labor_count) || 0;
-    const dbLabor = selectedDateEntry ? selectedDateEntry.labor_count || 0 : 0;
+    const dbLabor = selectedDateEntry ? parseFloat(selectedDateEntry.labor_count) || 0 : 0;
     
     const currentDesc = state.description || '';
     const dbDesc = selectedDateEntry ? selectedDateEntry.work_done_description || '' : '';
@@ -960,8 +1354,7 @@ export default function SiteProgress() {
             <div className="font-semibold">{r.title}</div>
           </div>
         ),
-      },
-      { key: 'unit', label: 'Unit', tooltip: 'Unit of measurement for this activity (e.g. Cum, Sqm, MT, Rmt).' },
+      },      { key: 'unit', label: 'Unit', tooltip: 'Unit of measurement for this activity (e.g. Cum, Sqm, MT, Rmt).' },
       { key: 'total_qty', label: 'Total Qty', tooltip: 'Total planned quantity of work for this activity, from the WBS/budget.' },
       { key: 'today_qty', label: 'Today Qty', tooltip: 'Quantity of work executed on this activity today.' },
       { key: 'balance_qty', label: 'Balance Qty', tooltip: 'Remaining quantity of work still to be completed.' },
@@ -1083,7 +1476,7 @@ export default function SiteProgress() {
                 Weather {!weatherCondition && <span className="text-destructive">*</span>}
               </span>
               <Select
-                value={weatherCondition || undefined}
+                value={weatherCondition || ''}
                 onValueChange={(value) => {
                   weatherManualRef.current = true;
                   setWeatherManuallyEdited(true);
@@ -1202,7 +1595,6 @@ export default function SiteProgress() {
                       { id: 'status-report', label: 'Status Report' },
                       { id: 'special-site-visits', label: 'Special Site Visits' },
                       { id: 'critical-issues', label: 'Critical Issues' },
-                      { id: 'next-days-plan', label: "Next Day's Plan" },
                     ].map((tab) => {
                       const isActive = sheetSubTab === tab.id;
                       return (
@@ -1231,34 +1623,174 @@ export default function SiteProgress() {
                         ⚠️ {modifiedCount} unsaved
                       </Badge>
                     )}
+                    
+                    {/* Update DPR Button */}
                     <Button
                       onClick={handleSaveDpr}
                       disabled={isSubmitting || !isReady || isSelectedDateLocked}
-                      className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold h-10 px-5 text-sm shadow-sm transition-colors"
+                      className={cn(
+                        "gap-2 font-semibold h-10 px-4 text-sm shadow-sm transition-colors text-white",
+                        isSelectedDateLocked 
+                          ? "bg-slate-300 cursor-not-allowed hover:bg-slate-300"
+                          : "bg-slate-800 hover:bg-slate-900"
+                      )}
                     >
                       <Save className="w-4 h-4" />
-                      {isSelectedDateLocked ? 'Date Locked' : 'Save DPR'}
+                      {dprEntriesForSelectedDate.length > 0 ? 'Update DPR' : 'Save DPR'}
                     </Button>
+
+                    {/* Submit for Approval Button */}
+                    {dprEntriesForSelectedDate.length > 0 && (!dprRecord || dprRecord.status === 'draft') && (
+                      <Button
+                        onClick={handleSubmitForApproval}
+                        disabled={isSubmitting || !isReady}
+                        className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold h-10 px-4 text-sm shadow-sm transition-colors"
+                      >
+                        Submit for Approval
+                      </Button>
+                    )}
+
+                    {/* Approve DPR Button */}
+                    {dprRecord?.status === 'pending' && canApprove && (
+                      <Button
+                        onClick={handleApproveDpr}
+                        disabled={isSubmitting || !isReady}
+                        className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold h-10 px-4 text-sm shadow-sm transition-colors"
+                      >
+                        Approve DPR
+                      </Button>
+                    )}
+
+                    {/* Reopen DPR Button */}
+                    {dprRecord?.status === 'approved' && user?.role === 'admin' && (
+                      <Button
+                        onClick={() => setShowReopenDialog(true)}
+                        disabled={isSubmitting || !isReady}
+                        className="gap-2 bg-rose-600 hover:bg-rose-700 text-white font-semibold h-10 px-4 text-sm shadow-sm transition-colors"
+                      >
+                        Move to Draft / Reopen
+                      </Button>
+                    )}
+
+                    {/* Print / Download Button */}
+                    {dprEntriesForSelectedDate.length > 0 && (
+                      <Button
+                        onClick={handlePrintDpr}
+                        variant="outline"
+                        className="gap-2 border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold h-10 px-4 text-sm shadow-sm transition-colors"
+                      >
+                        <Printer className="w-4 h-4" />
+                        Print
+                      </Button>
+                    )}
                   </div>
                 </div>
               </div>
 
-              {isSelectedDateLocked && (
-                <div className="flex items-center gap-3 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>
-                    DPR is already submitted for <span className="font-semibold">{selectedReportDate}</span>.
-                    {dprEntriesForSelectedDate.length > 0 && (
-                      <span className="ml-1 text-emerald-700 font-semibold">
-                        {dprEntriesForSelectedDate.length} progress entr{dprEntriesForSelectedDate.length === 1 ? 'y' : 'ies'} recorded.
+              {isReady && (
+                <div className="space-y-4">
+                  {/* WBS Unapproved Warning Banner */}
+                  {isWbsUnapproved && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center gap-3 text-amber-800 font-sans shadow-sm">
+                      <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                      <div>
+                        <p className="text-sm font-semibold">DPR Locked — WBS Structure Awaiting Approval</p>
+                        <p className="text-xs text-amber-700/90 mt-0.5">
+                          The WBS structure is currently in <strong>{wbsHeader?.status?.replace('_', ' ') || 'Draft'}</strong> status. Downstream daily progress recording (DPR) is disabled and locked until selected Department Heads approve the WBS.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {wbsHeader?.status === 'partially_approved' && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-center gap-3 text-blue-800 font-sans shadow-sm">
+                      <AlertTriangle className="w-5 h-5 text-blue-600 shrink-0" />
+                      <div>
+                        <p className="text-sm font-semibold">Granular DPR Lock Active — WBS Partially Approved</p>
+                        <p className="text-xs text-blue-700/90 mt-0.5">
+                          Only approved categories are unlocked for daily progress recording (DPR). Unapproved categories remain locked.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Draft Banner */}
+                  {(!dprRecord || dprRecord.status === 'draft') && (
+                    <div className="flex items-center gap-2 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 shadow-sm">
+                      <Clock className="w-4 h-4 text-slate-500 shrink-0" />
+                      <span>
+                        <strong className="text-slate-800">Status: Draft</strong>
                       </span>
-                    )}
-                    {' '}This date is locked and cannot be changed.
-                  </span>
+                    </div>
+                  )}
+
+                  {/* Pending Approval Banner */}
+                  {dprRecord?.status === 'pending' && (
+                    <div className="flex items-center gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 shadow-sm">
+                      <Clock className="w-4 h-4 text-amber-500 shrink-0" />
+                      <span>
+                        <strong className="text-amber-900">Status: Pending Approval</strong> — Waiting for Project Manager approval.
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Approved Banner */}
+                  {dprRecord?.status === 'approved' && (
+                    <div className="flex items-center gap-2 text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 shadow-sm">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>
+                        <strong className="text-emerald-900">Status: Approved</strong> — Approved by {dprRecord.approved_by?.split('@')[0]} on {(() => {
+                          if (!dprRecord.approved_date) return '';
+                          const d = new Date(dprRecord.approved_date);
+                          if (isNaN(d.getTime())) return dprRecord.approved_date;
+                          return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+                        })()}.
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 
-              <div className={sheetSubTab === 'contractor' ? '' : 'hidden'}>
+              {/* Reopen Confirmation Dialog */}
+              <Dialog open={showReopenDialog} onOpenChange={setShowReopenDialog}>
+                <DialogContent className="sm:max-w-[425px]">
+                  <DialogHeader>
+                    <DialogTitle>Reopen DPR</DialogTitle>
+                    <DialogDescription>
+                      This will change the DPR status from Approved back to Draft, allowing the Site Engineer to make modifications.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-4 py-4">
+                    <div className="flex flex-col gap-2">
+                      <label htmlFor="reason" className="text-xs font-semibold text-slate-500">
+                        Reason for Reopening *
+                      </label>
+                      <textarea
+                        id="reason"
+                        value={reopenReason}
+                        onChange={(e) => setReopenReason(e.target.value)}
+                        placeholder="Please explain why you are unlocking this report..."
+                        className="min-h-[80px] p-2.5 rounded-lg border border-slate-200 text-sm focus:border-slate-400 focus:ring-0 resize-none"
+                      />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => { setShowReopenDialog(false); setReopenReason(''); }}>
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={handleReopenDpr}
+                      disabled={isSubmitting || !reopenReason.trim()}
+                      className="bg-rose-600 hover:bg-rose-700 text-white"
+                    >
+                      Reopen DPR
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              <div id="dpr-active-panel-container" className="space-y-4">
+                <div className={sheetSubTab === 'contractor' ? '' : 'hidden'}>
                 <ContractorLabourPanel
                   ref={contractorRef}
                   projectId={projectId}
@@ -1324,15 +1856,6 @@ export default function SiteProgress() {
               <div className={sheetSubTab === 'critical-issues' ? '' : 'hidden'}>
                 <CriticalIssuesPanel
                   ref={criticalIssuesRef}
-                  projectId={projectId}
-                  subProjectId={subProjectId}
-                  selectedDate={selectedReportDate}
-                  isDateLocked={isSelectedDateLocked}
-                />
-              </div>
-              <div className={sheetSubTab === 'next-days-plan' ? '' : 'hidden'}>
-                <NextDaysPlansPanel
-                  ref={nextDaysPlanRef}
                   projectId={projectId}
                   subProjectId={subProjectId}
                   selectedDate={selectedReportDate}
@@ -1635,6 +2158,21 @@ export default function SiteProgress() {
                           const cumulativeVowd = cumulativeQty * rate;
                           const tomorrowVowd = tomorrowQty * rate;
 
+                          // Granular row-level locking by WBS status
+                          const wbsId = bItem.wbs_item_id;
+                          let l1Status = 'approved';
+                          if (wbsId) {
+                            const wbsItem = allWbsItems.find(w => w.id === wbsId);
+                            if (wbsItem) {
+                              const rootCode = String(wbsItem.code).split('.')[0];
+                              const l1Category = wbsHeader?.l1_items?.find(l => l.code === rootCode);
+                              if (l1Category) {
+                                l1Status = l1Category.status || 'draft';
+                              }
+                            }
+                          }
+                          const isRowLockedByWBS = l1Status !== 'approved';
+
                           const isComplete = percentComp >= 100;
                           const isCarryForwardRow = bItem.is_l1_carry_forward;
                           const rowModified = isRowModified(rowId);
@@ -1664,7 +2202,14 @@ export default function SiteProgress() {
                                 {bItem.code && (
                                   <p className="font-mono text-[10px] text-muted-foreground leading-tight">{bItem.code}</p>
                                 )}
-                                <p className="font-semibold text-foreground leading-snug mt-0.5">{bItem.title}</p>
+                                <p className="font-semibold text-foreground leading-snug mt-0.5">
+                                  {bItem.title}
+                                  {isRowLockedByWBS && (
+                                    <span className="ml-2 text-[9px] bg-amber-50 text-amber-700 font-bold px-1 py-0.5 rounded border border-amber-200" title={`Locked by WBS category status: ${l1Status}`}>
+                                      🔒 Locked
+                                    </span>
+                                  )}
+                                </p>
                                 {isCarryForwardRow && (
                                   <p className="text-[10px] mt-1 inline-flex items-center rounded border border-sky-200 bg-sky-100 px-1.5 py-0.5 text-sky-700">
                                     L1 carried (consumed {Number(bItem.carry_forward_consumed_qty || 0).toLocaleString()})
@@ -1688,8 +2233,8 @@ export default function SiteProgress() {
                                   placeholder="0"
                                   value={state.qty_executed ?? ''}
                                   onChange={(e) => handleQtyExecutedChange(rowId, e.target.value)}
-                                  disabled={isSelectedDateLocked || maxTodayQty <= 0}
-                                  title={maxTodayQty > 0 ? `Max today: ${maxTodayQty}` : 'No balance quantity remaining'}
+                                  disabled={isSelectedDateLocked || isRowLockedByWBS || maxTodayQty <= 0}
+                                  title={isRowLockedByWBS ? `Locked by WBS status: ${l1Status}` : (maxTodayQty > 0 ? `Max today: ${maxTodayQty}` : 'No balance quantity remaining')}
                                 />
                               </td>
 
@@ -1723,7 +2268,7 @@ export default function SiteProgress() {
                                   placeholder="0"
                                   value={state.tomorrow_qty ?? ''}
                                   onChange={(e) => handleInputChange(rowId, 'tomorrow_qty', e.target.value)}
-                                  disabled={isSelectedDateLocked}
+                                  disabled={isSelectedDateLocked || isRowLockedByWBS}
                                 />
                               </td>
 
@@ -1737,7 +2282,7 @@ export default function SiteProgress() {
                                   size="icon"
                                   onClick={() => handleRemoveActivity(rowId)}
                                   className="w-7 h-7 hover:bg-destructive/10 text-destructive/80 hover:text-destructive"
-                                  disabled={isSelectedDateLocked}
+                                  disabled={isSelectedDateLocked || isRowLockedByWBS}
                                 >
                                   <X className="w-3.5 h-3.5" />
                                 </Button>
@@ -1752,6 +2297,7 @@ export default function SiteProgress() {
               )}
               </>
               )}
+            </div>
             </>
           ) : (
             <div className="bg-card border rounded-xl p-8 text-center text-muted-foreground font-sans">

@@ -1,4 +1,8 @@
 -- Drop existing tables if they exist to allow clean reset
+DROP TABLE IF EXISTS role_permissions CASCADE;
+DROP TABLE IF EXISTS modules CASCADE;
+DROP TABLE IF EXISTS roles CASCADE;
+DROP TABLE IF EXISTS dprs CASCADE;
 DROP TABLE IF EXISTS next_days_plans CASCADE;
 DROP TABLE IF EXISTS critical_issues CASCADE;
 DROP TABLE IF EXISTS special_site_visits CASCADE;
@@ -32,6 +36,10 @@ CREATE TABLE users (
     email VARCHAR(255) UNIQUE NOT NULL,
     role VARCHAR(50) NOT NULL DEFAULT 'user',
     password_hash VARCHAR(255) NOT NULL,
+    company_access VARCHAR(255),
+    project_access_id TEXT,
+    mobile VARCHAR(50),
+    status VARCHAR(20) DEFAULT 'active',
     created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by_id VARCHAR(50)
@@ -93,7 +101,16 @@ CREATE TABLE wbs_items (
     level_label VARCHAR(50),
     progress NUMERIC(5, 2) DEFAULT 0,
     budget_amount NUMERIC(15, 2) DEFAULT 0,
-    order_index INTEGER DEFAULT 0
+    order_index INTEGER DEFAULT 0,
+    status VARCHAR(50) DEFAULT 'draft',
+    assigned_reviewer VARCHAR(255),
+    return_reason TEXT,
+    returned_by VARCHAR(255),
+    approved_by VARCHAR(255),
+    approved_date TIMESTAMP,
+    approval_status VARCHAR(50),
+    remarks TEXT,
+    returned_date TIMESTAMP
 );
 
 -- 3b. Standard WBS Template (global format for all projects)
@@ -601,4 +618,161 @@ CREATE TABLE next_days_plans (
     quantity NUMERIC(12, 2),
     created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 28. Roles Table
+CREATE TABLE roles (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL
+);
+
+-- Seed default roles
+INSERT INTO roles (id, name) VALUES
+('admin', 'Admin'),
+('planning_team', 'Planning Team'),
+('project_manager', 'Project Manager'),
+('site_engineer', 'Site Engineer'),
+('department_head', 'Department Head'),
+('management', 'Management');
+
+-- 29. Modules Table
+CREATE TABLE modules (
+    id VARCHAR(50) PRIMARY KEY,
+    parent_module_id VARCHAR(50) REFERENCES modules(id) ON DELETE CASCADE,
+    module_name VARCHAR(255) NOT NULL,
+    route VARCHAR(255),
+    display_order INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+-- Seed initial modules and submodules
+INSERT INTO modules (id, parent_module_id, module_name, route, display_order) VALUES
+('dashboard', NULL, 'Dashboard', '/', 1),
+('dpr_group', NULL, 'Progress', NULL, 2),
+('technical_staff', NULL, 'Technical Staff', '/technical-staff', 3),
+('contractor_master', NULL, 'Contractors', '/contractors', 4),
+('schedule_group', NULL, 'Schedule', NULL, 5),
+('analytics_group', NULL, 'Analytics', NULL, 6),
+('wbs_group', NULL, 'WBS', NULL, 7),
+('admin_group', NULL, 'Admin', NULL, 8),
+('collaboration', NULL, 'Collaboration', '/collaboration', 9),
+
+-- Progress children
+('dpr_entry', 'dpr_group', 'DPR', '/progress?tab=dpr', 1),
+('wpr_entry', 'dpr_group', 'WPR', '/progress?tab=wpr', 2),
+('mpr_entry', 'dpr_group', 'MPR', '/progress?tab=mpr', 3),
+
+-- Schedule children
+('wbs_management', 'schedule_group', 'Schedule Builder', '/scheduler', 1),
+('schedule_monitor', 'schedule_group', 'Schedule Monitor', '/schedule-monitor', 2),
+
+-- Analytics children
+('dpr_reports', 'analytics_group', 'Reports', '/reports', 1),
+('labour_productivity', 'analytics_group', 'Labour Productivity', '/analytics/labour-productivity', 2),
+
+-- WBS children
+('budget', 'wbs_group', 'Budget', '/budget', 2),
+('cost_controls', 'wbs_group', 'Cost Controls', '/cost', 3),
+
+-- Admin children
+('admin_panel', 'admin_group', 'Administration', '/admin', 1),
+('project_master', 'admin_group', 'Projects', '/projects', 2);
+
+-- 30. Role Permissions Table
+CREATE TABLE role_permissions (
+    role_id VARCHAR(50) REFERENCES roles(id) ON DELETE CASCADE,
+    module_id VARCHAR(50) REFERENCES modules(id) ON DELETE CASCADE,
+    can_view BOOLEAN DEFAULT FALSE,
+    can_add BOOLEAN DEFAULT FALSE,
+    can_edit BOOLEAN DEFAULT FALSE,
+    can_delete BOOLEAN DEFAULT FALSE,
+    can_approve BOOLEAN DEFAULT FALSE,
+    can_export BOOLEAN DEFAULT FALSE,
+    can_print BOOLEAN DEFAULT FALSE,
+    can_admin BOOLEAN DEFAULT FALSE,
+    PRIMARY KEY (role_id, module_id)
+);
+
+-- Seed initial default permissions
+-- Let's give Admin full permissions
+INSERT INTO role_permissions (role_id, module_id, can_view, can_add, can_edit, can_delete, can_approve, can_export, can_print, can_admin)
+SELECT r.id, m.id, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE
+FROM roles r, modules m
+WHERE r.id = 'admin';
+
+-- Seed default permissions for other roles
+-- Everyone gets Dashboard view access
+INSERT INTO role_permissions (role_id, module_id, can_view)
+SELECT r.id, 'dashboard', TRUE
+FROM roles r
+WHERE r.id <> 'admin';
+
+-- Other non-admin role view access permissions
+-- Planning Team
+INSERT INTO role_permissions (role_id, module_id, can_view) VALUES
+('planning_team', 'projects_mgt', TRUE),
+('planning_team', 'project_master', TRUE),
+('planning_team', 'sub_project', TRUE),
+('planning_team', 'wbs_group', TRUE),
+('planning_team', 'wbs_management', TRUE),
+('planning_team', 'wbs_import', TRUE),
+('planning_team', 'collaboration', TRUE);
+
+-- Project Manager
+INSERT INTO role_permissions (role_id, module_id, can_view) VALUES
+('project_manager', 'projects_mgt', TRUE),
+('project_manager', 'project_master', TRUE),
+('project_manager', 'sub_project', TRUE),
+('project_manager', 'wbs_group', TRUE),
+('project_manager', 'budget', TRUE),
+('project_manager', 'cost_controls', TRUE),
+('project_manager', 'dpr_group', TRUE),
+('project_manager', 'dpr_entry', TRUE),
+('project_manager', 'analytics_group', TRUE),
+('project_manager', 'labour_productivity', TRUE),
+('project_manager', 'dpr_reports', TRUE),
+('project_manager', 'collaboration', TRUE);
+
+-- Site Engineer
+INSERT INTO role_permissions (role_id, module_id, can_view) VALUES
+('site_engineer', 'dpr_group', TRUE),
+('site_engineer', 'dpr_entry', TRUE),
+('site_engineer', 'labour_details', TRUE),
+('site_engineer', 'technical_staff', TRUE),
+('site_engineer', 'material_status', TRUE),
+('site_engineer', 'machinery_details', TRUE),
+('site_engineer', 'day_report', TRUE),
+('site_engineer', 'collaboration', TRUE);
+
+-- Department Head
+INSERT INTO role_permissions (role_id, module_id, can_view) VALUES
+('department_head', 'analytics_group', TRUE),
+('department_head', 'dpr_reports', TRUE),
+('department_head', 'collaboration', TRUE);
+
+-- Management
+INSERT INTO role_permissions (role_id, module_id, can_view) VALUES
+('management', 'analytics_group', TRUE),
+('management', 'dpr_reports', TRUE),
+('management', 'collaboration', TRUE);
+
+-- DPR Header Table
+CREATE TABLE dprs (
+    id VARCHAR(50) PRIMARY KEY,
+    project_id VARCHAR(50) REFERENCES projects(id) ON DELETE CASCADE,
+    sub_project_id VARCHAR(50) REFERENCES sub_projects(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    status VARCHAR(50) DEFAULT 'draft',
+    created_by VARCHAR(255),
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    submitted_by VARCHAR(255),
+    submitted_date TIMESTAMP,
+    approved_by VARCHAR(255),
+    approved_date TIMESTAMP,
+    reopened_by VARCHAR(255),
+    reopened_date TIMESTAMP,
+    last_updated_by VARCHAR(255),
+    last_updated_date TIMESTAMP,
+    reopen_reason TEXT,
+    UNIQUE (project_id, sub_project_id, date)
 );

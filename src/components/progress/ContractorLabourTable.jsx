@@ -51,6 +51,9 @@ export default function ContractorLabourTable({
             <th rowSpan={2} className="p-3 text-left font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 min-w-[240px]">
               Contractor Name
             </th>
+            <th rowSpan={2} className="p-3 text-left font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 min-w-[180px]">
+              Type of Work
+            </th>
             <th rowSpan={2} className="p-3 text-center font-bold text-[11px] uppercase tracking-wider border-r border-slate-200 w-24">
               Unit
             </th>
@@ -88,7 +91,7 @@ export default function ContractorLabourTable({
             if (showGroupLabels && row._groupLabel) {
               return (
                 <tr key={`group-${row._groupLabel}-${index}`} className="bg-primary/5 font-semibold text-primary">
-                  <td colSpan={13} className="p-1.5 pl-4 text-xs font-bold border-b border-slate-200">
+                  <td colSpan={14} className="p-1.5 pl-4 text-xs font-bold border-b border-slate-200">
                     {row._groupLabel}
                   </td>
                 </tr>
@@ -115,6 +118,9 @@ export default function ContractorLabourTable({
                 </td>
                 <td className="p-3 text-xs font-bold text-foreground border-r border-slate-200">
                   {name}
+                </td>
+                <td className="p-3 text-xs text-foreground border-r border-slate-200">
+                  {row.type_of_work || '—'}
                 </td>
                 <td className="p-3 text-center border-r border-slate-200">
                   <span className="text-xs font-semibold text-slate-600">{row.unit || 'Nos'}</span>

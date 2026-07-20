@@ -116,6 +116,19 @@ export default function WBSManagement() {
   const [parsingUpload, setParsingUpload] = useState(false);
   const [confirmingUpload, setConfirmingUpload] = useState(false);
 
+  // WBS Approval Workflow States
+  const [showApprovalDialog, setShowApprovalDialog] = useState(false);
+  const [selectedL1Codes, setSelectedL1Codes] = useState([]);
+  const [selectedReviewers, setSelectedReviewers] = useState([]);
+  const [showReviewDialog, setShowReviewDialog] = useState(false);
+  const [reviewStatus, setReviewStatus] = useState('approved');
+  const [reviewComment, setReviewComment] = useState('');
+  const [submittingWorkflow, setSubmittingWorkflow] = useState(false);
+  const [workflowError, setWorkflowError] = useState('');
+  const [reviewingL1Item, setReviewingL1Item] = useState(null);
+  const [showBulkReturnDialog, setShowBulkReturnDialog] = useState(false);
+  const [bulkReturnComment, setBulkReturnComment] = useState('');
+
   // Filter options state
   const [searchQuery, setSearchQuery] = useState('');
   const [filterProgress, setFilterProgress] = useState('all');
@@ -176,6 +189,37 @@ export default function WBSManagement() {
       ? base44.entities.BudgetItem.filter({ project_id: projectFilter || form.project_id })
       : base44.entities.BudgetItem.list('-created_date', 500),
   });
+
+  // WBS Approval Workflow Queries
+  const { data: wbsHeader, refetch: refetchHeader } = useQuery({
+    queryKey: ['wbs-header', projectFilter, subProjectFilter],
+    queryFn: () => base44.wbs.getHeader(projectFilter, subProjectFilter),
+    enabled: wbsReady,
+  });
+
+  const { data: wbsHistory = [], refetch: refetchHistory } = useQuery({
+    queryKey: ['wbs-history', projectFilter, subProjectFilter],
+    queryFn: () => base44.wbs.getHistory(projectFilter, subProjectFilter),
+    enabled: wbsReady,
+  });
+
+  const { data: departmentHeads = [] } = useQuery({
+    queryKey: ['department-heads'],
+    queryFn: () => base44.entities.User.filter({ role: 'department_head' }),
+  });
+
+  useEffect(() => {
+    if (wbsHeader && Array.isArray(wbsHeader.l1_items)) {
+      if (user?.role === 'department_head') {
+        setSelectedL1Codes([]);
+      } else {
+        const initialSelected = wbsHeader.l1_items
+          .filter(item => item.status === 'draft' || item.status === 'changes_requested')
+          .map(item => item.code);
+        setSelectedL1Codes(initialSelected);
+      }
+    }
+  }, [wbsHeader, user]);
 
   const createMutation = useMutation({
     mutationFn: (data) => base44.entities.WBSItem.create(data),
@@ -238,6 +282,176 @@ export default function WBSManagement() {
       setTimeout(() => setApplyMessage(''), 5000);
     },
   });
+
+  const getAssignedReviewer = (code, title) => {
+    const normTitle = String(title || '').toLowerCase();
+    const rootId = String(code).split('.')[0];
+
+    if (
+      rootId === '1' || rootId === '2' || rootId === '3' || rootId === '4' ||
+      normTitle.includes('earth') || normTitle.includes('rcc') ||
+      normTitle.includes('masonry') || normTitle.includes('plaster') ||
+      normTitle.includes('waterproofing')
+    ) {
+      return 'civil.head@planedge.co';
+    }
+    if (
+      rootId === '5' || rootId === '6' || rootId === '7' || rootId === '8' || rootId === '9' ||
+      normTitle.includes('wood') || normTitle.includes('door') ||
+      normTitle.includes('window') || normTitle.includes('sliding') ||
+      normTitle.includes('floor') || normTitle.includes('tile') ||
+      normTitle.includes('tiling') || normTitle.includes('paint') ||
+      normTitle.includes('polish') || normTitle.includes('grill') ||
+      normTitle.includes('railing') || normTitle.includes('facade') ||
+      normTitle.includes('glazing')
+    ) {
+      return 'finishing.head@planedge.co';
+    }
+    if (rootId === '10' || normTitle.includes('plumb') || normTitle.includes('drain')) {
+      return 'mep.head@planedge.co';
+    }
+    if (rootId === '11' || normTitle.includes('elect')) {
+      return 'electrical.head@planedge.co';
+    }
+    if (rootId === '12' || rootId === '13' || normTitle.includes('lift') || normTitle.includes('fire')) {
+      return 'mep.head@planedge.co';
+    }
+    return 'planning.head@planedge.co';
+  };
+
+  const openSubmitApprovalDialog = () => {
+    if (selectedL1Codes.length === 0) {
+      alert('Please select at least one WBS Head before submitting for approval.');
+      return;
+    }
+    const draftL1Items = wbsHeader?.l1_items || [];
+    const mapped = [];
+    selectedL1Codes.forEach(code => {
+      const match = draftL1Items.find(item => item.code === code);
+      if (match) {
+        const defaultReviewer = match.assigned_reviewer || getAssignedReviewer(match.code, match.title);
+        if (defaultReviewer && !mapped.includes(defaultReviewer)) {
+          mapped.push(defaultReviewer);
+        }
+      }
+    });
+    setSelectedReviewers(mapped);
+    setWorkflowError('');
+    setShowApprovalDialog(true);
+  };
+
+  const handleSubmitForApproval = async () => {
+    if (selectedL1Codes.length === 0) {
+      alert('Please select at least one WBS Head before submitting for approval.');
+      return;
+    }
+    if (selectedReviewers.length === 0) {
+      setWorkflowError('Please select at least one Department Head reviewer.');
+      return;
+    }
+    setSubmittingWorkflow(true);
+    setWorkflowError('');
+    try {
+      await base44.wbs.submitApproval(projectFilter, subProjectFilter, selectedL1Codes, selectedReviewers);
+      refetchHeader();
+      refetchHistory();
+      setShowApprovalDialog(false);
+    } catch (err) {
+      setWorkflowError(err.message || 'Failed to submit WBS for approval.');
+    } finally {
+      setSubmittingWorkflow(false);
+    }
+  };
+
+  const handleReview = async () => {
+    if (!reviewingL1Item) return;
+    if (reviewStatus === 'changes_requested' && !reviewComment.trim()) {
+      setWorkflowError('Reason for return is mandatory.');
+      return;
+    }
+    setSubmittingWorkflow(true);
+    setWorkflowError('');
+    try {
+      await base44.wbs.review(projectFilter, subProjectFilter, reviewStatus, reviewComment, reviewingL1Item.code);
+      refetchHeader();
+      refetchHistory();
+      setShowReviewDialog(false);
+      setReviewComment('');
+      setReviewingL1Item(null);
+    } catch (err) {
+      setWorkflowError(err.message || 'Failed to submit review.');
+    } finally {
+      setSubmittingWorkflow(false);
+    }
+  };
+
+  const handleBulkApprove = async () => {
+    if (selectedL1Codes.length === 0) {
+      alert('Please select at least one WBS Head to approve.');
+      return;
+    }
+    if (!window.confirm(`Are you sure you want to approve the ${selectedL1Codes.length} selected WBS Head(s)?`)) {
+      return;
+    }
+    setSubmittingWorkflow(true);
+    try {
+      await base44.wbs.review(projectFilter, subProjectFilter, 'approved', 'Bulk approved by Department Head', selectedL1Codes);
+      refetchHeader();
+      refetchHistory();
+      setSelectedL1Codes([]);
+    } catch (err) {
+      alert(err.message || 'Failed to approve selected WBS Heads.');
+    } finally {
+      setSubmittingWorkflow(false);
+    }
+  };
+
+  const handleBulkReturnTrigger = () => {
+    if (selectedL1Codes.length === 0) {
+      alert('Please select at least one WBS Head.');
+      return;
+    }
+    setBulkReturnComment('');
+    setWorkflowError('');
+    setShowBulkReturnDialog(true);
+  };
+
+  const handleBulkReturnSubmit = async () => {
+    if (!bulkReturnComment || !bulkReturnComment.trim()) {
+      setWorkflowError('Reason for changes is mandatory.');
+      return;
+    }
+    setSubmittingWorkflow(true);
+    setWorkflowError('');
+    try {
+      await base44.wbs.review(projectFilter, subProjectFilter, 'changes_requested', bulkReturnComment, selectedL1Codes);
+      refetchHeader();
+      refetchHistory();
+      setSelectedL1Codes([]);
+      setShowBulkReturnDialog(false);
+      setBulkReturnComment('');
+    } catch (err) {
+      setWorkflowError(err.message || 'Failed to return WBS Heads.');
+    } finally {
+      setSubmittingWorkflow(false);
+    }
+  };
+
+  const handleReopen = async () => {
+    if (!window.confirm('Are you sure you want to cancel approval and reopen this WBS for editing?')) return;
+    setSubmittingWorkflow(true);
+    try {
+      await base44.wbs.reopen(projectFilter, subProjectFilter);
+      refetchHeader();
+      refetchHistory();
+    } catch (err) {
+      alert(err.message || 'Failed to reopen WBS.');
+    } finally {
+      setSubmittingWorkflow(false);
+    }
+  };
+
+  const isLockedForEditing = wbsHeader && (wbsHeader.status === 'pending_approval' || wbsHeader.status === 'approved');
 
   const sortedWbsItems = useMemo(
     () => [...wbsItems].sort((a, b) => compareWbsIds(a.code, b.code)),
@@ -370,14 +584,41 @@ export default function WBSManagement() {
     setMaxBudget('');
   };
 
+  const stats = useMemo(() => {
+    const items = wbsHeader?.l1_items || [];
+    const filtered = items.filter(item => {
+      if (user?.role === 'department_head') {
+        return (item.assigned_reviewer || '').toLowerCase() === (user?.email || '').toLowerCase();
+      }
+      return true;
+    });
+
+    return {
+      pending: filtered.filter(i => i.status === 'pending_approval').length,
+      approved: filtered.filter(i => i.status === 'approved').length,
+      returned: filtered.filter(i => i.status === 'changes_requested').length
+    };
+  }, [wbsHeader, user]);
+
   // Filtered lists for the render views
   const filteredL1L2Items = useMemo(() => {
     return l1L2Items.filter(item => visibleWbsItemIds.has(item.id));
   }, [l1L2Items, visibleWbsItemIds]);
 
   const filteredL1Items = useMemo(() => {
-    return filteredL1L2Items.filter((w) => Number(w.level) === 1 || !w.parent_id);
-  }, [filteredL1L2Items]);
+    const baseL1s = filteredL1L2Items.filter((w) => Number(w.level) === 1 || !w.parent_id);
+    if (user?.role === 'department_head') {
+      return baseL1s.filter(item => {
+        const dbL1Item = wbsHeader?.l1_items?.find(i => i.code === item.code);
+        if (!dbL1Item) return false;
+        return (
+          dbL1Item.status === 'pending_approval' &&
+          (dbL1Item.assigned_reviewer || '').toLowerCase() === (user?.email || '').toLowerCase()
+        );
+      });
+    }
+    return baseL1s;
+  }, [filteredL1L2Items, user, wbsHeader]);
 
   const filteredL3Items = useMemo(() => {
     return l3Items.filter(isItemMatch);
@@ -920,7 +1161,6 @@ export default function WBSManagement() {
 
       const existingByCode = new Map(currentItems.map((item) => [item.code, item]));
       const templateByCode = new Map(sortedTemplateItems.map((item) => [item.wbs_id, item]));
-      const codeToId = new Map(currentItems.map((item) => [item.code, item.id]));
       const activityRows = uploadType === 'l1'
         ? normalizedRows.filter((row) => row.activity_id || row.activity_name)
         : [];
@@ -1003,216 +1243,104 @@ export default function WBSManagement() {
           .map((act) => [String(act.activity_id || '').trim().toLowerCase(), act])
       );
 
-      let created = 0;
-      let updated = 0;
-
-      // 1. Separate orderedRows into parent items (levels 1 & 2) and child items (level 3)
       const parentRows = orderedRows.filter((row) => getWbsLevel(row.code) <= 2);
       const level3RowsFromOrdered = orderedRows.filter((row) => getWbsLevel(row.code) === 3);
 
-      // 2. Process parents sequentially
-      for (let index = 0; index < parentRows.length; index += 1) {
-        const row = parentRows[index];
-        const level = getWbsLevel(row.code);
-        const parentCode = getParentCode(row.code);
-        const parentId = parentCode ? codeToId.get(parentCode) || null : null;
-        const existing = existingByCode.get(row.code);
+      const rowsPayload = [];
 
-        const payload = {
-          project_id: projectFilter,
-          sub_project_id: subProjectFilter,
+      // 1. Parent rows
+      parentRows.forEach((row, index) => {
+        rowsPayload.push({
           code: row.code,
           activity_id: '',
-          activity_code: null,
+          activity_code: '',
           title: row.title,
           description: row.description || '',
-          level,
-          parent_id: parentId,
-          planned_quantity: row.planned_quantity,
-          actual_quantity: row.actual_quantity,
+          planned_quantity: row.planned_quantity || 0,
+          actual_quantity: row.actual_quantity || 0,
           unit: row.unit || '',
           lumsum_rate: row.lumsum_rate || 0,
           total_days: row.total_days || 0,
-          level_label: row.level_label || existing?.level_label || '',
+          level_label: row.level_label || '',
           source_upload_type: row.source_upload_type || 'l1',
-          progress: existing ? parseNumber(existing.progress) : 0,
-          budget_amount: row.budget_amount,
-          order_index: index,
-        };
+          budget_amount: row.budget_amount || 0,
+          order_index: index
+        });
+      });
 
-        let savedItem;
-        if (existing) {
-          savedItem = await base44.entities.WBSItem.update(existing.id, payload);
-          updated += 1;
-        } else {
-          savedItem = await base44.entities.WBSItem.create(payload);
-          created += 1;
-          currentItems.push(savedItem);
-        }
-
-        codeToId.set(row.code, savedItem.id);
-        existingByCode.set(row.code, savedItem);
-      }
-
-      // 3. Collect level 3 tasks (WBS items and/or activities) to process in parallel batches
-      let activityCreated = 0;
-      let activityUpdated = 0;
-      let activityDeleted = 0;
-      const consumedActivityCodes = new Set();
-
-      const l3ToSave = [];
+      // 2. L3 rows
       level3RowsFromOrdered.forEach((row, index) => {
-        l3ToSave.push({ row, index, isActivityRow: false });
+        const resolvedActivityId = row.activity_id || row.code;
+        const resolvedLevelLabel = row.level_label || `L3`;
+        const computedActivityCode = makeActivityCode(row, resolvedActivityId, resolvedLevelLabel);
+
+        rowsPayload.push({
+          code: row.code,
+          activity_id: resolvedActivityId,
+          activity_code: computedActivityCode,
+          title: row.title,
+          description: row.description || '',
+          planned_quantity: row.planned_quantity || 0,
+          actual_quantity: row.actual_quantity || 0,
+          unit: row.unit || '',
+          lumsum_rate: row.lumsum_rate || 0,
+          total_days: row.total_days || 0,
+          level_label: row.level_label || '',
+          source_upload_type: row.source_upload_type || 'l3',
+          budget_amount: row.budget_amount || 0,
+          order_index: parentRows.length + index
+        });
       });
+
+      // 3. Activity rows
       activityRows.forEach((row, index) => {
-        l3ToSave.push({ row, index, isActivityRow: true });
+        const parentCode = uploadType === 'l3' ? getParentCode(row.code) : row.code;
+        const activityCode = (uploadType === 'l3' ? row.code : row.activity_id) || `${parentCode}.${index + 1}`;
+        const resolvedActivityId = row.activity_id || activityCode;
+        const resolvedLevelLabel = row.level_label || `L${row.level || 3}`;
+        const computedActivityCode = makeActivityCode(row, resolvedActivityId, resolvedLevelLabel);
+
+        rowsPayload.push({
+          code: activityCode,
+          activity_id: resolvedActivityId,
+          activity_code: computedActivityCode,
+          title: row.activity_name || row.title || activityCode,
+          description: row.activity_description || row.description || '',
+          planned_quantity: row.total_qty || 0,
+          actual_quantity: row.actual_quantity || 0,
+          unit: row.unit || '',
+          lumsum_rate: row.lumsum_rate || 0,
+          total_days: row.total_days || 0,
+          level_label: resolvedLevelLabel,
+          source_upload_type: uploadType === 'l3' ? 'l3' : 'l1_activity',
+          budget_amount: row.budget_amount || 0,
+          order_index: parentRows.length + level3RowsFromOrdered.length + index
+        });
       });
 
-      // Process in parallel batches of size 40
-      const batchSize = 40;
-      for (let i = 0; i < l3ToSave.length; i += batchSize) {
-        const batch = l3ToSave.slice(i, i + batchSize);
-        await Promise.all(
-          batch.map(async ({ row, index, isActivityRow }) => {
-            if (isActivityRow) {
-              const parentCode = uploadType === 'l3' ? getParentCode(row.code) : row.code;
-              const parentId = parentCode ? codeToId.get(parentCode) : null;
-              if (!parentId) return;
+      // Send to server to run smart comparison in a transaction
+      const res = await base44.wbs.upload(projectFilter, subProjectFilter, uploadType, rowsPayload);
 
-              const activityCode = (uploadType === 'l3' ? row.code : row.activity_id) || `${parentCode}.${index + 1}`;
-              const resolvedActivityId = row.activity_id || activityCode;
-              const resolvedLevelLabel = row.level_label || `L${row.level || 3}`;
-              const computedActivityCode = makeActivityCode(row, resolvedActivityId, resolvedLevelLabel);
-
-              const existingActivity = currentItems.find(item => 
-                item.activity_code && 
-                item.activity_code.toLowerCase() === computedActivityCode.toLowerCase()
-              ) || (row.activity_id ? currentItems.find(item => 
-                Number(item.level) === 3 && 
-                item.activity_id && 
-                item.activity_id.toLowerCase() === row.activity_id.toLowerCase() && 
-                String(item.level_label || '').toLowerCase() === resolvedLevelLabel.toLowerCase()
-              ) : null);
-
-              const activityPayload = {
-                project_id: projectFilter,
-                sub_project_id: subProjectFilter,
-                code: activityCode,
-                activity_id: resolvedActivityId,
-                activity_code: computedActivityCode,
-                title: row.activity_name || row.title || activityCode,
-                description: row.activity_description || row.description || '',
-                level: 3,
-                parent_id: parentId,
-                planned_quantity: row.total_qty,
-                actual_quantity: row.actual_quantity,
-                unit: row.unit || '',
-                lumsum_rate: row.lumsum_rate || 0,
-                total_days: row.total_days || 0,
-                level_label: row.level_label || existingActivity?.level_label || '',
-                progress: existingActivity ? parseNumber(existingActivity.progress) : 0,
-                budget_amount: row.budget_amount,
-                order_index: parentRows.length + index,
-                source_upload_type: uploadType === 'l3' ? 'l3' : 'l1_activity',
-              };
-
-              let savedActivity;
-              if (existingActivity) {
-                savedActivity = await base44.entities.WBSItem.update(existingActivity.id, activityPayload);
-                activityUpdated += 1;
-              } else {
-                savedActivity = await base44.entities.WBSItem.create(activityPayload);
-                activityCreated += 1;
-                currentItems.push(savedActivity);
-              }
-
-              consumedActivityCodes.add(savedActivity.code);
-              codeToId.set(savedActivity.code, savedActivity.id);
-              existingByCode.set(savedActivity.code, savedActivity);
-
-              const match = activityByCode.get(String(savedActivity.activity_id || '').toLowerCase()) || activities.find((act) => act.id === savedActivity.activity_id);
-              if (match && match.wbs_item_id !== savedActivity.id) {
-                await base44.entities.ScheduleActivity.update(match.id, { wbs_item_id: savedActivity.id });
-              }
-            } else {
-              const parentCode = getParentCode(row.code);
-              const parentId = parentCode ? codeToId.get(parentCode) || null : null;
-              
-              const resolvedActivityId = row.activity_id || row.code;
-              const resolvedLevelLabel = row.level_label || `L3`;
-              const computedActivityCode = makeActivityCode(row, resolvedActivityId, resolvedLevelLabel);
-
-              let existing = currentItems.find(item => 
-                item.activity_code && 
-                item.activity_code.toLowerCase() === computedActivityCode.toLowerCase()
-              ) || (resolvedActivityId ? currentItems.find(item => 
-                Number(item.level) === 3 && 
-                item.activity_id && 
-                item.activity_id.toLowerCase() === resolvedActivityId.toLowerCase() && 
-                String(item.level_label || '').toLowerCase() === resolvedLevelLabel.toLowerCase()
-              ) : null);
-
-              const payload = {
-                project_id: projectFilter,
-                sub_project_id: subProjectFilter,
-                code: row.code,
-                activity_id: resolvedActivityId,
-                activity_code: computedActivityCode,
-                title: row.title,
-                description: row.description || '',
-                level: 3,
-                parent_id: parentId,
-                planned_quantity: row.planned_quantity,
-                actual_quantity: row.actual_quantity,
-                unit: row.unit || '',
-                lumsum_rate: row.lumsum_rate || 0,
-                total_days: row.total_days || 0,
-                level_label: row.level_label || existing?.level_label || '',
-                source_upload_type: row.source_upload_type || 'l3',
-                progress: existing ? parseNumber(existing.progress) : 0,
-                budget_amount: row.budget_amount,
-                order_index: parentRows.length + index,
-              };
-
-              let savedItem;
-              if (existing) {
-                savedItem = await base44.entities.WBSItem.update(existing.id, payload);
-                updated += 1;
-              } else {
-                savedItem = await base44.entities.WBSItem.create(payload);
-                created += 1;
-                currentItems.push(savedItem);
-              }
-
-              codeToId.set(row.code, savedItem.id);
-              existingByCode.set(row.code, savedItem);
-
-              if (row.activity_id) {
-                const match = activityByCode.get(String(row.activity_id).toLowerCase()) || activities.find((act) => act.id === row.activity_id);
-                if (match && match.wbs_item_id !== savedItem.id) {
-                  await base44.entities.ScheduleActivity.update(match.id, { wbs_item_id: savedItem.id });
-                }
-              }
-            }
-          })
-        );
-      }
-
-      // 4. Delete stale L1 activities sequentially
-      if (uploadType === 'l1') {
-        const staleL1Activities = currentItems.filter(
-          (item) => Number(item.level) === 3 && item.source_upload_type === 'l1_activity' && !consumedActivityCodes.has(item.code)
-        );
-        for (const staleItem of staleL1Activities) {
-          await base44.entities.WBSItem.delete(staleItem.id);
-          activityDeleted += 1;
+      // Trigger side updates if schedule activities need linking
+      // This is still done locally to keep ScheduleActivity IDs matching
+      for (const row of rowsPayload) {
+        if (row.activity_id) {
+          const match = activityByCode.get(String(row.activity_id).toLowerCase()) || activities.find((act) => act.id === row.activity_id);
+          // Fetch the updated WBS item ID to link
+          const dbItem = currentItems.find(item => item.code === row.code) || await base44.entities.WBSItem.filter({ project_id: projectFilter, sub_project_id: subProjectFilter, code: row.code }).then(res => res[0]);
+          if (match && dbItem && match.wbs_item_id !== dbItem.id) {
+            await base44.entities.ScheduleActivity.update(match.id, { wbs_item_id: dbItem.id });
+          }
         }
       }
 
       queryClient.invalidateQueries({ queryKey: ['wbs'] });
       queryClient.invalidateQueries({ queryKey: ['activities'] });
+      queryClient.invalidateQueries({ queryKey: ['wbs-header'] });
+      queryClient.invalidateQueries({ queryKey: ['wbs-history'] });
+
       setApplyMessage(
-        `WBS upload complete (${uploadConfig.label}): ${created} created, ${updated} updated, ${activityCreated} activity rows created, ${activityUpdated} activity rows updated${activityDeleted ? `, ${activityDeleted} activity rows removed` : ''}.`
+        `WBS upload complete: ${res.created} created, ${res.updated} updated, ${res.deleted} deleted. WBS updated to Draft (Version ${res.version}).`
       );
       setTimeout(() => setApplyMessage(''), 5000);
       closeUploadDialog();
@@ -1303,6 +1431,13 @@ export default function WBSManagement() {
     });
   };
 
+  const isL1HeadLocked = (code) => {
+    const rootCode = String(code).split('.')[0];
+    const rootItem = wbsHeader?.l1_items?.find(i => i.code === rootCode);
+    if (!rootItem) return false;
+    return rootItem.status === 'pending_approval' || rootItem.status === 'approved';
+  };
+
   const renderRow = (item, items, depth = 0, expandActivitiesFromHead = false) => {
     const children = getChildren(items, item.id);
     const indent = depth * 20;
@@ -1320,12 +1455,61 @@ export default function WBSManagement() {
         ? getSubHeadBudget(item)
         : parseNumber(item.budget_amount);
 
+    const isItemLocked = isL1HeadLocked(item.code);
+    const dbL1Item = isHead ? wbsHeader?.l1_items?.find(i => i.code === item.code) : null;
+    const itemStatus = dbL1Item?.status || 'draft';
+
     return (
       <React.Fragment key={item.id}>
         <tr
           className="border-b hover:bg-muted/10 cursor-pointer"
           onClick={() => canToggleRow && toggleExpand(item.id)}
         >
+          {/* 1. Checkbox / Status Badge Column */}
+          <td className="p-3 w-12 text-center" onClick={(e) => e.stopPropagation()}>
+            {isHead && (
+              <>
+                {(() => {
+                  const canSelectRow = user?.role === 'department_head'
+                    ? (itemStatus === 'pending_approval')
+                    : (itemStatus === 'draft' || itemStatus === 'changes_requested');
+
+                  return canSelectRow ? (
+                    <input
+                      type="checkbox"
+                      checked={selectedL1Codes.includes(item.code)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedL1Codes(prev => [...prev, item.code]);
+                        } else {
+                          setSelectedL1Codes(prev => prev.filter(c => c !== item.code));
+                        }
+                      }}
+                      className="rounded border-slate-300 text-slate-800 focus:ring-0 w-4 h-4 cursor-pointer"
+                    />
+                  ) : itemStatus === 'pending_approval' ? (
+                    <span className="bg-blue-50 text-blue-700 text-[10px] font-bold px-1.5 py-0.5 rounded border border-blue-200 whitespace-nowrap">
+                      ⏳ Pending
+                    </span>
+                  ) : itemStatus === 'approved' ? (
+                    <span className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded border border-emerald-200 whitespace-nowrap">
+                      ✓ Approved
+                    </span>
+                  ) : itemStatus === 'changes_requested' ? (
+                    <span className="bg-rose-50 text-rose-700 text-[10px] font-bold px-1.5 py-0.5 rounded border border-rose-200 whitespace-nowrap">
+                      Returned
+                    </span>
+                  ) : (
+                    <span className="bg-slate-50 text-slate-600 text-[10px] font-bold px-1.5 py-0.5 rounded border border-slate-200 whitespace-nowrap">
+                      Draft
+                    </span>
+                  );
+                })()}
+              </>
+            )}
+          </td>
+
+          {/* 2. Title & ID Column */}
           <td className="p-3 text-foreground" style={{ paddingLeft: `${12 + indent}px` }}>
             <div className="flex items-start gap-2">
               {hasExpandableContent
@@ -1336,7 +1520,19 @@ export default function WBSManagement() {
               <span className={`text-xs px-1.5 py-0.5 mt-0.5 rounded shrink-0 ${levelColors[item.level] || levelColors[3]}`}>L{item.level}</span>
               <span className="text-xs font-mono font-semibold text-primary mt-0.5 shrink-0 min-w-[3rem]">{item.code}</span>
               <div className="flex flex-col">
-                <span className="font-medium text-sm">{item.title}</span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-medium text-sm">{item.title}</span>
+                  {isHead && dbL1Item?.assigned_reviewer && (
+                    <span className="text-[10px] text-slate-400 font-medium px-1.5 py-0.5 rounded bg-slate-100/80 font-sans" title={`Assigned Approver: ${dbL1Item.assigned_reviewer}`}>
+                      👤 {dbL1Item.assigned_reviewer.split('@')[0]}
+                    </span>
+                  )}
+                </div>
+                {isHead && itemStatus === 'changes_requested' && dbL1Item?.return_reason && (
+                  <span className="text-[11px] text-rose-600 mt-0.5 font-sans leading-tight">
+                    Returned: "{dbL1Item.return_reason}"
+                  </span>
+                )}
                 {isSubHead && activityRows.length > 0 && (
                   <span className="text-[11px] text-muted-foreground mt-0.5">
                     {activityRows.length} activities
@@ -1360,17 +1556,47 @@ export default function WBSManagement() {
               <span className="text-xs text-muted-foreground">{item.progress || 0}%</span>
             </div>
           </td>
-          <td className="p-3" onClick={(e) => e.stopPropagation()}>
-            <div className="flex gap-1">
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit(item)}><Pencil className="w-3 h-3" /></Button>
-              <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => deleteMutation.mutate(item.id)}><Trash2 className="w-3 h-3" /></Button>
+          <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
+            <div className="flex gap-1.5 justify-end">
+              {isHead && itemStatus === 'pending_approval' && (
+                (() => {
+                  const assignedReviewer = dbL1Item?.assigned_reviewer || '';
+                  const isAssigned = assignedReviewer.toLowerCase() === user?.email?.toLowerCase();
+                  if (isAssigned || isAdmin) {
+                    return (
+                      <Button
+                        onClick={() => {
+                          setReviewingL1Item(dbL1Item);
+                          setReviewStatus('approved');
+                          setReviewComment('');
+                          setShowReviewDialog(true);
+                        }}
+                        className="h-7 text-[10px] bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded px-2"
+                      >
+                        Review
+                      </Button>
+                    );
+                  }
+                })()
+              )}
+
+              {!isItemLocked ? (
+                <>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit(item)}><Pencil className="w-3 h-3" /></Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => deleteMutation.mutate(item.id)}><Trash2 className="w-3 h-3" /></Button>
+                </>
+              ) : (
+                !isHead && (
+                  <span className="text-[10px] text-slate-400 self-center font-medium italic select-none">🔒 Locked</span>
+                )
+              )}
             </div>
           </td>
         </tr>
 
         {isExp && isSubHead && activityRows.length > 0 && (
           <tr className="border-b bg-muted/20">
-            <td colSpan={4} className="p-3">
+            <td colSpan={5} className="p-3">
               <div className="overflow-x-auto border rounded-lg bg-background">
                 <table className="w-full text-xs">
                   <thead>
@@ -1567,6 +1793,7 @@ export default function WBSManagement() {
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="project" className="gap-2"><Layers className="w-4 h-4" /> Project WBS</TabsTrigger>
+          {wbsReady && <TabsTrigger value="history" className="gap-2"><SlidersHorizontal className="w-4 h-4" /> Approval History</TabsTrigger>}
           <TabsTrigger value="template" className="gap-2"><BookTemplate className="w-4 h-4" /> Standard Template</TabsTrigger>
         </TabsList>
 
@@ -1658,6 +1885,130 @@ export default function WBSManagement() {
               {' → '}
               <span className="font-medium text-foreground">{selectedSubProject.name}</span>
             </p>
+          )}
+
+          {wbsReady && wbsHeader && (
+            <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shadow-sm font-sans">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-slate-100 rounded-lg text-slate-600">
+                  <Layers className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-heading font-bold text-slate-800 text-sm">WBS Status</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full font-mono bg-slate-200/80 text-slate-700 font-semibold">v{wbsHeader.version_no}</span>
+                    {wbsHeader.status === 'draft' && <span className="bg-amber-100 text-amber-700 text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full">Draft</span>}
+                    {wbsHeader.status === 'pending_approval' && <span className="bg-blue-100 text-blue-700 text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full">Pending Approval</span>}
+                    {wbsHeader.status === 'changes_requested' && <span className="bg-rose-100 text-rose-700 text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full">Changes Requested</span>}
+                    {wbsHeader.status === 'approved' && <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full">Approved</span>}
+                  </div>
+                  {wbsHeader.status === 'pending_approval' && (
+                    <p className="text-xs text-slate-500 mt-1">
+                      Awaiting approval from:{' '}
+                      <span className="font-semibold text-slate-700">
+                        {(() => {
+                          try {
+                            const revs = typeof wbsHeader.reviewers === 'string' ? JSON.parse(wbsHeader.reviewers) : (wbsHeader.reviewers || []);
+                            const appvs = typeof wbsHeader.approved_reviewers === 'string' ? JSON.parse(wbsHeader.approved_reviewers) : (wbsHeader.approved_reviewers || []);
+                            return revs.map(email => {
+                              const approved = appvs.some(ar => ar.toLowerCase() === email.toLowerCase());
+                              return `${email.split('@')[0]} (${approved ? '✓ Approved' : 'Pending'})`;
+                            }).join(', ');
+                          } catch (e) {
+                            return 'Reviewers loading...';
+                          }
+                        })()}
+                      </span>
+                    </p>
+                  )}
+                  {wbsHeader.status === 'changes_requested' && (
+                    <p className="text-xs text-rose-600 mt-1 font-medium">
+                      Returned by {wbsHeader.returned_by || 'Reviewer'}: "{wbsHeader.return_reason}"
+                    </p>
+                  )}
+                  {wbsHeader.status === 'approved' && (
+                    <p className="text-xs text-emerald-600 mt-1 font-medium">
+                      Approved by all reviewers. WBS is locked and active for DPR.
+                    </p>
+                  )}
+                  {wbsHeader.status === 'draft' && (
+                    <p className="text-xs text-slate-500 mt-1">
+                      WBS structure is editable. Complete edits and submit for approval.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2 sm:self-center">
+                {user?.role === 'department_head' ? (
+                  <>
+                    <Button
+                      onClick={handleBulkApprove}
+                      disabled={submittingWorkflow || selectedL1Codes.length === 0}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-9 rounded-lg font-semibold"
+                    >
+                      {submittingWorkflow ? 'Processing...' : 'Approve Selected'}
+                    </Button>
+                    <Button
+                      onClick={handleBulkReturnTrigger}
+                      disabled={submittingWorkflow || selectedL1Codes.length === 0}
+                      className="bg-rose-600 hover:bg-rose-700 text-white text-xs h-9 rounded-lg font-semibold"
+                    >
+                      Return for Changes
+                    </Button>
+                  </>
+                ) : (
+                  (wbsHeader.status === 'draft' || wbsHeader.status === 'partially_approved' || wbsHeader.status === 'changes_requested') && (
+                    <Button
+                      onClick={openSubmitApprovalDialog}
+                      disabled={submittingWorkflow || selectedL1Codes.length === 0}
+                      className="bg-[#0f172a] hover:bg-[#1e293b] text-white text-xs h-9 rounded-lg"
+                    >
+                      {submittingWorkflow ? 'Submitting...' : 'Submit for Approval'}
+                    </Button>
+                  )
+                )}
+
+                {wbsHeader.status === 'pending_approval' && (
+                  <>
+                    {(() => {
+                      try {
+                        const revs = typeof wbsHeader.reviewers === 'string' ? JSON.parse(wbsHeader.reviewers) : (wbsHeader.reviewers || []);
+                        const appvs = typeof wbsHeader.approved_reviewers === 'string' ? JSON.parse(wbsHeader.approved_reviewers) : (wbsHeader.approved_reviewers || []);
+                        const isAssigned = revs.some(r => r.toLowerCase() === user?.email?.toLowerCase());
+                        const alreadyApproved = appvs.some(r => r.toLowerCase() === user?.email?.toLowerCase());
+                        
+                        if ((isAssigned && !alreadyApproved) || isAdmin) {
+                          return (
+                            <Button
+                              onClick={() => {
+                                setReviewStatus('approved');
+                                setReviewComment('');
+                                setShowReviewDialog(true);
+                              }}
+                              className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-9 rounded-lg shadow-sm"
+                            >
+                              Review WBS
+                            </Button>
+                          );
+                        }
+                      } catch (e) {}
+                      return <span className="text-xs text-slate-400 self-center font-medium italic">Pending Review...</span>;
+                    })()}
+                  </>
+                )}
+
+                {wbsHeader.status === 'approved' && isAdmin && (
+                  <Button
+                    variant="outline"
+                    onClick={handleReopen}
+                    className="text-xs border-slate-200 text-slate-600 hover:bg-slate-50 h-9"
+                  >
+                    Reopen to Draft
+                  </Button>
+                )}
+              </div>
+            </div>
           )}
 
           {applyMessage && (
@@ -1899,11 +2250,84 @@ export default function WBSManagement() {
                 </TabsList>
 
                 <TabsContent value="l1">
+                  {/* Summary Indicator Panel */}
+                  <div className="grid grid-cols-3 gap-4 mb-4">
+                    <div className="bg-amber-50/50 border border-amber-100 rounded-xl p-3 text-center">
+                      <div className="text-[10px] uppercase tracking-wider text-amber-600 font-bold font-sans">Pending Review</div>
+                      <div className="text-2xl font-bold text-amber-700 font-mono mt-0.5">{stats.pending}</div>
+                    </div>
+                    <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-3 text-center">
+                      <div className="text-[10px] uppercase tracking-wider text-emerald-600 font-bold font-sans">Approved</div>
+                      <div className="text-2xl font-bold text-emerald-700 font-mono mt-0.5">{stats.approved}</div>
+                    </div>
+                    <div className="bg-rose-50/50 border border-rose-100 rounded-xl p-3 text-center">
+                      <div className="text-[10px] uppercase tracking-wider text-rose-600 font-bold font-sans">Returned</div>
+                      <div className="text-2xl font-bold text-rose-700 font-mono mt-0.5">{stats.returned}</div>
+                    </div>
+                  </div>
+
+                  {/* Select WBS Heads Panel */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-slate-50 border border-slate-100 rounded-xl mb-4 text-xs font-sans">
+                    <div className="flex items-center gap-2">
+                      {(() => {
+                        const targetL1s = (wbsHeader?.l1_items || [])
+                          .filter(item => {
+                            if (user?.role === 'department_head') {
+                              return (
+                                item.status === 'pending_approval' &&
+                                (item.assigned_reviewer || '').toLowerCase() === (user?.email || '').toLowerCase()
+                              );
+                            }
+                            return item.status === 'draft' || item.status === 'changes_requested';
+                          })
+                          .map(item => item.code);
+                        const areAllSelected = targetL1s.length > 0 && targetL1s.every(code => selectedL1Codes.includes(code));
+
+                        return (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 text-slate-700 bg-white hover:bg-slate-50 border-slate-200 flex items-center gap-1.5 font-semibold"
+                            onClick={() => {
+                              if (areAllSelected) {
+                                setSelectedL1Codes(prev => prev.filter(c => !targetL1s.includes(c)));
+                              } else {
+                                setSelectedL1Codes(prev => Array.from(new Set([...prev, ...targetL1s])));
+                              }
+                            }}
+                          >
+                            {areAllSelected ? (
+                              <>
+                                <span className="text-slate-500 font-mono font-bold text-sm">☐</span> Clear Selection
+                              </>
+                            ) : (
+                              <>
+                                <span className="text-primary font-mono font-bold text-sm">☑</span> Select All
+                              </>
+                            )}
+                          </Button>
+                        );
+                      })()}
+                    </div>
+                    <div className="text-slate-600 font-semibold">
+                      {user?.role === 'department_head' ? (
+                        <>
+                          Selected WBS Heads for Review: <span className="text-primary font-mono text-sm">{selectedL1Codes.length}</span> of <span className="font-mono text-sm">{(wbsHeader?.l1_items || []).filter(item => item.status === 'pending_approval' && (item.assigned_reviewer || '').toLowerCase() === (user?.email || '').toLowerCase()).length}</span> Pending Heads Selected
+                        </>
+                      ) : (
+                        <>
+                          Selected WBS Heads: <span className="text-primary font-mono text-sm">{selectedL1Codes.length}</span> of <span className="font-mono text-sm">{(wbsHeader?.l1_items || []).filter(item => item.status === 'draft' || item.status === 'changes_requested').length}</span> ready WBS Heads Selected
+                        </>
+                      )}
+                    </div>
+                  </div>
+
                   <Card>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm font-sans">
                         <thead>
                           <tr className="border-b bg-muted/30">
+                            <th className="p-3 w-12 text-center font-semibold">Select</th>
                             <th className="text-left p-3 font-semibold">WBS ID / Name</th>
                             <th className="text-right p-3 font-semibold">Budget</th>
                             <th className="text-left p-3 font-semibold">Progress</th>
@@ -1913,7 +2337,7 @@ export default function WBSManagement() {
                         <tbody>
                           {filteredL1Items.length === 0 ? (
                             <tr>
-                              <td colSpan={4} className="p-8 text-center text-muted-foreground font-sans">
+                              <td colSpan={5} className="p-8 text-center text-muted-foreground font-sans">
                                 No matching categories or sub-items found.
                               </td>
                             </tr>
@@ -1969,6 +2393,42 @@ export default function WBSManagement() {
             </>
           )}
         </TabsContent>
+
+        {wbsReady && (
+          <TabsContent value="history" className="mt-4 space-y-4">
+            <Card className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 space-y-4 font-sans">
+              <div>
+                <h2 className="text-lg font-heading font-bold text-slate-800">Version & Approval History</h2>
+                <p className="text-xs text-muted-foreground mt-1 font-sans">Audit log of all uploads, changes, and approvals for this WBS structure.</p>
+              </div>
+
+              <div className="relative border-l border-slate-100 ml-3 pl-6 space-y-6 py-2">
+                {wbsHistory.length > 0 ? (
+                  wbsHistory.map((item, index) => (
+                    <div key={item.id || index} className="relative">
+                      <div className="absolute -left-[31px] top-1.5 w-3 h-3 rounded-full bg-slate-200 border-2 border-white ring-4 ring-slate-50" />
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-slate-800 text-sm">{item.action}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-mono font-semibold bg-slate-100 text-slate-600">v{item.version_no}</span>
+                          </div>
+                          {item.remarks && <p className="text-xs text-slate-500 mt-1 font-sans">{item.remarks}</p>}
+                        </div>
+                        <div className="text-right sm:text-right shrink-0">
+                          <p className="text-xs font-medium text-slate-700 font-sans">{item.user_email}</p>
+                          <p className="text-[10px] text-slate-400 mt-0.5 font-sans">{new Date(item.date).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-slate-400 py-4 italic font-sans">No history log recorded yet.</p>
+                )}
+              </div>
+            </Card>
+          </TabsContent>
+        )}
 
         <TabsContent value="template" className="space-y-4 mt-4">
           {applyMessage && activeTab === 'template' && (
@@ -2382,6 +2842,162 @@ export default function WBSManagement() {
             </div>
             <Button className="w-full" disabled={!templateForm.wbs_id || !templateForm.title} onClick={handleTemplateSubmit}>
               {editTemplateItem ? 'Save Changes' : 'Add to Template'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+
+
+      {/* Submit for Approval Dialog */}
+      <Dialog open={showApprovalDialog} onOpenChange={setShowApprovalDialog}>
+        <DialogContent className="max-w-md font-sans bg-white border border-slate-100 shadow-xl rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-slate-800 font-bold font-heading text-lg">Submit WBS for Approval</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <p className="text-xs text-slate-500 leading-relaxed font-sans">
+              Select one or more Department Heads to review and approve the WBS. The WBS heads will be sent to the selected reviewers for review.
+            </p>
+            <div className="space-y-2 border border-slate-100 rounded-xl p-3 max-h-60 overflow-y-auto bg-slate-50/50">
+              <Label className="text-xs font-semibold text-slate-600 block mb-1">Assigned Department Heads</Label>
+              {departmentHeads.length > 0 ? (
+                departmentHeads.map((head) => (
+                  <label key={head.id} className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-slate-100/50 rounded-lg text-xs text-slate-700 font-medium cursor-pointer transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={selectedReviewers.includes(head.email)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedReviewers(prev => [...prev, head.email]);
+                        } else {
+                          setSelectedReviewers(prev => prev.filter(r => r !== head.email));
+                        }
+                      }}
+                      className="rounded border-slate-300 text-slate-800 focus:ring-0 w-4 h-4 cursor-pointer"
+                    />
+                    {head.email} ({head.mobile || 'Dept Head'})
+                  </label>
+                ))
+              ) : (
+                <p className="text-xs text-slate-400 text-center py-4">No active Department Heads found.</p>
+              )}
+            </div>
+            {workflowError && (
+              <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-xs text-rose-600 font-medium">
+                {workflowError}
+              </div>
+            )}
+            <Button
+              className="w-full bg-[#0f172a] hover:bg-[#1e293b] text-white font-semibold rounded-xl h-10 text-sm shadow-sm"
+              disabled={submittingWorkflow || selectedReviewers.length === 0}
+              onClick={handleSubmitForApproval}
+            >
+              {submittingWorkflow ? 'Sending...' : 'Send for Approval'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Review Dialog */}
+      <Dialog open={showReviewDialog} onOpenChange={setShowReviewDialog}>
+        <DialogContent className="max-w-md font-sans bg-white border border-slate-100 shadow-xl rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-slate-800 font-bold font-heading text-lg font-heading">
+              Review Category: {reviewingL1Item?.title || 'WBS Structure'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div>
+              <Label className="text-xs font-semibold text-slate-600 block mb-2">Decision</Label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setReviewStatus('approved')}
+                  className={`flex items-center justify-center py-2.5 rounded-xl text-xs font-semibold border transition-all ${
+                    reviewStatus === 'approved'
+                      ? 'bg-emerald-50 border-emerald-500 text-emerald-700 shadow-xs'
+                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  ✓ Approve Category
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReviewStatus('changes_requested')}
+                  className={`flex items-center justify-center py-2.5 rounded-xl text-xs font-semibold border transition-all ${
+                    reviewStatus === 'changes_requested'
+                      ? 'bg-rose-50 border-rose-500 text-rose-700 shadow-xs'
+                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  ✕ Request Changes
+                </button>
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs font-semibold text-slate-600 block mb-1">
+                {reviewStatus === 'changes_requested' ? 'Remarks (Mandatory) *' : 'Remarks (Optional)'}
+              </Label>
+              <Textarea
+                placeholder={reviewStatus === 'changes_requested' ? 'Describe the changes needed (e.g. Please revise Blockwork quantities.)' : 'Review comments'}
+                value={reviewComment}
+                onChange={e => setReviewComment(e.target.value)}
+                rows={3}
+                className="text-xs border-slate-200 focus:border-slate-400 focus:ring-0 rounded-xl"
+              />
+            </div>
+            {workflowError && (
+              <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-xs text-rose-600 font-medium">
+                {workflowError}
+              </div>
+            )}
+            <Button
+              className="w-full bg-[#0f172a] hover:bg-[#1e293b] text-white"
+              disabled={submittingWorkflow || (reviewStatus === 'changes_requested' && !reviewComment.trim())}
+              onClick={handleReview}
+            >
+              {submittingWorkflow ? 'Submitting...' : 'Submit Decision'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Return Dialog */}
+      <Dialog open={showBulkReturnDialog} onOpenChange={setShowBulkReturnDialog}>
+        <DialogContent className="max-w-md font-sans bg-white border border-slate-100 shadow-xl rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-slate-800 font-bold font-heading text-lg font-heading">
+              Return WBS for Changes
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <p className="text-xs text-slate-500 leading-relaxed font-sans">
+              Provide a clear reason for requesting changes on the {selectedL1Codes.length} selected WBS Head(s).
+            </p>
+            <div>
+              <Label className="text-xs font-semibold text-slate-600 block mb-1">
+                Reason for Changes *
+              </Label>
+              <Textarea
+                placeholder="Describe the changes needed (e.g. Please revise Blockwork quantities.)"
+                value={bulkReturnComment}
+                onChange={e => setBulkReturnComment(e.target.value)}
+                rows={3}
+                className="text-xs border-slate-200 focus:border-slate-400 focus:ring-0 rounded-xl"
+              />
+            </div>
+            {workflowError && (
+              <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-xs text-rose-600 font-medium">
+                {workflowError}
+              </div>
+            )}
+            <Button
+              className="w-full bg-[#0f172a] hover:bg-[#1e293b] text-white"
+              disabled={submittingWorkflow || !bulkReturnComment.trim()}
+              onClick={handleBulkReturnSubmit}
+            >
+              {submittingWorkflow ? 'Submitting...' : 'Submit'}
             </Button>
           </div>
         </DialogContent>
