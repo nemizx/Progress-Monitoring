@@ -8,7 +8,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2, HelpCircle } from 'lucide-react';
+import { Loader2, HelpCircle, FileCheck, Lock, Printer } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 
 function SectionTitle({ title, tooltip }) {
@@ -134,60 +134,100 @@ export default function MprReviewDialog({
   meta,
   sections,
   onConfirm,
+  onApprove,
+  onPrint,
   isSubmitting,
 }) {
   return (
     <TooltipProvider>
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl max-h-[90vh] flex flex-col gap-0 p-0">
-        <DialogHeader className="px-6 pt-6 pb-4 border-b shrink-0">
-          <DialogTitle className="text-lg font-heading">Review &amp; Final Submit MPR</DialogTitle>
-          <DialogDescription className="text-sm">
-            Review the monthly progress report below before final submission for{' '}
-            <span className="font-semibold text-foreground">{meta?.monthLabel}</span>.
-            After submit, this month will be locked.
-          </DialogDescription>
-          <div className="flex flex-wrap gap-4 pt-2 text-xs text-muted-foreground">
-            {meta?.projectName && (
-              <span>
-                <span className="font-semibold text-foreground">Project:</span> {meta.projectName}
-              </span>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-6xl max-h-[90vh] flex flex-col gap-0 p-0">
+          <DialogHeader className="px-6 pt-6 pb-4 border-b shrink-0">
+            <DialogTitle className="text-lg font-heading">Review &amp; Submit MPR</DialogTitle>
+            <DialogDescription className="text-sm">
+              Review the monthly progress report below. You can save as submitted or approve &amp; lock the report for{' '}
+              <span className="font-semibold text-foreground">{meta?.monthLabel}</span>.
+            </DialogDescription>
+            <div className="flex flex-wrap gap-4 pt-2 text-xs text-muted-foreground">
+              {meta?.projectName && (
+                <span>
+                  <span className="font-semibold text-foreground">Project:</span> {meta.projectName}
+                </span>
+              )}
+              {meta?.submittedBy && (
+                <span>
+                  <span className="font-semibold text-foreground">Submitted by:</span> {meta.submittedBy}
+                </span>
+              )}
+            </div>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+            {meta?.elevationPhotoUrl && (
+              <div className="p-4 border rounded-xl bg-slate-900 text-white flex items-center gap-4 shadow-sm">
+                <div className="w-32 h-24 rounded-lg overflow-hidden shrink-0 border border-slate-700 bg-slate-950 flex items-center justify-center">
+                  <img src={meta.elevationPhotoUrl} alt="Project Elevation" className="w-full h-full object-cover" />
+                </div>
+                <div className="space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/30">
+                    Project Elevation View
+                  </span>
+                  <h4 className="font-bold text-sm text-white">{meta.projectName || 'Project Elevation'}</h4>
+                  <p className="text-xs text-slate-300">Project elevation photo from Project Master for user MPR print reports.</p>
+                </div>
+              </div>
             )}
-            {meta?.submittedBy && (
-              <span>
-                <span className="font-semibold text-foreground">Submitted by:</span> {meta.submittedBy}
-              </span>
-            )}
+
+            {sections.map((section) => (
+              <ReviewSection key={section.title} section={section} />
+            ))}
           </div>
-        </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-          {sections.map((section) => (
-            <ReviewSection key={section.title} section={section} />
-          ))}
-        </div>
-
-        <DialogFooter className="px-6 py-4 border-t shrink-0 gap-2 sm:gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={isSubmitting}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={onConfirm}
-            disabled={isSubmitting}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
-          >
-            {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            {isSubmitting ? 'Submitting...' : 'Confirm Final Submit'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter className="px-6 py-4 border-t shrink-0 gap-2 sm:gap-2">
+            {onPrint && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onPrint}
+                disabled={isSubmitting}
+                className="gap-2 border-blue-200 text-blue-700 hover:bg-blue-50"
+              >
+                <Printer className="w-4 h-4 text-blue-600" />
+                Print Report (PDF)
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={isSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={onConfirm}
+              disabled={isSubmitting}
+              variant="secondary"
+              className="gap-2"
+            >
+              {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCheck className="w-4 h-4" />}
+              Save &amp; Submit
+            </Button>
+            {onApprove && (
+              <Button
+                type="button"
+                onClick={onApprove}
+                disabled={isSubmitting}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+              >
+                {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+                Approve &amp; Lock
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </TooltipProvider>
   );
 }

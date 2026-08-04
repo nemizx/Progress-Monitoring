@@ -7,17 +7,26 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Lock, Plus, Minus, Save, FileCheck, HelpCircle } from 'lucide-react';
+import { Loader2, Lock, Plus, Minus, Save, FileCheck, HelpCircle, ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { formatCurrencyINR, normalizeDateKey } from '@/lib/formatters';
 import { filterProgressBySubProject } from '@/lib/subProjectScope';
 import {
   calcAvgWeeklyLabour,
   calcWeeklyVowd,
+  calcWprBillSummary,
+  calcWprRequisitionSummary,
   createDefaultWprForm,
+  createEmptyBillToCertifyRow,
   createEmptyFeedbackRow,
+  createEmptyMaterialRequisitionRow,
   createEmptyNamedRow,
   formatPct,
+  generateAllBillRowsFromBaseline,
+  generateAllRequisitionRowsFromBaseline,
+  getMprBaselineForWpr,
+  isBillRowAchieved,
+  isRequisitionRowAchieved,
   parseWprFormData,
   sumPlanAchieved,
 } from '@/lib/wprForm';
@@ -137,6 +146,7 @@ function MultiRowSection({
   onChange,
   locked = false,
   showRemark = true,
+  showAgencyName = false,
 }) {
   const totals = sumPlanAchieved(rows);
 
@@ -145,12 +155,22 @@ function MultiRowSection({
   };
 
   const addRow = () => {
-    onChange([...rows, showRemark ? createEmptyNamedRow() : createEmptyFeedbackRow()]);
+    if (showAgencyName) {
+      onChange([...rows, createEmptyBillToCertifyRow()]);
+    } else {
+      onChange([...rows, showRemark ? createEmptyNamedRow() : createEmptyFeedbackRow()]);
+    }
   };
 
   const removeRow = (id) => {
     if (rows.length <= 1) {
-      onChange([showRemark ? createEmptyNamedRow() : createEmptyFeedbackRow()]);
+      onChange([
+        showAgencyName
+          ? createEmptyBillToCertifyRow()
+          : showRemark
+          ? createEmptyNamedRow()
+          : createEmptyFeedbackRow(),
+      ]);
       return;
     }
     onChange(rows.filter((r) => r.id !== id));
@@ -168,6 +188,9 @@ function MultiRowSection({
             <tr className="border-b bg-muted/40">
               <th className="text-left p-2 text-xs font-semibold text-muted-foreground w-10">#</th>
               <th className="text-left p-2 text-xs font-semibold text-muted-foreground">{nameLabel}</th>
+              {showAgencyName ? (
+                <th className="text-left p-2 text-xs font-semibold text-muted-foreground">Name of Agency</th>
+              ) : null}
               <th className="text-left p-2 text-xs font-semibold text-muted-foreground w-28">Plan</th>
               <th className="text-left p-2 text-xs font-semibold text-muted-foreground w-28">Achieved</th>
               {showRemark ? (
@@ -190,6 +213,16 @@ function MultiRowSection({
                     placeholder={nameLabel}
                   />
                 </td>
+                {showAgencyName ? (
+                  <td className="p-2">
+                    <Input
+                      value={row.agencyName || ''}
+                      onChange={(e) => updateRow(row.id, 'agencyName', e.target.value)}
+                      disabled={locked}
+                      placeholder="Name of Agency"
+                    />
+                  </td>
+                ) : null}
                 <td className="p-2">
                   <Input
                     type="number"
@@ -247,6 +280,429 @@ function MultiRowSection({
   );
 }
 
+function Point5RequisitionSection({
+  title,
+  tooltip,
+  rows = [],
+  onChange,
+  locked = false,
+}) {
+  const [expandedGroups, setExpandedGroups] = useState({});
+
+  const toggleGroup = (groupName) => {
+    setExpandedGroups((prev) => ({ ...prev, [groupName]: !prev[groupName] }));
+  };
+
+  const grouped = useMemo(() => {
+    const groups = {};
+    (rows || []).forEach((row) => {
+      const gKey = (row.subItemName || row.name || 'General Requisition').trim();
+      if (!groups[gKey]) groups[gKey] = [];
+      groups[gKey].push(row);
+    });
+    return groups;
+  }, [rows]);
+
+  const updateRow = (id, field, value) => {
+    onChange(rows.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
+  };
+
+  const addSubItemRow = (gKey) => {
+    onChange([...rows, createEmptyMaterialRequisitionRow({ subItemName: gKey, name: gKey })]);
+  };
+
+  const removeRow = (id) => {
+    if (rows.length <= 1) {
+      onChange([createEmptyMaterialRequisitionRow()]);
+      return;
+    }
+    onChange(rows.filter((r) => r.id !== id));
+  };
+
+  const overallPlan = rows.length;
+  const overallAchieved = rows.filter(isRequisitionRowAchieved).length;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <TitleWithTooltip text={title} tooltip={tooltip} />
+        <PctBadge plan={overallPlan} achieved={overallAchieved} />
+      </div>
+
+      <div className="space-y-3">
+        {Object.entries(grouped).map(([gKey, groupRows]) => {
+          const isExpanded = Boolean(expandedGroups[gKey]);
+          const groupPlan = groupRows.length;
+          const groupAchieved = groupRows.filter(isRequisitionRowAchieved).length;
+
+          return (
+            <div key={gKey} className="border rounded-lg overflow-hidden bg-card">
+              <div
+                onClick={() => toggleGroup(gKey)}
+                className="p-3 bg-muted/40 hover:bg-muted/60 transition-colors flex flex-wrap items-center justify-between gap-3 cursor-pointer select-none"
+              >
+                <div className="flex items-center gap-3">
+                  <Button variant="ghost" size="icon" className="h-6 w-6 p-0 text-muted-foreground pointer-events-none">
+                    {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </Button>
+                  <span className="font-semibold text-sm text-foreground">{gKey}</span>
+                </div>
+
+                <div className="flex items-center gap-4 text-xs">
+                  <span className="text-muted-foreground">
+                    Plan: <strong className="text-foreground">{groupPlan}</strong>
+                  </span>
+                  <span className="text-muted-foreground">
+                    Achieved: <strong className="text-foreground">{groupAchieved}</strong>
+                  </span>
+                  <span className="font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                    {formatPct(groupPlan, groupAchieved)}
+                  </span>
+                  <span className="text-xs text-primary font-medium flex items-center gap-1 ml-1">
+                    {isExpanded ? 'Collapse' : `Expand (${groupPlan} rows)`}
+                  </span>
+                </div>
+              </div>
+
+              {isExpanded && (
+                <div className="p-3 border-t overflow-x-auto">
+                  <table className="w-full text-sm border-collapse min-w-[850px]">
+                    <thead>
+                      <tr className="border-b bg-muted/20">
+                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground w-10">#</th>
+                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground w-32">Date</th>
+                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground w-36">Requisition No.</th>
+                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground">Requisition</th>
+                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground w-24">Unit</th>
+                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground w-24">Qty</th>
+                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground w-36">Received Date</th>
+                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground">Remark</th>
+                        {!locked ? (
+                          <th className="text-center p-2 text-xs font-semibold text-muted-foreground w-20">Action</th>
+                        ) : null}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {groupRows.map((row, idx) => {
+                        const achieved = isRequisitionRowAchieved(row);
+                        return (
+                          <tr key={row.id} className={`border-b last:border-0 ${achieved ? 'bg-emerald-50/40' : ''}`}>
+                            <td className="p-2 text-xs text-muted-foreground">{idx + 1}</td>
+                            <td className="p-2">
+                              <Input
+                                type="date"
+                                value={row.date || ''}
+                                onChange={(e) => updateRow(row.id, 'date', e.target.value)}
+                                disabled={locked}
+                              />
+                            </td>
+                            <td className="p-2">
+                              <Input
+                                value={row.requisitionNo || ''}
+                                onChange={(e) => updateRow(row.id, 'requisitionNo', e.target.value)}
+                                disabled={locked}
+                                placeholder="e.g. REQ-045"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <Input
+                                value={row.name || gKey}
+                                disabled
+                                className="bg-muted/50 font-medium"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <Input
+                                value={row.unit || ''}
+                                onChange={(e) => updateRow(row.id, 'unit', e.target.value)}
+                                disabled={locked}
+                                placeholder="Unit"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <Input
+                                type="number"
+                                step="any"
+                                value={row.qty ?? ''}
+                                onChange={(e) => updateRow(row.id, 'qty', e.target.value)}
+                                disabled={locked}
+                                placeholder="Qty"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <Input
+                                type="date"
+                                value={row.receivedDate || ''}
+                                onChange={(e) => updateRow(row.id, 'receivedDate', e.target.value)}
+                                disabled={locked}
+                              />
+                            </td>
+                            <td className="p-2">
+                              <Input
+                                value={row.remark || ''}
+                                onChange={(e) => updateRow(row.id, 'remark', e.target.value)}
+                                disabled={locked}
+                                placeholder="Remark"
+                              />
+                            </td>
+                            {!locked ? (
+                              <td className="p-2 text-center">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                  onClick={() => removeRow(row.id)}
+                                >
+                                  <Minus className="w-3.5 h-3.5" />
+                                </Button>
+                              </td>
+                            ) : null}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {!locked && (
+                    <div className="mt-2 text-right">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="text-xs h-7 gap-1"
+                        onClick={() => addSubItemRow(gKey)}
+                      >
+                        <Plus className="w-3 h-3" /> Add Row to {gKey}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="p-3 bg-muted/40 border rounded-lg flex flex-wrap items-center justify-between gap-4 text-xs font-medium">
+        <div className="flex items-center gap-6">
+          <span>Total Planned: <strong className="font-mono text-sm">{overallPlan}</strong></span>
+          <span>Total Achieved: <strong className="font-mono text-sm text-emerald-700">{overallAchieved}</strong></span>
+        </div>
+        <div className="font-semibold text-emerald-700">
+          Overall Achievement: {formatPct(overallPlan, overallAchieved)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Point6BillsSection({
+  title,
+  tooltip,
+  rows = [],
+  onChange,
+  locked = false,
+}) {
+  const [expandedGroups, setExpandedGroups] = useState({});
+
+  const toggleGroup = (groupName) => {
+    setExpandedGroups((prev) => ({ ...prev, [groupName]: !prev[groupName] }));
+  };
+
+  const grouped = useMemo(() => {
+    const groups = {};
+    (rows || []).forEach((row) => {
+      const gKey = (row.subItemName || row.name || 'General Bills').trim();
+      if (!groups[gKey]) groups[gKey] = [];
+      groups[gKey].push(row);
+    });
+    return groups;
+  }, [rows]);
+
+  const updateRow = (id, field, value) => {
+    onChange(rows.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
+  };
+
+  const addSubItemRow = (gKey) => {
+    onChange([...rows, createEmptyBillToCertifyRow({ subItemName: gKey, name: gKey })]);
+  };
+
+  const removeRow = (id) => {
+    if (rows.length <= 1) {
+      onChange([createEmptyBillToCertifyRow()]);
+      return;
+    }
+    onChange(rows.filter((r) => r.id !== id));
+  };
+
+  const overallPlan = rows.length;
+  const overallAchieved = rows.filter(isBillRowAchieved).length;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <TitleWithTooltip text={title} tooltip={tooltip} />
+        <PctBadge plan={overallPlan} achieved={overallAchieved} />
+      </div>
+
+      <div className="space-y-3">
+        {Object.entries(grouped).map(([gKey, groupRows]) => {
+          const isExpanded = Boolean(expandedGroups[gKey]);
+          const groupPlan = groupRows.length;
+          const groupAchieved = groupRows.filter(isBillRowAchieved).length;
+
+          return (
+            <div key={gKey} className="border rounded-lg overflow-hidden bg-card">
+              <div
+                onClick={() => toggleGroup(gKey)}
+                className="p-3 bg-muted/40 hover:bg-muted/60 transition-colors flex flex-wrap items-center justify-between gap-3 cursor-pointer select-none"
+              >
+                <div className="flex items-center gap-3">
+                  <Button variant="ghost" size="icon" className="h-6 w-6 p-0 text-muted-foreground pointer-events-none">
+                    {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </Button>
+                  <span className="font-semibold text-sm text-foreground">{gKey}</span>
+                </div>
+
+                <div className="flex items-center gap-4 text-xs">
+                  <span className="text-muted-foreground">
+                    Plan: <strong className="text-foreground">{groupPlan}</strong>
+                  </span>
+                  <span className="text-muted-foreground">
+                    Achieved: <strong className="text-foreground">{groupAchieved}</strong>
+                  </span>
+                  <span className="font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                    {formatPct(groupPlan, groupAchieved)}
+                  </span>
+                  <span className="text-xs text-primary font-medium flex items-center gap-1 ml-1">
+                    {isExpanded ? 'Collapse' : `Expand (${groupPlan} rows)`}
+                  </span>
+                </div>
+              </div>
+
+              {isExpanded && (
+                <div className="p-3 border-t overflow-x-auto">
+                  <table className="w-full text-sm border-collapse min-w-[900px]">
+                    <thead>
+                      <tr className="border-b bg-muted/20">
+                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground w-10">#</th>
+                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground w-32">Bill Date</th>
+                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground">Bills to Certify</th>
+                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground">Name of Agency</th>
+                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground w-32">Bill Amount</th>
+                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground w-36">Certified Date</th>
+                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground">Remark</th>
+                        {!locked ? (
+                          <th className="text-center p-2 text-xs font-semibold text-muted-foreground w-20">Action</th>
+                        ) : null}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {groupRows.map((row, idx) => {
+                        const achieved = isBillRowAchieved(row);
+                        return (
+                          <tr key={row.id} className={`border-b last:border-0 ${achieved ? 'bg-emerald-50/40' : ''}`}>
+                            <td className="p-2 text-xs text-muted-foreground">{idx + 1}</td>
+                            <td className="p-2">
+                              <Input
+                                type="date"
+                                value={row.billDate || ''}
+                                onChange={(e) => updateRow(row.id, 'billDate', e.target.value)}
+                                disabled={locked}
+                              />
+                            </td>
+                            <td className="p-2">
+                              <Input
+                                value={row.name || gKey}
+                                disabled
+                                className="bg-muted/50 font-medium"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <Input
+                                value={row.agencyName || ''}
+                                onChange={(e) => updateRow(row.id, 'agencyName', e.target.value)}
+                                disabled={locked}
+                                placeholder="Name of Agency"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <Input
+                                type="number"
+                                step="any"
+                                value={row.billAmount ?? ''}
+                                onChange={(e) => updateRow(row.id, 'billAmount', e.target.value)}
+                                disabled={locked}
+                                placeholder="Amount ₹"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <Input
+                                type="date"
+                                value={row.certifiedDate || ''}
+                                onChange={(e) => updateRow(row.id, 'certifiedDate', e.target.value)}
+                                disabled={locked}
+                              />
+                            </td>
+                            <td className="p-2">
+                              <Input
+                                value={row.remark || ''}
+                                onChange={(e) => updateRow(row.id, 'remark', e.target.value)}
+                                disabled={locked}
+                                placeholder="Remark"
+                              />
+                            </td>
+                            {!locked ? (
+                              <td className="p-2 text-center">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                  onClick={() => removeRow(row.id)}
+                                >
+                                  <Minus className="w-3.5 h-3.5" />
+                                </Button>
+                              </td>
+                            ) : null}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {!locked && (
+                    <div className="mt-2 text-right">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="text-xs h-7 gap-1"
+                        onClick={() => addSubItemRow(gKey)}
+                      >
+                        <Plus className="w-3 h-3" /> Add Row to {gKey}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="p-3 bg-muted/40 border rounded-lg flex flex-wrap items-center justify-between gap-4 text-xs font-medium">
+        <div className="flex items-center gap-6">
+          <span>Total Planned: <strong className="font-mono text-sm">{overallPlan}</strong></span>
+          <span>Total Achieved: <strong className="font-mono text-sm text-emerald-700">{overallAchieved}</strong></span>
+        </div>
+        <div className="font-semibold text-emerald-700">
+          Overall Achievement: {formatPct(overallPlan, overallAchieved)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function WprSheetPanel({
   projectId,
   subProjectId,
@@ -268,7 +724,7 @@ export default function WprSheetPanel({
   const weekStart = week?.startDate || '';
   const weekEnd = week?.endDate || '';
   const scopeKey = `${projectId}:${subProjectId || 'project'}:${weekId}`;
-  const isLocked = status === 'submitted';
+  const isLocked = status === 'approved';
 
   const { data: existingReports = [], isLoading: reportLoading } = useQuery({
     queryKey: ['wpr-report', projectId, subProjectId || 'project', weekId],
@@ -309,6 +765,12 @@ export default function WprSheetPanel({
     enabled: !!projectId,
   });
 
+  const { data: allMprReports = [] } = useQuery({
+    queryKey: ['mpr-reports-for-wpr', projectId],
+    queryFn: () => base44.entities.MprReport.filter({ project_id: projectId }, '-month_id', 12),
+    enabled: !!projectId,
+  });
+
   const scopedProgress = useMemo(
     () => subProjectId 
       ? filterProgressBySubProject(allProgress, allBudgetItems, allWbsItems, subProjectId)
@@ -326,6 +788,11 @@ export default function WprSheetPanel({
     [scopedProgress, weekStart, weekEnd]
   );
 
+  const wprMonthId = week?.monthId || (week?.startDate ? String(week.startDate).slice(0, 7) : '');
+  const mprBaselineInfo = useMemo(() => {
+    return getMprBaselineForWpr(allMprReports, week?.weekNum, wprMonthId);
+  }, [allMprReports, week?.weekNum, wprMonthId]);
+
   // Reset when week/scope changes
   useEffect(() => {
     setLoadedKey('');
@@ -333,7 +800,7 @@ export default function WprSheetPanel({
     setStatus('draft');
     setForm(createDefaultWprForm(selectedProject));
     // Only re-init when week/project/sub-project scope changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [scopeKey]);
 
   // Hydrate from saved report + locked computed fields
@@ -343,17 +810,33 @@ export default function WprSheetPanel({
     const existing = existingReports[0];
     const parsed = parseWprFormData(existing?.form_data);
     const base = createDefaultWprForm(selectedProject);
+    const mprBaselines = mprBaselineInfo?.missing ? null : mprBaselineInfo;
+
+    const hasRealItem = (list) => Array.isArray(list) && list.some((r) => (r?.name || r?.subItemName || '').trim() !== '');
+    const resolveMultiRow = (savedRows, baselineRows, defaultRows) => {
+      if (hasRealItem(savedRows)) return savedRows;
+      if (hasRealItem(baselineRows)) return baselineRows;
+      return savedRows?.length ? savedRows : defaultRows;
+    };
 
     if (parsed) {
       setForm({
         ...base,
         ...parsed,
         avgLabour: {
-          plan: parsed.avgLabour?.plan ?? '',
+          plan: parsed.avgLabour?.plan !== '' && parsed.avgLabour?.plan != null ? parsed.avgLabour.plan : (mprBaselines?.avgLabour ?? ''),
           achieved: avgLabour,
         },
+        milestones: {
+          plan: parsed.milestones?.plan !== '' && parsed.milestones?.plan != null ? parsed.milestones.plan : (mprBaselines?.milestones ?? ''),
+          achieved: parsed.milestones?.achieved ?? '',
+        },
+        contractorReviewMeeting: {
+          plan: parsed.contractorReviewMeeting?.plan !== '' && parsed.contractorReviewMeeting?.plan != null ? parsed.contractorReviewMeeting.plan : (mprBaselines?.contractorReviewMeeting ?? ''),
+          achieved: parsed.contractorReviewMeeting?.achieved ?? '',
+        },
         valueOfWorkDone: {
-          plan: parsed.valueOfWorkDone?.plan ?? '',
+          plan: parsed.valueOfWorkDone?.plan !== '' && parsed.valueOfWorkDone?.plan != null ? parsed.valueOfWorkDone.plan : (mprBaselines?.valueOfWorkDone ?? ''),
           achieved: weeklyVowd,
         },
         qualityRating: {
@@ -374,36 +857,60 @@ export default function WprSheetPanel({
             normalizeDateKey(selectedProject?.end_date) ||
             '',
         },
-        materialRequisitions: parsed.materialRequisitions?.length
-          ? parsed.materialRequisitions
-          : base.materialRequisitions,
-        billsToCertify: parsed.billsToCertify?.length ? parsed.billsToCertify : base.billsToCertify,
-        leadershipInputs: parsed.leadershipInputs?.length
-          ? parsed.leadershipInputs
-          : base.leadershipInputs,
-        mockUpActivities: parsed.mockUpActivities?.length
-          ? parsed.mockUpActivities
-          : base.mockUpActivities,
-        contractorsMobilized: parsed.contractorsMobilized?.length
-          ? parsed.contractorsMobilized
-          : base.contractorsMobilized,
-        keyPlanActivities: parsed.keyPlanActivities?.length
-          ? parsed.keyPlanActivities
-          : base.keyPlanActivities,
-        workMethodology: parsed.workMethodology?.length
-          ? parsed.workMethodology
-          : base.workMethodology,
-        supportRequired: parsed.supportRequired?.length
-          ? parsed.supportRequired
-          : base.supportRequired,
+        materialRequisitions: generateAllRequisitionRowsFromBaseline(
+          mprBaselines?.materialRequisitions,
+          parsed.materialRequisitions
+        ),
+        materialRequisitionsSummary: parsed.materialRequisitionsSummary || { plan: '', achieved: '' },
+        billsToCertify: generateAllBillRowsFromBaseline(
+          mprBaselines?.billsToCertify,
+          parsed.billsToCertify
+        ),
+        billsToCertifySummary: parsed.billsToCertifySummary || { plan: '', achieved: '' },
+        leadershipInputs: resolveMultiRow(parsed.leadershipInputs, mprBaselines?.leadershipInputs, base.leadershipInputs),
+        mockUpActivities: resolveMultiRow(parsed.mockUpActivities, mprBaselines?.mockUpActivities, base.mockUpActivities),
+        contractorsMobilized: resolveMultiRow(parsed.contractorsMobilized, mprBaselines?.contractorsMobilized, base.contractorsMobilized),
+        keyPlanActivities: resolveMultiRow(parsed.keyPlanActivities, mprBaselines?.keyPlanActivities, base.keyPlanActivities),
+        workMethodology: resolveMultiRow(parsed.workMethodology, mprBaselines?.workMethodology, base.workMethodology),
+        supportRequired: resolveMultiRow(parsed.supportRequired, mprBaselines?.supportRequired, base.supportRequired),
       });
       setReportId(existing.id);
       setStatus(existing.status || 'draft');
     } else {
       setForm({
         ...base,
-        avgLabour: { plan: '', achieved: avgLabour },
-        valueOfWorkDone: { plan: '', achieved: weeklyVowd },
+        avgLabour: { plan: mprBaselines?.avgLabour ?? '', achieved: avgLabour },
+        milestones: { plan: mprBaselines?.milestones ?? '', achieved: '' },
+        qualityRating: { plan: 10, achieved: '' },
+        healthSafetyRating: { plan: 10, achieved: '' },
+        contractorReviewMeeting: { plan: mprBaselines?.contractorReviewMeeting ?? '', achieved: '' },
+        valueOfWorkDone: { plan: mprBaselines?.valueOfWorkDone ?? '', achieved: weeklyVowd },
+        materialRequisitions: generateAllRequisitionRowsFromBaseline(
+          mprBaselines?.materialRequisitions,
+          []
+        ),
+        billsToCertify: generateAllBillRowsFromBaseline(
+          mprBaselines?.billsToCertify,
+          []
+        ),
+        leadershipInputs: mprBaselines?.leadershipInputs?.length
+          ? mprBaselines.leadershipInputs
+          : base.leadershipInputs,
+        mockUpActivities: mprBaselines?.mockUpActivities?.length
+          ? mprBaselines.mockUpActivities
+          : base.mockUpActivities,
+        contractorsMobilized: mprBaselines?.contractorsMobilized?.length
+          ? mprBaselines.contractorsMobilized
+          : base.contractorsMobilized,
+        keyPlanActivities: mprBaselines?.keyPlanActivities?.length
+          ? mprBaselines.keyPlanActivities
+          : base.keyPlanActivities,
+        workMethodology: mprBaselines?.workMethodology?.length
+          ? mprBaselines.workMethodology
+          : base.workMethodology,
+        supportRequired: mprBaselines?.supportRequired?.length
+          ? mprBaselines.supportRequired
+          : base.supportRequired,
       });
       setReportId(null);
       setStatus('draft');
@@ -418,6 +925,7 @@ export default function WprSheetPanel({
     selectedProject,
     avgLabour,
     weeklyVowd,
+    mprBaselineInfo,
   ]);
 
   // Keep locked achieved fields in sync while editing
@@ -481,6 +989,7 @@ export default function WprSheetPanel({
         week_id: weekId,
         week_start: weekStart,
         week_end: weekEnd,
+        week_num: week?.weekNum || 1,
         status: nextStatus,
         form_data: JSON.stringify(formData),
         submitted_by: submittedBy || 'Supervisor',
@@ -500,7 +1009,94 @@ export default function WprSheetPanel({
     ]
   );
 
+  const syncAchievedToMpr = async () => {
+    const achievedReqs = (form.materialRequisitions || []).filter(isRequisitionRowAchieved);
+    const achievedBills = (form.billsToCertify || []).filter(isBillRowAchieved);
+
+    if (achievedReqs.length === 0 && achievedBills.length === 0) return;
+
+    try {
+      const mprList = await base44.entities.MprReport.filter({ project_id: projectId });
+      if (mprList && mprList.length > 0) {
+        const currentMpr = mprList[0];
+        let mprFormData = currentMpr.form_data;
+        if (typeof mprFormData === 'string') {
+          try { mprFormData = JSON.parse(mprFormData); } catch { mprFormData = {}; }
+        }
+        if (!mprFormData) mprFormData = {};
+
+        let updatedReqs = Array.isArray(mprFormData.materialRequisitions) ? [...mprFormData.materialRequisitions] : [];
+        let updatedBills = Array.isArray(mprFormData.contractorBills) ? [...mprFormData.contractorBills] : [];
+
+        achievedReqs.forEach((r) => {
+          const existsIdx = updatedReqs.findIndex((m) => m.id === r.id || (m.requisitionNo && m.requisitionNo === r.requisitionNo));
+          const itemObj = {
+            id: r.id || `req_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            date: r.date || '',
+            requisitionNo: r.requisitionNo || '',
+            particulars: r.name || r.subItemName || '',
+            unit: r.unit || '',
+            qty: r.qty || '',
+            receivedDate: r.receivedDate || '',
+            remarks: r.remark || '',
+          };
+          if (existsIdx >= 0) {
+            updatedReqs[existsIdx] = { ...updatedReqs[existsIdx], ...itemObj };
+          } else {
+            updatedReqs.push(itemObj);
+          }
+        });
+
+        achievedBills.forEach((b) => {
+          const existsIdx = updatedBills.findIndex((m) => m.id === b.id);
+          const itemObj = {
+            id: b.id || `bill_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            date: b.billDate || '',
+            work: b.name || b.subItemName || '',
+            raBillNo: '',
+            agencyName: b.agencyName || '',
+            amount: b.billAmount || '',
+            certifiedDate: b.certifiedDate || '',
+          };
+          if (existsIdx >= 0) {
+            updatedBills[existsIdx] = { ...updatedBills[existsIdx], ...itemObj };
+          } else {
+            updatedBills.push(itemObj);
+          }
+        });
+
+        await base44.entities.MprReport.update(currentMpr.id, {
+          form_data: JSON.stringify({
+            ...mprFormData,
+            materialRequisitions: updatedReqs,
+            contractorBills: updatedBills,
+          }),
+        });
+      }
+    } catch (err) {
+      console.warn('Sync to MPR failed:', err);
+    }
+  };
+
   const persist = async (nextStatus) => {
+    if (!projectId || !week?.wprYear || !week?.wprMonthNum || !week?.weekNum || !weekStart || !weekEnd) {
+      toast({
+        title: 'Mandatory Fields Missing',
+        description: 'Please select Project, Year, Month, Week, Start Date, and End Date before saving.',
+        variant: 'destructive',
+      });
+      throw new Error('Mandatory fields missing');
+    }
+
+    if (weekStart > weekEnd) {
+      toast({
+        title: 'Invalid Date Range',
+        description: 'Start Date cannot be greater than End Date.',
+        variant: 'destructive',
+      });
+      throw new Error('Invalid date range');
+    }
+
     const payload = buildPayload(nextStatus);
     if (reportId) {
       const updated = await base44.entities.WprReport.update(reportId, payload);
@@ -509,6 +1105,7 @@ export default function WprSheetPanel({
       const created = await base44.entities.WprReport.create(payload);
       setReportId(created?.id || null);
     }
+    await syncAchievedToMpr();
     setStatus(nextStatus);
     queryClient.invalidateQueries({ queryKey: ['wpr-report', projectId, subProjectId || 'project', weekId] });
   };
@@ -552,12 +1149,32 @@ export default function WprSheetPanel({
       setShowReview(false);
       toast({
         title: 'WPR Submitted',
-        description: 'Weekly report submitted and locked for this week.',
+        description: 'Weekly report submitted for review.',
       });
     } catch (err) {
       toast({
         title: 'Submit Failed',
         description: err?.message || 'Could not submit WPR.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleApproveReport = async () => {
+    setSaving(true);
+    try {
+      await persist('approved');
+      setShowReview(false);
+      toast({
+        title: 'WPR Approved & Locked',
+        description: 'Weekly report approved and locked for this week.',
+      });
+    } catch (err) {
+      toast({
+        title: 'Approve Failed',
+        description: err?.message || 'Could not approve WPR.',
         variant: 'destructive',
       });
     } finally {
@@ -613,23 +1230,74 @@ export default function WprSheetPanel({
       };
     };
 
-    return [
-      simpleRow('1. Avg. No Of Labour Allocated', form.avgLabour.plan, avgLabour, {
-        tooltip: 'Average daily labour headcount for the week, auto-calculated from Contractor Labour entries.',
-      }),
-      simpleRow('2. No. of Construction Milestones to Achieve (Building wise)', form.milestones.plan, form.milestones.achieved, {
-        tooltip: 'Number of construction milestones planned versus achieved this week, building-wise.',
-      }),
-      simpleRow('3. Quality Rating', form.qualityRating.plan, form.qualityRating.achieved, {
-        tooltip: 'Rate the quality of work executed this week on a scale of 1–10.',
-      }),
-      simpleRow('4. Health and Safety Rating', form.healthSafetyRating.plan, form.healthSafetyRating.achieved, {
-        tooltip: 'Rate health & safety compliance on site this week on a scale of 1–10.',
-      }),
-      multiSection('5. No of Requisition Of Material', 'Requisition', form.materialRequisitions, true,
-        'Material requisitions raised this week — list each requisition with planned vs achieved quantities.'),
-      multiSection('6. Bills to certify', 'Bills to Certify', form.billsToCertify, true,
-        'Contractor or vendor bills that need certification this week.'),
+      const requisitionSummary = calcWprRequisitionSummary(form.materialRequisitions);
+      const billsSummary = calcWprBillSummary(form.billsToCertify);
+
+      const requisitionReviewSection = {
+        title: '5. No of Requisition Of Material',
+        tooltip: 'Material requisitions raised this week — list each requisition with date and received status.',
+        pctLabel: `Total % Achieved: ${formatPct(requisitionSummary.plan, requisitionSummary.achieved)}`,
+        columns: [
+          { key: 'sr', label: '#' },
+          { key: 'name', label: 'Requisition' },
+          { key: 'requisitionNo', label: 'Requisition No.' },
+          { key: 'date', label: 'Date' },
+          { key: 'receivedDate', label: 'Received Date' },
+          { key: 'remark', label: 'Remark' },
+        ],
+        rows: (form.materialRequisitions || [])
+          .filter((r) => (r.name || '').trim() || (r.requisitionNo || '').trim() || (r.date || '').trim() || (r.receivedDate || '').trim())
+          .map((r, i) => ({
+            id: r.id,
+            sr: i + 1,
+            name: r.name || '—',
+            requisitionNo: r.requisitionNo || '—',
+            date: r.date || '—',
+            receivedDate: r.receivedDate || '—',
+            remark: r.remark || '—',
+          })),
+      };
+
+      const billsReviewSection = {
+        title: '6. Bills to certify',
+        tooltip: 'Contractor or vendor bills that need certification this week.',
+        pctLabel: `Total % Achieved: ${formatPct(billsSummary.plan, billsSummary.achieved)}`,
+        columns: [
+          { key: 'sr', label: '#' },
+          { key: 'name', label: 'Bills to Certify' },
+          { key: 'agencyName', label: 'Name of Agency' },
+          { key: 'billDate', label: 'Bill Date' },
+          { key: 'certifiedDate', label: 'Certified Date' },
+          { key: 'remark', label: 'Remark' },
+        ],
+        rows: (form.billsToCertify || [])
+          .filter((r) => (r.name || '').trim() || (r.agencyName || '').trim() || (r.billDate || '').trim() || (r.certifiedDate || '').trim())
+          .map((r, i) => ({
+            id: r.id,
+            sr: i + 1,
+            name: r.name || '—',
+            agencyName: r.agencyName || '—',
+            billDate: r.billDate || '—',
+            certifiedDate: r.certifiedDate || '—',
+            remark: r.remark || '—',
+          })),
+      };
+
+      return [
+        simpleRow('1. Avg. No Of Labour Allocated', form.avgLabour.plan, avgLabour, {
+          tooltip: 'Average daily labour headcount for the week, auto-calculated from Contractor Labour entries.',
+        }),
+        simpleRow('2. No. of Construction Milestones to Achieve (Building wise)', form.milestones.plan, form.milestones.achieved, {
+          tooltip: 'Number of construction milestones planned versus achieved this week, building-wise.',
+        }),
+        simpleRow('3. Quality Rating', form.qualityRating.plan, form.qualityRating.achieved, {
+          tooltip: 'Rate the quality of work executed this week on a scale of 1–10.',
+        }),
+        simpleRow('4. Health and Safety Rating', form.healthSafetyRating.plan, form.healthSafetyRating.achieved, {
+          tooltip: 'Rate health & safety compliance on site this week on a scale of 1–10.',
+        }),
+        requisitionReviewSection,
+        billsReviewSection,
       multiSection('7. Leadership / Client / Consultant Inputs', 'Feedback', form.leadershipInputs, false,
         'Key directives or feedback received from leadership, client, or consultant to be adopted this week.'),
       multiSection('8. Mock up Activity', 'Mock up Activity', form.mockUpActivities, true,
@@ -668,15 +1336,24 @@ export default function WprSheetPanel({
 
   const loading = reportLoading || labourLoading || progressLoading;
 
-  if (!week) {
-    return (
-      <Card>
-        <CardContent className="p-8 text-center text-sm text-muted-foreground">
-          Select a week to fill the Weekly Progress Report.
-        </CardContent>
-      </Card>
-    );
-  }
+  const handleUnlockReport = async () => {
+    setSaving(true);
+    try {
+      await persist('draft');
+      toast({
+        title: 'Report Unlocked',
+        description: 'WPR report unlocked and restored to draft mode.',
+      });
+    } catch (err) {
+      toast({
+        title: 'Unlock Failed',
+        description: err?.message || 'Could not unlock report.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <TooltipProvider>
@@ -690,20 +1367,37 @@ export default function WprSheetPanel({
         <Card className="border shadow-sm">
           <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-sm font-semibold text-muted-foreground">
-              Fill plan vs achieved for {week?.label || 'the selected week'}
+              Fill plan vs achieved
             </CardTitle>
             <div className="flex items-center gap-2">
-              {isLocked ? (
+              {status === 'approved' ? (
                 <Badge className="bg-emerald-100 text-emerald-800 gap-1">
                   <Lock className="w-3 h-3" />
-                  Submitted — Locked
+                  Approved — Locked
                 </Badge>
-              ) : status === 'draft' && reportId ? (
-                <Badge variant="secondary">Draft</Badge>
+              ) : status === 'submitted' ? (
+                <Badge className="bg-blue-100 text-blue-800 gap-1">
+                  <FileCheck className="w-3 h-3" />
+                  Submitted — Editable
+                </Badge>
+              ) : reportId ? (
+                <Badge variant="secondary">Draft — Editable</Badge>
               ) : null}
             </div>
           </CardHeader>
           <CardContent className="space-y-8">
+            {mprBaselineInfo?.missing && (
+              <div className="p-4 border border-amber-300 bg-amber-50 rounded-lg flex items-start gap-3 text-amber-900 text-sm shadow-sm">
+                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="font-semibold text-amber-900 mb-0.5">MPR Weekly Plan Not Available</h4>
+                  <p className="text-amber-800 font-normal">
+                    Weekly Plan for <strong>{mprBaselineInfo.wprMonthLabel || 'this month'}</strong> is not available.
+                    Please complete and approve the <strong>{mprBaselineInfo.prevMonthLabel || 'previous month'}</strong> MPR first.
+                  </p>
+                </div>
+              </div>
+            )}
             <PlanAchievedRow
               label="1. Avg. No Of Labour Allocated"
               tooltip="Average daily labour headcount for the week, auto-calculated from Contractor Labour entries."
@@ -746,21 +1440,33 @@ export default function WprSheetPanel({
               planLocked
             />
 
-            <MultiRowSection
+            <Point5RequisitionSection
               title="5. No of Requisition Of Material"
-              tooltip="Material requisitions raised this week — list each requisition with planned vs achieved quantities."
-              nameLabel="Requisition"
+              tooltip="Material requisitions raised this week — list each requisition with date and received status."
               rows={form.materialRequisitions}
               onChange={(rows) => setForm((p) => ({ ...p, materialRequisitions: rows }))}
+              customSummary={form.materialRequisitionsSummary}
+              onSummaryChange={(field, val) =>
+                setForm((p) => ({
+                  ...p,
+                  materialRequisitionsSummary: { ...p.materialRequisitionsSummary, [field]: val },
+                }))
+              }
               locked={isLocked}
             />
 
-            <MultiRowSection
+            <Point6BillsSection
               title="6. Bills to certify"
               tooltip="Contractor or vendor bills that need certification this week."
-              nameLabel="Bills to Certify"
               rows={form.billsToCertify}
               onChange={(rows) => setForm((p) => ({ ...p, billsToCertify: rows }))}
+              customSummary={form.billsToCertifySummary}
+              onSummaryChange={(field, val) =>
+                setForm((p) => ({
+                  ...p,
+                  billsToCertifySummary: { ...p.billsToCertifySummary, [field]: val },
+                }))
+              }
               locked={isLocked}
             />
 
@@ -881,27 +1587,42 @@ export default function WprSheetPanel({
         </Card>
       )}
 
-      {!isLocked && !loading && (
+      {!loading && (
         <div className="flex justify-end gap-3 bg-card border rounded-xl p-4 shadow-sm">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={handleSaveDraft}
-            disabled={saving || loading}
-            className="gap-2"
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            Save as Draft
-          </Button>
-          <Button
-            type="button"
-            onClick={handleOpenReview}
-            disabled={saving || loading}
-            className="gap-2"
-          >
-            <FileCheck className="w-4 h-4" />
-            Save &amp; Review
-          </Button>
+          {!isLocked ? (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleSaveDraft}
+                disabled={saving || loading}
+                className="gap-2"
+              >
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save as Draft
+              </Button>
+              <Button
+                type="button"
+                onClick={handleOpenReview}
+                disabled={saving || loading}
+                className="gap-2"
+              >
+                <FileCheck className="w-4 h-4" />
+                Save &amp; Review
+              </Button>
+            </>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleUnlockReport}
+              disabled={saving || loading}
+              className="gap-2 border-amber-300 text-amber-800 hover:bg-amber-50"
+            >
+              <Lock className="w-4 h-4 text-amber-600" />
+              Unlock Report to Edit
+            </Button>
+          )}
         </div>
       )}
 
@@ -916,6 +1637,7 @@ export default function WprSheetPanel({
         }}
         sections={reviewSections}
         onConfirm={handleConfirmSubmit}
+        onApprove={handleApproveReport}
         isSubmitting={saving}
       />
     </div>

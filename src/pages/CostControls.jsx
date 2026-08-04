@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -12,8 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useToast } from '@/components/ui/use-toast';
 import { 
   Building2, Home, Hammer, ClipboardCheck, Lock, 
-  Sparkles, CheckCircle2, AlertCircle, RefreshCw, 
-  Search, Link2, Unlink, Coins, TrendingUp, HelpCircle
+  Sparkles, CheckCircle2, AlertCircle, RefreshCw, Link2, Unlink, Coins, TrendingUp
 } from 'lucide-react';
 import { formatCurrencyINR, formatCompactCurrencyINR } from '@/lib/formatters';
 import ProjectSubProjectSelector from '@/components/shared/ProjectSubProjectSelector';

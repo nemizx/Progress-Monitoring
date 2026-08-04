@@ -8,7 +8,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2, HelpCircle } from 'lucide-react';
+import { Loader2, HelpCircle, FileCheck, Lock } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 
 function SectionTitle({ title, tooltip }) {
@@ -115,6 +115,7 @@ export default function WprReviewDialog({
   meta,
   sections,
   onConfirm,
+  onApprove,
   isSubmitting,
 }) {
   return (
@@ -122,11 +123,10 @@ export default function WprReviewDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col gap-0 p-0">
         <DialogHeader className="px-6 pt-6 pb-4 border-b shrink-0">
-          <DialogTitle className="text-lg font-heading">Review &amp; Final Submit WPR</DialogTitle>
+          <DialogTitle className="text-lg font-heading">Review &amp; Submit WPR</DialogTitle>
           <DialogDescription className="text-sm">
-            Review the weekly progress report below before final submission for{' '}
+            Review the weekly progress report below. You can save as submitted or approve &amp; lock the report for{' '}
             <span className="font-semibold text-foreground">{meta?.weekLabel}</span>.
-            After submit, this week will be locked.
           </DialogDescription>
           <div className="flex flex-wrap gap-4 pt-2 text-xs text-muted-foreground">
             {meta?.projectName && (
@@ -166,11 +166,23 @@ export default function WprReviewDialog({
             type="button"
             onClick={onConfirm}
             disabled={isSubmitting}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+            variant="secondary"
+            className="gap-2"
           >
-            {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            {isSubmitting ? 'Submitting...' : 'Confirm Final Submit'}
+            {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCheck className="w-4 h-4" />}
+            Save &amp; Submit
           </Button>
+          {onApprove && (
+            <Button
+              type="button"
+              onClick={onApprove}
+              disabled={isSubmitting}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+            >
+              {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+              Approve &amp; Lock
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

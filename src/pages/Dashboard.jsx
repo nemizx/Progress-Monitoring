@@ -106,7 +106,7 @@ export default function Dashboard() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-heading font-bold tracking-tight">Command Center</h1>
+          <h1 className="text-2xl md:text-3xl font-heading font-bold tracking-tight">Dashboard</h1>
           <p className="text-sm text-muted-foreground mt-1">Real-time overview of all construction operations</p>
         </div>
         <div className="flex items-center gap-2">

@@ -36,12 +36,70 @@ export default function ProjectDetail({ project, onBack }) {
   const [elevationPhotoPreview, setElevationPhotoPreview] = useState('');
   const [uploadingElevationPhoto, setUploadingElevationPhoto] = useState(false);
 
+  const parseBuildingConfigs = (raw) => {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const [buildingConfigs, setBuildingConfigs] = useState(() => parseBuildingConfigs(project.building_configurations));
+
+  const buildingTotals = useMemo(() => {
+    return buildingConfigs.reduce((acc, row) => {
+      acc.floors += parseFloat(row.noOfFloor || row.no_of_floor) || 0;
+      acc.unitsResi += parseFloat(row.noOfUnitsResidential || row.no_of_units_residential) || 0;
+      acc.unitsComm += parseFloat(row.noOfUnitsCommercial || row.no_of_units_commercial) || 0;
+      acc.areaResi += parseFloat(row.areaPerUnitResidential || row.approx_area_resi) || 0;
+      acc.areaComm += parseFloat(row.areaPerUnitCommercial || row.approx_area_comm) || 0;
+      return acc;
+    }, { floors: 0, unitsResi: 0, unitsComm: 0, areaResi: 0, areaComm: 0 });
+  }, [buildingConfigs]);
+
+  // Automatic real-time synchronization: ensure subProjects automatically show under building configurations
+  useEffect(() => {
+    if (!subProjects || subProjects.length === 0) return;
+
+    setBuildingConfigs(prev => {
+      const existingMap = new Map(
+        prev.map(b => [(b.building || '').trim().toLowerCase(), b])
+      );
+
+      let changed = false;
+      const nextConfigs = [...prev];
+
+      subProjects.forEach(sp => {
+        const key = sp.name?.trim().toLowerCase();
+        if (key && !existingMap.has(key)) {
+          changed = true;
+          nextConfigs.push({
+            id: `bcfg_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            building: sp.name.trim(),
+            buildingDetails: '',
+            noOfFloor: sp.floors_count ? String(sp.floors_count) : '',
+            noOfUnitsResidential: sp.flats_per_floor && sp.floors_count ? String(sp.flats_per_floor * sp.floors_count) : '',
+            noOfUnitsCommercial: '',
+            areaPerUnitResidential: sp.built_up_area ? String(sp.built_up_area) : '',
+            areaPerUnitCommercial: '',
+          });
+        }
+      });
+
+      return changed ? nextConfigs : prev;
+    });
+  }, [subProjects]);
+
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const resetSubProjForm = () => setSubProjForm({ name: '', built_up_area: '', floors_count: '', flats_per_floor: '' });
 
   useEffect(() => {
     setProjectForm({ ...project });
+    setBuildingConfigs(parseBuildingConfigs(project.building_configurations));
     setElevationPhotoFile(null);
     setElevationPhotoPreview('');
   }, [project]);
@@ -157,6 +215,7 @@ export default function ProjectDetail({ project, onBack }) {
       name: projectForm.name.trim(),
       client: projectForm.client.trim(),
       project_type: projectForm.project_type,
+      building_configurations: JSON.stringify(buildingConfigs),
     };
 
     if (elevationPhotoFile) {
@@ -724,6 +783,287 @@ export default function ProjectDetail({ project, onBack }) {
                       className="hidden"
                       onChange={handleElevationPhotoChange}
                     />
+                  </div>
+
+                  {/* Area Details Section */}
+                  <div className="pt-4 border-t space-y-4">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                      <Building2 className="w-3.5 h-3.5 text-primary" /> Area Details
+                    </h4>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <Label className="text-xs">Plot Area</Label>
+                        <Input
+                          type="number"
+                          step="any"
+                          value={projectForm.plot_area ?? ''}
+                          onChange={e => setProjectForm({ ...projectForm, plot_area: e.target.value })}
+                          placeholder="e.g. 42948"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Reservation Area</Label>
+                        <Input
+                          type="number"
+                          step="any"
+                          value={projectForm.reservation_area ?? ''}
+                          onChange={e => setProjectForm({ ...projectForm, reservation_area: e.target.value })}
+                          placeholder="0.0"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Amenities Area</Label>
+                        <Input
+                          type="number"
+                          step="any"
+                          value={projectForm.amenities_area ?? ''}
+                          onChange={e => setProjectForm({ ...projectForm, amenities_area: e.target.value })}
+                          placeholder="e.g. 2147.42"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Open Space Area</Label>
+                        <Input
+                          type="number"
+                          step="any"
+                          value={projectForm.open_space_area ?? ''}
+                          onChange={e => setProjectForm({ ...projectForm, open_space_area: e.target.value })}
+                          placeholder="e.g. 4305.6"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Sanctioned F. S. I.</Label>
+                        <Input
+                          type="number"
+                          step="any"
+                          value={projectForm.sanctioned_fsi ?? ''}
+                          onChange={e => setProjectForm({ ...projectForm, sanctioned_fsi: e.target.value })}
+                          placeholder="e.g. 71743.0"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">T. D. R, if any</Label>
+                        <Input
+                          type="number"
+                          step="any"
+                          value={projectForm.tdr ?? ''}
+                          onChange={e => setProjectForm({ ...projectForm, tdr: e.target.value })}
+                          placeholder="e.g. 27916.43"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">RCC Slab Area (Sqft)</Label>
+                        <Input
+                          type="number"
+                          step="any"
+                          value={projectForm.rcc_slab_area ?? ''}
+                          onChange={e => setProjectForm({ ...projectForm, rcc_slab_area: e.target.value })}
+                          placeholder="e.g. 205221.56"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Built up area (Sqft)</Label>
+                        <Input
+                          type="number"
+                          step="any"
+                          value={projectForm.built_up_area ?? ''}
+                          onChange={e => setProjectForm({ ...projectForm, built_up_area: e.target.value })}
+                          placeholder="0.0"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Saleable area (Sqft)</Label>
+                        <Input
+                          type="number"
+                          step="any"
+                          value={projectForm.saleable_area ?? ''}
+                          onChange={e => setProjectForm({ ...projectForm, saleable_area: e.target.value })}
+                          placeholder="0.0"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Sub Project Section */}
+                  <div className="pt-4 border-t space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                        <Building2 className="w-3.5 h-3.5 text-primary" /> Sub Project
+                      </h4>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs gap-1"
+                          onClick={() => setBuildingConfigs(prev => [
+                            ...prev,
+                            {
+                              id: `bcfg_${Date.now()}`,
+                              building: '',
+                              buildingDetails: '',
+                              noOfFloor: '',
+                              noOfUnitsResidential: '',
+                              noOfUnitsCommercial: '',
+                              areaPerUnitResidential: '',
+                              areaPerUnitCommercial: '',
+                            }
+                          ])}
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Add Sub Project
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto rounded-lg border">
+                      <table className="w-full text-xs text-left">
+                        <thead className="bg-slate-50 text-slate-600 font-semibold border-b">
+                          <tr>
+                            <th className="p-2 w-8 text-center">#</th>
+                            <th className="p-2 min-w-[140px]">Sub Project Name</th>
+                            <th className="p-2 min-w-[160px]">Building Details</th>
+                            <th className="p-2 w-20">No of Floor</th>
+                            <th className="p-2 w-24">Units (Resi)</th>
+                            <th className="p-2 w-24">Units (Comm)</th>
+                            <th className="p-2 w-28">Area (Resi)</th>
+                            <th className="p-2 w-28">Area (Comm)</th>
+                            <th className="p-2 w-10 text-center"></th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {buildingConfigs.length === 0 ? (
+                            <tr>
+                              <td colSpan={9} className="p-4 text-center text-muted-foreground">
+                                No sub-projects added. Click "+ Add Sub Project" to add sub-project details.
+                              </td>
+                            </tr>
+                          ) : (
+                            buildingConfigs.map((row, idx) => (
+                              <tr key={row.id || idx}>
+                                <td className="p-2 text-center font-medium text-slate-400">{idx + 1}</td>
+                                <td className="p-1">
+                                  <Input
+                                    list="detail-subprojects-list"
+                                    value={row.building || ''}
+                                    onChange={e => {
+                                      const updated = [...buildingConfigs];
+                                      updated[idx] = { ...updated[idx], building: e.target.value };
+                                      setBuildingConfigs(updated);
+                                    }}
+                                    placeholder="e.g. Tower A"
+                                    className="h-8 text-xs font-semibold"
+                                  />
+                                </td>
+                                <td className="p-1">
+                                  <Input
+                                    value={row.buildingDetails || row.building_details || ''}
+                                    onChange={e => {
+                                      const updated = [...buildingConfigs];
+                                      updated[idx] = { ...updated[idx], buildingDetails: e.target.value };
+                                      setBuildingConfigs(updated);
+                                    }}
+                                    placeholder="e.g. LG+UG+16 Floor +TF"
+                                    className="h-8 text-xs"
+                                  />
+                                </td>
+                                <td className="p-1">
+                                  <Input
+                                    type="number"
+                                    value={row.noOfFloor || row.no_of_floor || ''}
+                                    onChange={e => {
+                                      const updated = [...buildingConfigs];
+                                      updated[idx] = { ...updated[idx], noOfFloor: e.target.value };
+                                      setBuildingConfigs(updated);
+                                    }}
+                                    placeholder="16"
+                                    className="h-8 text-xs text-center font-medium"
+                                  />
+                                </td>
+                                <td className="p-1">
+                                  <Input
+                                    type="number"
+                                    value={row.noOfUnitsResidential || row.no_of_units_residential || ''}
+                                    onChange={e => {
+                                      const updated = [...buildingConfigs];
+                                      updated[idx] = { ...updated[idx], noOfUnitsResidential: e.target.value };
+                                      setBuildingConfigs(updated);
+                                    }}
+                                    placeholder="64"
+                                    className="h-8 text-xs text-center font-medium"
+                                  />
+                                </td>
+                                <td className="p-1">
+                                  <Input
+                                    type="number"
+                                    value={row.noOfUnitsCommercial || row.no_of_units_commercial || ''}
+                                    onChange={e => {
+                                      const updated = [...buildingConfigs];
+                                      updated[idx] = { ...updated[idx], noOfUnitsCommercial: e.target.value };
+                                      setBuildingConfigs(updated);
+                                    }}
+                                    placeholder="0"
+                                    className="h-8 text-xs text-center font-medium"
+                                  />
+                                </td>
+                                <td className="p-1">
+                                  <Input
+                                    type="number"
+                                    step="any"
+                                    value={row.areaPerUnitResidential || row.approx_area_resi || ''}
+                                    onChange={e => {
+                                      const updated = [...buildingConfigs];
+                                      updated[idx] = { ...updated[idx], areaPerUnitResidential: e.target.value };
+                                      setBuildingConfigs(updated);
+                                    }}
+                                    placeholder="102445"
+                                    className="h-8 text-xs font-mono"
+                                  />
+                                </td>
+                                <td className="p-1">
+                                  <Input
+                                    type="number"
+                                    step="any"
+                                    value={row.areaPerUnitCommercial || row.approx_area_comm || ''}
+                                    onChange={e => {
+                                      const updated = [...buildingConfigs];
+                                      updated[idx] = { ...updated[idx], areaPerUnitCommercial: e.target.value };
+                                      setBuildingConfigs(updated);
+                                    }}
+                                    placeholder="0"
+                                    className="h-8 text-xs font-mono"
+                                  />
+                                </td>
+                                <td className="p-1 text-center">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 text-rose-500 hover:text-rose-700 hover:bg-rose-50"
+                                    onClick={() => setBuildingConfigs(buildingConfigs.filter((_, i) => i !== idx))}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </Button>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                        {buildingConfigs.length > 0 && (
+                          <tfoot className="bg-slate-100/80 font-bold border-t text-slate-800 text-xs">
+                            <tr>
+                              <td colSpan={3} className="p-2 text-right">Total Summary:</td>
+                              <td className="p-2 text-center">{buildingTotals.floors || 0}</td>
+                              <td className="p-2 text-center">{buildingTotals.unitsResi || 0}</td>
+                              <td className="p-2 text-center">{buildingTotals.unitsComm || 0}</td>
+                              <td className="p-2 text-right font-mono">{buildingTotals.areaResi ? buildingTotals.areaResi.toLocaleString() : '0'}</td>
+                              <td className="p-2 text-right font-mono">{buildingTotals.areaComm ? buildingTotals.areaComm.toLocaleString() : '0'}</td>
+                              <td></td>
+                            </tr>
+                          </tfoot>
+                        )}
+                      </table>
+                    </div>
                   </div>
 
                   <Button

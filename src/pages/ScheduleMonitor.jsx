@@ -204,7 +204,7 @@ export default function ScheduleMonitor() {
         }
       }
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [activities, progressByWbs, today]);
 
   // Project + sub-project scoped data

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
+import { Bell, LogOut } from 'lucide-react';
 import { base44 } from '@/api/base44Client';
 import { cn } from '@/lib/utils';
 import ThemeToggle from './ThemeToggle';

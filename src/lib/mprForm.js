@@ -177,10 +177,81 @@ export const createEmptyProjectConfigRow = () => ({
   areaPerUnitCommercial: '',
 });
 
+export const WPR_PLANNING_PARAMETERS = [
+  { key: 'avgLabour', name: '1. Avg. No Of Labour Allocated', unit: 'Headcount', isMultiRow: false },
+  { key: 'milestones', name: '2. No. of Construction Milestones to Achieve (Building wise)', unit: 'Nos', isMultiRow: false },
+  { key: 'qualityRating', name: '3. Quality Rating (1–10)', unit: 'Rating', isMultiRow: false, isReadOnly: true },
+  { key: 'healthSafetyRating', name: '4. Health and Safety Rating (1–10)', unit: 'Rating', isMultiRow: false, isReadOnly: true },
+  { key: 'materialRequisitions', name: '5. No of Requisition Of Material', unit: 'Items', isMultiRow: true },
+  { key: 'billsToCertify', name: '6. Bills to certify', unit: 'Items / ₹', isMultiRow: true },
+  { key: 'leadershipInputs', name: '7. Leadership / Client / Consultant Inputs', unit: 'Items', isMultiRow: true },
+  { key: 'mockUpActivities', name: '8. Mock up Activity', unit: 'Items', isMultiRow: true },
+  { key: 'contractorsMobilized', name: '9. Contractors to be Mobilized', unit: 'Items', isMultiRow: true },
+  { key: 'contractorReviewMeeting', name: '10. Contractor review meeting conducted', unit: 'Count', isMultiRow: true },
+  { key: 'keyPlanActivities', name: '11. Key Plan Activity', unit: 'Items', isMultiRow: true },
+  { key: 'valueOfWorkDone', name: '12. Value of Work Done', unit: '₹ Amount', isMultiRow: false, isReadOnly: true },
+  { key: 'workMethodology', name: '13. Work Methodology Details', unit: 'Items', isMultiRow: true },
+  { key: 'supportRequired', name: '14. Support Required / Decision On Details', unit: 'Items', isMultiRow: true },
+  { key: 'timelineMonthly', name: '15. Timeline Monthly Target', unit: 'Items', isMultiRow: true },
+];
+
+export const calcForecastWeeklyVowd = (forecastRows, weekKey) => {
+  return (forecastRows || []).reduce((sum, row) => {
+    const qty = parseFloat(row?.[weekKey]) || 0;
+    const rate = parseFloat(row?.rate) || 0;
+    return sum + (qty * rate);
+  }, 0);
+};
+
+export const createEmptyPlanForNextMonthRow = (paramKey = '', paramName = '', unit = '', isMultiRow = false, extra = {}) => {
+  const isRating = paramKey === 'qualityRating' || paramKey === 'healthSafetyRating';
+  const defaultVal = isRating ? '10' : '';
+
+  return {
+    id: genId(),
+    parameterKey: paramKey,
+    parameterName: paramName,
+    subItemName: '',
+    unit: unit,
+    isMultiRow: isMultiRow,
+    week1: defaultVal,
+    week2: defaultVal,
+    week3: defaultVal,
+    week4: defaultVal,
+    ...extra,
+  };
+};
+
+export const createDefaultPlanForNextMonthRows = () => {
+  return WPR_PLANNING_PARAMETERS.map((param) =>
+    createEmptyPlanForNextMonthRow(param.key, param.name, param.unit, param.isMultiRow)
+  );
+};
+
+export const planForNextMonthRowTotal = (row) => {
+  if (!row) return 0;
+  if (row.parameterKey === 'qualityRating' || row.parameterKey === 'healthSafetyRating') {
+    return 10;
+  }
+  const w1 = parseFloat(row.week1) || 0;
+  const w2 = parseFloat(row.week2) || 0;
+  const w3 = parseFloat(row.week3) || 0;
+  const w4 = parseFloat(row.week4) || 0;
+  return w1 + w2 + w3 + w4;
+};
+
 // --- Default form --------------------------------------------------------
 
 export const createDefaultMprForm = () => ({
   executiveSummary: '',
+  signOff: {
+    preparedByName: '',
+    preparedByTitle: 'Site Engineer',
+    checkedByName: '',
+    checkedByTitle: '',
+    endorsedByName: '',
+    endorsedByTitle: '',
+  },
   scheduleSummaryRows: [createEmptyScheduleSummaryRow()],
   projectDuration: {
     estimatedDuration: '',
@@ -205,6 +276,7 @@ export const createDefaultMprForm = () => ({
   challengesEncountered: [createEmptyChallengeRow()],
   keyActivities: [createEmptyKeyActivityRow()],
   forecast: [createEmptyForecastRow()],
+  planForNextMonth: createDefaultPlanForNextMonthRows(),
   drawingsRequired: [createEmptyDrawingRequiredRow()],
   challengesAnticipated: [createEmptyChallengeAnticipatedRow()],
   unitHandover: { rPlan: '', rAchieved: '', cPlan: '', cAchieved: '' },

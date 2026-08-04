@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Lock, Save, FileCheck } from 'lucide-react';
+import { Loader2, Lock, Save, FileCheck, Printer } from 'lucide-react';
 import { formatCurrencyINR, formatNumberIndian, normalizeDateKey } from '@/lib/formatters';
 import {
   createDefaultMprForm,
@@ -22,6 +22,7 @@ import {
 } from '@/lib/mprForm';
 import { getPreviousMonthId, getDaysInMonthId } from '@/lib/mprMonths';
 import MprReviewDialog from '@/components/progress/MprReviewDialog';
+import MprPrintReport from '@/components/progress/mpr/MprPrintReport';
 import ExecutiveSummarySection from '@/components/progress/mpr/ExecutiveSummarySection';
 import ProjectScheduleSummarySection from '@/components/progress/mpr/ProjectScheduleSummarySection';
 import DelaySummarySection from '@/components/progress/mpr/DelaySummarySection';
@@ -35,6 +36,7 @@ import DrawingsReceivedSection from '@/components/progress/mpr/DrawingsReceivedS
 import ChallengesEncounteredSection from '@/components/progress/mpr/ChallengesEncounteredSection';
 import KeyActivitiesSection from '@/components/progress/mpr/KeyActivitiesSection';
 import ForecastSection from '@/components/progress/mpr/ForecastSection';
+import PlanForNextMonthSection from '@/components/progress/mpr/PlanForNextMonthSection';
 import DrawingsRequiredSection from '@/components/progress/mpr/DrawingsRequiredSection';
 import ChallengesAnticipatedSection from '@/components/progress/mpr/ChallengesAnticipatedSection';
 import UnitHandoverSection from '@/components/progress/mpr/UnitHandoverSection';
@@ -54,6 +56,7 @@ const SECTIONS = [
   { id: 'challenges-encountered', label: 'Challenges Encountered' },
   { id: 'key-activities', label: 'Key Activities' },
   { id: 'forecast', label: 'Forecast' },
+  { id: 'plan-for-next-month', label: 'Weekly Plan for Next Month' },
   { id: 'drawings-required', label: 'Drawings Required' },
   { id: 'challenges-anticipated', label: 'Challenges Anticipated' },
   { id: 'unit-handover', label: 'Unit Handover' },
@@ -62,7 +65,55 @@ const SECTIONS = [
 
 const normalizeKey = (value) => String(value || '').trim().toLowerCase();
 
-/** Leaf-level (executable) activities only — mirrors the DPR worksheet's activity picker. */
+function isActivityL1Approved(activity, wbsItems) {
+  if (!activity || !Array.isArray(wbsItems) || wbsItems.length === 0) return false;
+
+  const wbsById = new Map(wbsItems.map((w) => [w.id, w]));
+
+  // 1. Trace parent_id up the hierarchy tree to find the Level 1 item
+  let current = activity;
+  let depth = 0;
+  let l1Item = null;
+
+  while (current && depth < 5) {
+    const level = Number(current.level) || 0;
+    const levelText = String(current.level || '').toLowerCase();
+    if (level === 1 || levelText === 'l1') {
+      l1Item = current;
+      break;
+    }
+    if (!current.parent_id) break;
+    current = wbsById.get(current.parent_id);
+    depth++;
+  }
+
+  // 2. Fallback: if parent_id chain didn't reach L1, find L1 by code prefix (e.g. "4" from "4.2.1")
+  if (!l1Item) {
+    const codePrefix = String(activity.code || activity.activity_code || '').split('.')[0];
+    if (codePrefix) {
+      l1Item = wbsItems.find((w) => {
+        const lvl = Number(w.level) || 0;
+        const lvlTxt = String(w.level || '').toLowerCase();
+        const isL1 = lvl === 1 || lvlTxt === 'l1';
+        if (!isL1) return false;
+        const wCode = String(w.code || '');
+        return (
+          wCode === codePrefix ||
+          wCode === `${codePrefix}.0` ||
+          wCode.split('.')[0] === codePrefix
+        );
+      });
+    }
+  }
+
+  if (!l1Item) return false;
+
+  // 3. Check L1 item status: MUST be strictly 'approved'
+  const status = String(l1Item.status || '').trim().toLowerCase();
+  return status === 'approved';
+}
+
+/** Leaf-level (executable) activities only — restricted to Approved WBS heads. */
 function buildActivityOptions(wbsItems, budgetItems) {
   const budgetByWbsId = new Map();
   (budgetItems || []).forEach((item) => {
@@ -75,7 +126,11 @@ function buildActivityOptions(wbsItems, budgetItems) {
     const levelNumber = Number(item.level);
     const levelText = String(item.level || '').trim().toLowerCase();
     const hasActivityId = String(item.activity_id || '').trim() !== '';
-    return levelNumber === 3 || levelText === 'l3' || hasActivityId;
+    const isActivity = levelNumber === 3 || levelText === 'l3' || hasActivityId;
+    if (!isActivity) return false;
+
+    // EXCLUSIVELY include activities under Approved L1 WBS Heads!
+    return isActivityL1Approved(item, wbsItems);
   });
 
   return activityItems.map((activity) => {
@@ -110,16 +165,24 @@ export default function MprSheetPanel({
   const [loadedKey, setLoadedKey] = useState('');
   const [saving, setSaving] = useState(false);
   const [showReview, setShowReview] = useState(false);
+  const [showPrintReport, setShowPrintReport] = useState(false);
   const [mprSubTab, setMprSubTab] = useState('executive-summary');
 
   const monthId = month?.id || '';
   const monthStart = month?.startDate || '';
   const monthEnd = month?.endDate || '';
   const scopeKey = `${projectId}:${monthId}`;
-  const isLocked = status === 'submitted';
+  const isLocked = status === 'approved';
   const prevMonthId = getPreviousMonthId(monthId);
   const prev2MonthId = getPreviousMonthId(prevMonthId);
   const daysInMonth = getDaysInMonthId(monthId);
+
+  const { data: fetchedProject } = useQuery({
+    queryKey: ['project', projectId],
+    queryFn: () => base44.entities.Project.get(projectId),
+    enabled: !!projectId && !selectedProject,
+  });
+  const projectData = selectedProject || fetchedProject;
 
   const { data: existingReports = [], isLoading: reportLoading } = useQuery({
     queryKey: ['mpr-report', projectId, monthId],
@@ -151,6 +214,12 @@ export default function MprSheetPanel({
     enabled: !!projectId,
   });
 
+  const { data: wbsHeaders = [] } = useQuery({
+    queryKey: ['wbsHeaders', projectId],
+    queryFn: () => base44.entities.WbsHeader.filter({ project_id: projectId }),
+    enabled: !!projectId,
+  });
+
   const { data: progressEntries = [], isLoading: progressLoading } = useQuery({
     queryKey: ['mpr-progress', projectId],
     queryFn: () => base44.entities.ProgressEntry.filter({ project_id: projectId }, '-date', 5000),
@@ -165,7 +234,10 @@ export default function MprSheetPanel({
 
   const budgetItemsById = useMemo(() => new Map(budgetItems.map((b) => [b.id, b])), [budgetItems]);
   const wbsItemsById = useMemo(() => new Map(wbsItems.map((w) => [w.id, w])), [wbsItems]);
-  const activityOptions = useMemo(() => buildActivityOptions(wbsItems, budgetItems), [wbsItems, budgetItems]);
+  const activityOptions = useMemo(
+    () => buildActivityOptions(wbsItems, budgetItems),
+    [wbsItems, budgetItems]
+  );
 
   const prevForm = useMemo(() => parseMprFormData(prevReports[0]?.form_data), [prevReports]);
   const prev2Form = useMemo(() => parseMprFormData(prev2Reports[0]?.form_data), [prev2Reports]);
@@ -367,9 +439,34 @@ export default function MprSheetPanel({
     try {
       await persist('submitted');
       setShowReview(false);
-      toast({ title: 'MPR Submitted', description: 'Monthly report submitted and locked for this month.' });
+      toast({ title: 'MPR Submitted', description: 'Monthly report submitted for review.' });
     } catch (err) {
       toast({ title: 'Submit Failed', description: err?.message || 'Could not submit MPR.', variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleApproveReport = async () => {
+    setSaving(true);
+    try {
+      await persist('approved');
+      setShowReview(false);
+      toast({ title: 'MPR Approved & Locked', description: 'Monthly report approved and locked for this month.' });
+    } catch (err) {
+      toast({ title: 'Approve Failed', description: err?.message || 'Could not approve MPR.', variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUnlockReport = async () => {
+    setSaving(true);
+    try {
+      await persist('draft');
+      toast({ title: 'Report Unlocked', description: 'MPR report unlocked and restored to draft mode.' });
+    } catch (err) {
+      toast({ title: 'Unlock Failed', description: err?.message || 'Could not unlock report.', variant: 'destructive' });
     } finally {
       setSaving(false);
     }
@@ -558,12 +655,16 @@ export default function MprSheetPanel({
                 Monthly Progress Report — {month?.label || 'selected month'}
               </CardTitle>
               <div className="flex items-center gap-2">
-                {isLocked ? (
+                {status === 'approved' ? (
                   <Badge className="bg-emerald-100 text-emerald-800 gap-1">
-                    <Lock className="w-3 h-3" /> Submitted — Locked
+                    <Lock className="w-3 h-3" /> Approved — Locked
                   </Badge>
-                ) : status === 'draft' && reportId ? (
-                  <Badge variant="secondary">Draft</Badge>
+                ) : status === 'submitted' ? (
+                  <Badge className="bg-blue-100 text-blue-800 gap-1">
+                    <FileCheck className="w-3 h-3" /> Submitted — Editable
+                  </Badge>
+                ) : reportId ? (
+                  <Badge variant="secondary">Draft — Editable</Badge>
                 ) : null}
               </div>
             </CardHeader>
@@ -591,18 +692,29 @@ export default function MprSheetPanel({
                 })}
               </div>
 
-              {!isLocked && (
-                <div className="flex flex-col items-stretch gap-2 shrink-0">
-                  <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={saving} className="gap-2">
-                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                    Save as Draft
+              <div className="flex flex-col items-stretch gap-2 shrink-0">
+                <Button type="button" variant="outline" onClick={() => setShowPrintReport(true)} className="gap-2 border-blue-200 text-blue-700 hover:bg-blue-50">
+                  <Printer className="w-4 h-4 text-blue-600" />
+                  Print Report (PDF)
+                </Button>
+                {!isLocked ? (
+                  <>
+                    <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={saving} className="gap-2">
+                      {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      Save as Draft
+                    </Button>
+                    <Button type="button" onClick={handleOpenReview} disabled={saving} className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white">
+                      <FileCheck className="w-4 h-4" />
+                      Save & Review
+                    </Button>
+                  </>
+                ) : (
+                  <Button type="button" variant="outline" onClick={handleUnlockReport} disabled={saving} className="gap-2 border-amber-300 text-amber-800 hover:bg-amber-50">
+                    <Lock className="w-4 h-4 text-amber-600" />
+                    Unlock Report to Edit
                   </Button>
-                  <Button type="button" onClick={handleOpenReview} disabled={saving} className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white">
-                    <FileCheck className="w-4 h-4" />
-                    Save & Review
-                  </Button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
 
@@ -611,6 +723,11 @@ export default function MprSheetPanel({
               value={form.executiveSummary}
               onChange={(v) => updateSection('executiveSummary', v)}
               locked={isLocked}
+              elevationPhotoUrl={selectedProject?.elevation_photo_url || projectData?.elevation_photo_url}
+              projectName={selectedProject?.name || projectData?.name}
+              signOff={form.signOff}
+              onSignOffChange={(signOff) => updateSection('signOff', signOff)}
+              submittedBy={submittedBy}
             />
           </div>
 
@@ -710,6 +827,15 @@ export default function MprSheetPanel({
             />
           </div>
 
+          <div className={mprSubTab === 'plan-for-next-month' ? '' : 'hidden'}>
+            <PlanForNextMonthSection
+              rows={form.planForNextMonth}
+              onChange={(rows) => updateSection('planForNextMonth', rows)}
+              locked={isLocked}
+              forecastRows={form.forecast}
+            />
+          </div>
+
           <div className={mprSubTab === 'drawings-required' ? '' : 'hidden'}>
             <DrawingsRequiredSection
               rows={form.drawingsRequired}
@@ -747,12 +873,35 @@ export default function MprSheetPanel({
             onOpenChange={setShowReview}
             meta={{
               monthLabel: month.label,
-              projectName: selectedProject?.name,
+              projectName: selectedProject?.name || projectData?.name,
+              elevationPhotoUrl: selectedProject?.elevation_photo_url || projectData?.elevation_photo_url,
               submittedBy,
             }}
             sections={reviewSections}
             onConfirm={handleConfirmSubmit}
+            onApprove={handleApproveReport}
+            onPrint={() => {
+              setShowReview(false);
+              setShowPrintReport(true);
+            }}
             isSubmitting={saving}
+          />
+
+          <MprPrintReport
+            open={showPrintReport}
+            onClose={() => setShowPrintReport(false)}
+            form={form}
+            meta={{
+              monthLabel: month.label,
+              nextMonthLabel: 'August - 2026',
+              monthId: month.id,
+              projectName: selectedProject?.name || projectData?.name,
+              projectCode: selectedProject?.project_code || projectData?.project_code || 'PL1287',
+              location: selectedProject?.location || projectData?.location,
+              elevationPhotoUrl: selectedProject?.elevation_photo_url || projectData?.elevation_photo_url,
+            }}
+            projectData={selectedProject || projectData}
+            planVsAchievementRows={planVsAchievementRows}
           />
         </>
       )}

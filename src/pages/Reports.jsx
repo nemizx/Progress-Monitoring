@@ -22,7 +22,6 @@ import { buildWprExcelWorkbook, downloadWprExcelWorkbook } from '@/lib/wprExcelE
 import { useToast } from '@/components/ui/use-toast';
 import { useProjectSubProject } from '@/hooks/useProjectSubProject';
 import { buildWprWeeksList } from '@/lib/wprWeeks';
-import { calcPct } from '@/lib/wprForm';
 
 const PIE_COLORS = ['#1e3a5f', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444'];
 
@@ -60,6 +59,15 @@ export default function Reports() {
   });
 
   // --- Date-based Queries for DPR Reports ---
+  const { data: dprRecords = [], isLoading: dprLoading } = useQuery({
+    queryKey: ['dprHeaders-project-date', projectId, selectedDprDate],
+    queryFn: () => projectId && selectedDprDate
+      ? base44.entities.Dpr.filter({ project_id: projectId, date: selectedDprDate })
+      : Promise.resolve([]),
+    enabled: !!projectId && !!selectedDprDate
+  });
+
+  const hasSavedDpr = dprRecords.length > 0;
 
   // Technical Staff List
   const { data: technicalStaff = [] } = useQuery({
@@ -244,18 +252,14 @@ export default function Reports() {
     return months;
   }, [weeksList]);
 
-  const filteredWprWeeks = useMemo(() => {
-    return weeksList.filter(w => w.monthKey === selectedWprReportMonth && filledWprWeekIds.has(w.id));
-  }, [weeksList, selectedWprReportMonth, filledWprWeekIds]);
+  const displayWprWeeks = useMemo(() => {
+    if (!selectedWprReportMonth) return [];
+    return weeksList.filter((w) => w.monthKey === selectedWprReportMonth);
+  }, [weeksList, selectedWprReportMonth]);
 
   const handleWprReportMonthChange = (monthKey) => {
     setSelectedWprReportMonth(monthKey);
-    const monthWeeks = weeksList.filter(w => w.monthKey === monthKey && filledWprWeekIds.has(w.id));
-    if (monthWeeks.length) {
-      setSelectedWprReportWeek(monthWeeks[0].id);
-    } else {
-      setSelectedWprReportWeek('');
-    }
+    setSelectedWprReportWeek('all');
   };
 
   useEffect(() => {
@@ -265,14 +269,17 @@ export default function Reports() {
       setSelectedWprReportMonth('');
       return;
     }
-    const latestWeek = weeksList.find(w => filledWprWeekIds.has(w.id));
-    const targetWeekId = selectedWprReportWeek && filledWprWeekIds.has(selectedWprReportWeek)
-      ? selectedWprReportWeek
-      : (latestWeek?.id || '');
-    const weekObj = weeksList.find((w) => w.id === targetWeekId);
-    setSelectedWprReportWeek(targetWeekId);
-    setSelectedWprReportMonth(weekObj?.monthKey || latestWeek?.monthKey || weeksList[0]?.monthKey || '');
-  }, [weeksList, filledWprWeekIds, activeTab, selectedWprReportWeek]);
+    if (!selectedWprReportMonth) {
+      const latestWeek = weeksList.find((w) => filledWprWeekIds.has(w.id)) || weeksList[0];
+      setSelectedWprReportMonth(latestWeek?.monthKey || '');
+      setSelectedWprReportWeek('all');
+    }
+  }, [weeksList, filledWprWeekIds, activeTab, selectedWprReportMonth]);
+
+  const activeWprWeeks = useMemo(() => {
+    if (!selectedWprReportMonth) return [];
+    return weeksList.filter((w) => w.monthKey === selectedWprReportMonth);
+  }, [weeksList, selectedWprReportMonth]);
 
   const wprWeekReports = useMemo(() => {
     if (!selectedWprReportWeek) return [];
@@ -332,6 +339,20 @@ export default function Reports() {
     const countSectionRows = (key, field = 'plan') => {
       return reports.reduce((sum, r) => {
         const rows = r.parsedForm?.[key] || [];
+        if (key === 'materialRequisitions') {
+          if (field === 'plan') {
+            return sum + rows.filter((row) => (row.name || row.requisitionNo || row.date || '').trim() !== '' || String(row.plan || '').trim() !== '').length;
+          } else {
+            return sum + rows.filter((row) => String(row.receivedDate || '').trim() !== '' || (row.achieved !== '' && row.achieved != null && Number(row.achieved) > 0)).length;
+          }
+        }
+        if (key === 'billsToCertify') {
+          if (field === 'plan') {
+            return sum + rows.filter((row) => (row.name || row.agencyName || row.billDate || '').trim() !== '' || String(row.plan || '').trim() !== '').length;
+          } else {
+            return sum + rows.filter((row) => String(row.certifiedDate || '').trim() !== '' || (row.achieved !== '' && row.achieved != null && Number(row.achieved) > 0)).length;
+          }
+        }
         return sum + rows.filter(row => row.name && String(row[field] || '').trim() !== '').length;
       }, 0);
     };
@@ -434,10 +455,15 @@ export default function Reports() {
   };
 
   const wprSummaryData = useMemo(() => {
-    if (!parsedWprReports.length) return [];
+    if (!parsedWprMonthReports.length) return [];
 
     const monthly = getSummaryForReports(parsedWprMonthReports);
-    const weekly = getSummaryForReports(parsedWprReports);
+
+    const weekSummariesMap = new Map();
+    activeWprWeeks.forEach((wk) => {
+      const wkReports = parsedWprMonthReports.filter((r) => r.week_id === wk.id);
+      weekSummariesMap.set(wk.id, getSummaryForReports(wkReports));
+    });
 
     const labels = [
       { id: 1, name: '1. Avg.No Of Labour Allocated', unit: 'Nos', key: 'avgLabour' },
@@ -465,57 +491,79 @@ export default function Reports() {
       return Math.min(Math.round((a / p) * 100), 100);
     };
 
-    return labels.map(label => {
+    return labels.map((label) => {
       let mPlan = 0;
       let mAchieved = 0;
-      let wPlan = 0;
-      let wAchieved = 0;
 
       if (label.isDate) {
         mPlan = monthly.timelineMonthly?.startDate || '—';
         mAchieved = monthly.timelineMonthly?.endDate || '—';
-        wPlan = '0';
-        wAchieved = '0';
       } else {
         mPlan = monthly[label.key]?.plan ?? 0;
         mAchieved = monthly[label.key]?.achieved ?? 0;
-        wPlan = weekly[label.key]?.plan ?? 0;
-        wAchieved = weekly[label.key]?.achieved ?? 0;
       }
 
       const mPct = label.isDate ? null : calcWprRowPct(mPlan, mAchieved);
-      const wPct = label.isDate ? null : calcWprRowPct(wPlan, wAchieved);
+
+      const weeklyData = {};
+      activeWprWeeks.forEach((wk) => {
+        const summary = weekSummariesMap.get(wk.id) || {};
+        let wPlan = 0;
+        let wAchieved = 0;
+        if (label.isDate) {
+          wPlan = '0';
+          wAchieved = '0';
+        } else {
+          wPlan = summary[label.key]?.plan ?? 0;
+          wAchieved = summary[label.key]?.achieved ?? 0;
+        }
+        const wPct = label.isDate ? null : calcWprRowPct(wPlan, wAchieved);
+        weeklyData[wk.id] = {
+          plan: wPlan,
+          achieved: wAchieved,
+          pct: wPct !== null ? `${wPct}%` : '—',
+          rawPct: wPct,
+        };
+      });
+
+      const firstWkData = Object.values(weeklyData)[0] || {};
 
       return {
         ...label,
         monthlyPlan: mPlan,
         monthlyAchieved: mAchieved,
         monthlyPct: mPct !== null ? `${mPct}%` : '—',
-        weeklyPlan: wPlan,
-        weeklyAchieved: wAchieved,
-        weeklyPct: wPct !== null ? `${wPct}%` : '—',
+        weeklyPlan: firstWkData.plan ?? 0,
+        weeklyAchieved: firstWkData.achieved ?? 0,
+        weeklyPct: firstWkData.pct ?? '—',
+        weeklyData,
         rawMonthlyPct: mPct,
-        rawWeeklyPct: wPct,
       };
     });
-  }, [parsedWprMonthReports, parsedWprReports, weeksList]);
+  }, [parsedWprMonthReports, activeWprWeeks]);
 
   const wprTotals = useMemo(() => {
-    if (!wprSummaryData.length) return { monthly: '0%', weekly: '0%' };
-    const activeRows = wprSummaryData.filter(r => !r.isDate);
-    if (!activeRows.length) return { monthly: '0%', weekly: '0%' };
+    if (!wprSummaryData.length) return { monthly: '0%', weekly: '0%', weeklyByWeek: {} };
+    const activeRows = wprSummaryData.filter((r) => !r.isDate);
+    if (!activeRows.length) return { monthly: '0%', weekly: '0%', weeklyByWeek: {} };
 
     const sumMonthly = activeRows.reduce((sum, r) => sum + (r.rawMonthlyPct || 0), 0);
-    const sumWeekly = activeRows.reduce((sum, r) => sum + (r.rawWeeklyPct || 0), 0);
-
     const mAvg = (sumMonthly / activeRows.length).toFixed(2);
-    const wAvg = (sumWeekly / activeRows.length).toFixed(2);
+
+    const weeklyByWeek = {};
+    activeWprWeeks.forEach((wk) => {
+      const sumWk = activeRows.reduce((sum, r) => sum + (r.weeklyData?.[wk.id]?.rawPct || 0), 0);
+      weeklyByWeek[wk.id] = `${(sumWk / activeRows.length).toFixed(2)}%`;
+    });
+
+    const firstWkAvg = Object.values(weeklyByWeek)[0] || '0%';
 
     return {
       monthly: `${mAvg}%`,
-      weekly: `${wAvg}%`,
+      weekly: firstWkAvg,
+      weeklyByWeek,
     };
-  }, [wprSummaryData]);
+  }, [wprSummaryData, activeWprWeeks]);
 
   const wprDetailedSections = useMemo(() => {
     const sections = [
@@ -529,11 +577,11 @@ export default function Reports() {
       { key: 'supportRequired', title: '14. Support Required / Decision On Details', nameLabel: 'Support Required / Decision On' },
     ];
 
-    return sections.map(sec => {
+    return sections.map((sec) => {
       const monthlyNames = new Set();
-      parsedWprMonthReports.forEach(report => {
+      parsedWprMonthReports.forEach((report) => {
         const rows = report.parsedForm?.[sec.key] || [];
-        rows.forEach(r => {
+        rows.forEach((r) => {
           if (r.name && String(r.name).trim()) {
             monthlyNames.add(String(r.name).trim());
           }
@@ -542,32 +590,23 @@ export default function Reports() {
 
       const uniqueNames = Array.from(monthlyNames);
 
-      const rows = uniqueNames.map(name => {
+      const rows = uniqueNames.map((name) => {
         let monthlyPlan = 0;
         let monthlyAchieved = 0;
-        parsedWprMonthReports.forEach(report => {
+        parsedWprMonthReports.forEach((report) => {
           const sRows = report.parsedForm?.[sec.key] || [];
-          sRows.forEach(r => {
+          sRows.forEach((r) => {
             if (r.name && String(r.name).trim().toLowerCase() === name.toLowerCase()) {
-              monthlyPlan += parseFloat(r.plan) || 0;
-              monthlyAchieved += parseFloat(r.achieved) || 0;
-            }
-          });
-        });
-
-        let weeklyPlan = 0;
-        let weeklyAchieved = 0;
-        let weeklyRemark = '';
-        let hasWeekly = false;
-
-        parsedWprReports.forEach(report => {
-          const sRows = report.parsedForm?.[sec.key] || [];
-          sRows.forEach(r => {
-            if (r.name && String(r.name).trim().toLowerCase() === name.toLowerCase()) {
-              weeklyPlan += parseFloat(r.plan) || 0;
-              weeklyAchieved += parseFloat(r.achieved) || 0;
-              weeklyRemark = r.remark || '';
-              hasWeekly = true;
+              if (sec.key === 'materialRequisitions') {
+                monthlyPlan += parseFloat(r.plan) || 1;
+                monthlyAchieved += parseFloat(r.achieved) || (r.receivedDate && String(r.receivedDate).trim() !== '' ? 1 : 0);
+              } else if (sec.key === 'billsToCertify') {
+                monthlyPlan += parseFloat(r.plan) || 1;
+                monthlyAchieved += parseFloat(r.achieved) || (r.certifiedDate && String(r.certifiedDate).trim() !== '' ? 1 : 0);
+              } else {
+                monthlyPlan += parseFloat(r.plan) || 0;
+                monthlyAchieved += parseFloat(r.achieved) || 0;
+              }
             }
           });
         });
@@ -581,29 +620,59 @@ export default function Reports() {
         };
 
         const mPctVal = calcRowPct(monthlyPlan, monthlyAchieved);
-        const wPctVal = hasWeekly ? calcRowPct(weeklyPlan, weeklyAchieved) : null;
+
+        const weeklyData = {};
+        activeWprWeeks.forEach((wk) => {
+          const report = parsedWprMonthReports.find((r) => r.week_id === wk.id);
+          let wPlan = 0;
+          let wAchieved = 0;
+          let remark = '';
+          let hasVal = false;
+          if (report) {
+            const sRows = report.parsedForm?.[sec.key] || [];
+            sRows.forEach((r) => {
+              if (r.name && String(r.name).trim().toLowerCase() === name.toLowerCase()) {
+                if (sec.key === 'materialRequisitions') {
+                  wPlan += parseFloat(r.plan) || 1;
+                  wAchieved += parseFloat(r.achieved) || (r.receivedDate && String(r.receivedDate).trim() !== '' ? 1 : 0);
+                } else if (sec.key === 'billsToCertify') {
+                  wPlan += parseFloat(r.plan) || 1;
+                  wAchieved += parseFloat(r.achieved) || (r.certifiedDate && String(r.certifiedDate).trim() !== '' ? 1 : 0);
+                } else {
+                  wPlan += parseFloat(r.plan) || 0;
+                  wAchieved += parseFloat(r.achieved) || 0;
+                }
+                remark = r.remark || '';
+                hasVal = true;
+              }
+            });
+          }
+          const wPctVal = hasVal ? calcRowPct(wPlan, wAchieved) : null;
+          weeklyData[wk.id] = {
+            plan: hasVal ? wPlan : '—',
+            achieved: hasVal ? wAchieved : '—',
+            pct: wPctVal !== null ? `${wPctVal}%` : '—',
+            remark: remark || '—',
+          };
+        });
 
         return {
           name,
           monthlyPlan,
           monthlyAchieved,
           monthlyPct: `${mPctVal}%`,
-          weeklyPlan: hasWeekly ? weeklyPlan : null,
-          weeklyAchieved: hasWeekly ? weeklyAchieved : null,
-          weeklyPct: wPctVal !== null ? `${wPctVal}%` : '—',
-          remark: hasWeekly ? weeklyRemark : '—',
-          hasWeekly,
+          weeklyData,
         };
       });
 
-      const filteredRows = rows.filter(r => r.monthlyPlan > 0 || r.monthlyAchieved > 0);
+      const filteredRows = rows.filter((r) => r.monthlyPlan > 0 || r.monthlyAchieved > 0);
 
       return {
         ...sec,
-        rows: filteredRows
+        rows: filteredRows,
       };
     });
-  }, [parsedWprMonthReports, parsedWprReports]);
+  }, [parsedWprMonthReports, activeWprWeeks]);
 
   // Helper date formatter
   const formatDateDMY = (dateStr) => {
@@ -901,13 +970,13 @@ export default function Reports() {
   };
 
   const handleExportWprExcel = async () => {
-    if (!projectId || !selectedWprReportWeek) return;
+    if (!projectId || !selectedWprReportMonth) return;
 
     toast({ title: 'Exporting WPR Excel...', description: 'Assembling progress datasets.' });
     try {
       const { workbook, filename } = await buildWprExcelWorkbook({
         selectedProject,
-        selectedWprReportWeek,
+        selectedWprReportWeek: 'all',
         weeksList,
         wprSummaryData,
         wprTotals,
@@ -923,7 +992,7 @@ export default function Reports() {
   };
 
   const handleExportWprPdf = async () => {
-    if (!selectedWprReportWeek) return;
+    if (!selectedWprReportMonth) return;
     toast({ title: 'Exporting PDF...', description: 'Assembling document pages.' });
     try {
       const { jsPDF } = await import('jspdf');
@@ -1169,12 +1238,31 @@ Format with markdown. Be specific, professional, and actionable.`;
                   />
                 </div>
                 <div>
-                  <Button onClick={handleExportDprExcel} className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold h-10 text-sm">
+                  <Button onClick={handleExportDprExcel} disabled={!hasSavedDpr || dprLoading} className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold h-10 text-sm">
                     <FileSpreadsheet className="w-4 h-4" /> Export DPR Excel
                   </Button>
                 </div>
               </CardContent>
             </Card>
+
+            {dprLoading ? (
+              <div className="flex items-center justify-center p-12">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              </div>
+            ) : !hasSavedDpr ? (
+              <Card className="border border-amber-200 bg-amber-50/50 shadow-sm rounded-xl">
+                <CardContent className="p-8 flex flex-col items-center justify-center text-center space-y-3 font-sans">
+                  <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center text-amber-600">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-base font-semibold text-amber-900">No DPR Found</h3>
+                  <p className="text-sm text-amber-700 max-w-md">
+                    No DPR entry is available for the selected date.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
 
             {/* A. Status of the Work Preview */}
             <Card className="shadow-sm border">
@@ -1570,6 +1658,7 @@ Format with markdown. Be specific, professional, and actionable.`;
               </Card>
 
             </div>
+            </>)}
           </TabsContent>
           {/* WPR Reports Tab */}
           <TabsContent value="wpr-reports" className="mt-4 space-y-6">
@@ -1579,7 +1668,7 @@ Format with markdown. Be specific, professional, and actionable.`;
                   <div className="space-y-1.5">
                     <Label className="text-xs font-semibold text-muted-foreground">Select Month</Label>
                     <Select value={selectedWprReportMonth} onValueChange={handleWprReportMonthChange}>
-                      <SelectTrigger className="w-full sm:w-44 bg-background">
+                      <SelectTrigger className="w-full sm:w-56 bg-background">
                         <SelectValue placeholder="Choose Month" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1589,32 +1678,12 @@ Format with markdown. Be specific, professional, and actionable.`;
                       </SelectContent>
                     </Select>
                   </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-muted-foreground">Select Week</Label>
-                    <Select
-                      value={selectedWprReportWeek}
-                      onValueChange={setSelectedWprReportWeek}
-                      disabled={!filteredWprWeeks.length}
-                    >
-                      <SelectTrigger className="w-full sm:w-60 bg-background">
-                        <SelectValue placeholder={filteredWprWeeks.length ? 'Choose Week' : 'No filled weeks available'} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {filteredWprWeeks.map(w => (
-                          <SelectItem key={w.id} value={w.id}>
-                            Week {w.weekNum} ({w.startDate} to {w.endDate})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
                   <Button
                     onClick={handleExportWprPdf}
-                    disabled={!selectedWprReportWeek}
+                    disabled={!selectedWprReportMonth}
                     variant="outline"
                     className="gap-2 border-slate-300 text-slate-700 font-semibold h-10 text-sm"
                   >
@@ -1622,7 +1691,7 @@ Format with markdown. Be specific, professional, and actionable.`;
                   </Button>
                   <Button
                     onClick={handleExportWprExcel}
-                    disabled={!selectedWprReportWeek}
+                    disabled={!selectedWprReportMonth}
                     className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold h-10 text-sm"
                   >
                     <FileSpreadsheet className="w-4 h-4" /> Export Excel
@@ -1631,7 +1700,7 @@ Format with markdown. Be specific, professional, and actionable.`;
               </CardContent>
             </Card>
 
-            {selectedWprReportWeek && parsedWprReports.length > 0 ? (
+            {selectedWprReportMonth && (parsedWprMonthReports.length > 0 || displayWprWeeks.length > 0) ? (
               <div id="wpr-report-print-container" className="space-y-6 bg-slate-50/50 p-2 rounded-lg">
                 
                 {/* 1. Summary Card */}
@@ -1641,7 +1710,7 @@ Format with markdown. Be specific, professional, and actionable.`;
                     <h3 className="text-xs uppercase font-bold text-slate-500 tracking-widest mt-0.5">Weekly Progress Monitoring Report</h3>
                     <p className="text-sm font-semibold text-primary mt-2">{selectedProject?.name}</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      {weeksList.find(w => w.id === selectedWprReportWeek)?.label}
+                      {wprMonths.find(m => m.key === selectedWprReportMonth)?.label || ''} — All Weeks ({activeWprWeeks.length} Weeks)
                     </p>
                   </div>
 
@@ -1657,11 +1726,11 @@ Format with markdown. Be specific, professional, and actionable.`;
                             <th className="p-3 text-left font-bold border-r border-slate-200 align-bottom pb-1 bg-slate-200 min-w-[200px] text-slate-800">Area of Review</th>
                             <th className="p-3 text-center font-bold border-r border-slate-200 align-bottom pb-1 bg-slate-200 min-w-[60px] text-slate-800">Unit</th>
                             <th colSpan={3} className="p-3 text-center font-bold border-r border-b border-slate-200 bg-slate-200 text-slate-800">Monthly</th>
-                            <th colSpan={3} className="p-2.5 text-center font-bold border-r border-b border-slate-200 bg-slate-200 text-slate-800">
-                              {weeksList.find(w => w.id === selectedWprReportWeek) ? `Week ${weeksList.find(w => w.id === selectedWprReportWeek).weekNum}` : 'Weekly'}
-                              {" "}
-                              ({weeksList.find(w => w.id === selectedWprReportWeek) ? `${formatWprDate(weeksList.find(w => w.id === selectedWprReportWeek).startDate)} to ${formatWprDate(weeksList.find(w => w.id === selectedWprReportWeek).endDate)}` : ''})
-                            </th>
+                            {activeWprWeeks.map((wk) => (
+                              <th key={wk.id} colSpan={3} className="p-2.5 text-center font-bold border-r border-b border-slate-200 bg-slate-200 text-slate-800 min-w-[180px]">
+                                Week {wk.weekNum} ({formatWprDate(wk.startDate)} to {formatWprDate(wk.endDate)})
+                              </th>
+                            ))}
                           </tr>
                           <tr className="bg-slate-50 text-[10px]">
                             <th className="border-r border-b border-slate-200 bg-slate-200 h-4"></th>
@@ -1669,28 +1738,26 @@ Format with markdown. Be specific, professional, and actionable.`;
                             <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Plan</th>
                             <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Achieved</th>
                             <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">% Achieved</th>
-                            <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Plan</th>
-                            <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Achieved</th>
-                            <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">% Achieved</th>
+                            {activeWprWeeks.map((wk) => (
+                              <React.Fragment key={wk.id}>
+                                <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Plan</th>
+                                <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Achieved</th>
+                                <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">% Achieved</th>
+                              </React.Fragment>
+                            ))}
                           </tr>
                         </thead>
                         <tbody>
                           {wprSummaryData.map((item) => {
                             let mPlanDisplay = item.monthlyPlan;
                             let mAchievedDisplay = item.monthlyAchieved;
-                            let wPlanDisplay = item.weeklyPlan;
-                            let wAchievedDisplay = item.weeklyAchieved;
 
                             if (item.isDate) {
                               mPlanDisplay = formatWprDate(mPlanDisplay);
                               mAchievedDisplay = formatWprDate(mAchievedDisplay);
-                              wPlanDisplay = formatWprDate(wPlanDisplay);
-                              wAchievedDisplay = formatWprDate(wAchievedDisplay);
                             } else if (item.isCurrency) {
                               mPlanDisplay = mPlanDisplay ? `Rs. ${Number(mPlanDisplay).toLocaleString('en-IN')}` : '0';
                               mAchievedDisplay = mAchievedDisplay ? `Rs. ${Number(mAchievedDisplay).toLocaleString('en-IN')}` : '0';
-                              wPlanDisplay = wPlanDisplay ? `Rs. ${Number(wPlanDisplay).toLocaleString('en-IN')}` : '0';
-                              wAchievedDisplay = wAchievedDisplay ? `Rs. ${Number(wAchievedDisplay).toLocaleString('en-IN')}` : '0';
                             }
 
                             return (
@@ -1700,9 +1767,27 @@ Format with markdown. Be specific, professional, and actionable.`;
                                 <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-slate-700">{mPlanDisplay}</td>
                                 <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-semibold text-slate-850">{mAchievedDisplay}</td>
                                 <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-bold text-emerald-650 bg-emerald-50">{item.monthlyPct}</td>
-                                <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-slate-700">{wPlanDisplay}</td>
-                                <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-semibold text-slate-850">{wAchievedDisplay}</td>
-                                <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-bold text-emerald-650 bg-emerald-50">{item.weeklyPct}</td>
+                                {activeWprWeeks.map((wk) => {
+                                  const wkVal = item.weeklyData?.[wk.id] || { plan: 0, achieved: 0, pct: '0%' };
+                                  let wPlanDisplay = wkVal.plan;
+                                  let wAchievedDisplay = wkVal.achieved;
+
+                                  if (item.isDate) {
+                                    wPlanDisplay = formatWprDate(wPlanDisplay);
+                                    wAchievedDisplay = formatWprDate(wAchievedDisplay);
+                                  } else if (item.isCurrency) {
+                                    wPlanDisplay = wPlanDisplay ? `Rs. ${Number(wPlanDisplay).toLocaleString('en-IN')}` : '0';
+                                    wAchievedDisplay = wAchievedDisplay ? `Rs. ${Number(wAchievedDisplay).toLocaleString('en-IN')}` : '0';
+                                  }
+
+                                  return (
+                                    <React.Fragment key={wk.id}>
+                                      <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-slate-700">{wPlanDisplay}</td>
+                                      <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-semibold text-slate-850">{wAchievedDisplay}</td>
+                                      <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-bold text-emerald-650 bg-emerald-50">{wkVal.pct}</td>
+                                    </React.Fragment>
+                                  );
+                                })}
                               </tr>
                             );
                           })}
@@ -1712,9 +1797,15 @@ Format with markdown. Be specific, professional, and actionable.`;
                             <td className="p-2.5 border-r border-b border-slate-200 text-right bg-slate-100/80">—</td>
                             <td className="p-2.5 border-r border-b border-slate-200 text-right bg-slate-100/80">—</td>
                             <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-emerald-700 bg-slate-100/80">{wprTotals.monthly}</td>
-                            <td className="p-2.5 border-r border-b border-slate-200 text-right bg-slate-100/80">—</td>
-                            <td className="p-2.5 border-r border-b border-slate-200 text-right bg-slate-100/80">—</td>
-                            <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-emerald-700 bg-slate-100/80">{wprTotals.weekly}</td>
+                            {activeWprWeeks.map((wk) => (
+                              <React.Fragment key={wk.id}>
+                                <td className="p-2.5 border-r border-b border-slate-200 text-right bg-slate-100/80">—</td>
+                                <td className="p-2.5 border-r border-b border-slate-200 text-right bg-slate-100/80">—</td>
+                                <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-emerald-700 bg-slate-100/80">
+                                  {wprTotals.weeklyByWeek?.[wk.id] || '0%'}
+                                </td>
+                              </React.Fragment>
+                            ))}
                           </tr>
                         </tbody>
                       </table>
@@ -1740,10 +1831,11 @@ Format with markdown. Be specific, professional, and actionable.`;
                                 <th className="p-2.5 text-center font-bold w-[60px] border-r border-slate-200 align-bottom pb-1 bg-slate-200 text-slate-800">Sr. No</th>
                                 <th className="p-2.5 text-left font-bold border-r border-slate-200 align-bottom pb-1 bg-slate-200 text-slate-800">{sec.nameLabel} Name</th>
                                 <th colSpan={3} className="p-2.5 text-center font-bold border-r border-b border-slate-200 bg-slate-200 text-slate-800">Monthly</th>
-                                <th colSpan={3} className="p-2.5 text-center font-bold border-r border-b border-slate-200 bg-slate-200 text-slate-800">
-                                  {weeksList.find(w => w.id === selectedWprReportWeek) ? `Week ${weeksList.find(w => w.id === selectedWprReportWeek).weekNum}` : 'Weekly'}
-                                </th>
-                                <th className="p-2.5 text-left font-bold border-r border-slate-200 align-bottom pb-1 bg-slate-200 text-slate-800">Remarks</th>
+                                {activeWprWeeks.map((wk) => (
+                                  <th key={wk.id} colSpan={4} className="p-2.5 text-center font-bold border-r border-b border-slate-200 bg-slate-200 text-slate-800">
+                                    Week {wk.weekNum}
+                                  </th>
+                                ))}
                               </tr>
                               <tr className="bg-slate-50 text-[10px]">
                                 <th className="border-r border-b border-slate-200 bg-slate-200 h-4"></th>
@@ -1751,10 +1843,14 @@ Format with markdown. Be specific, professional, and actionable.`;
                                 <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Plan</th>
                                 <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Achieved</th>
                                 <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">% Comp.</th>
-                                <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Plan</th>
-                                <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Achieved</th>
-                                <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">% Comp.</th>
-                                <th className="border-r border-b border-slate-200 bg-slate-200 h-4"></th>
+                                {activeWprWeeks.map((wk) => (
+                                  <React.Fragment key={wk.id}>
+                                    <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Plan</th>
+                                    <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Achieved</th>
+                                    <th className="p-2 text-right font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">% Comp.</th>
+                                    <th className="p-2 text-left font-bold border-r border-b border-slate-200 text-slate-700 bg-slate-50">Remarks</th>
+                                  </React.Fragment>
+                                ))}
                               </tr>
                             </thead>
                             <tbody>
@@ -1765,20 +1861,23 @@ Format with markdown. Be specific, professional, and actionable.`;
                                   <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-slate-700">{r.monthlyPlan}</td>
                                   <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-semibold text-slate-850">{r.monthlyAchieved}</td>
                                   <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-bold text-emerald-650 bg-emerald-50">{r.monthlyPct}</td>
-                                  <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-slate-700">{r.weeklyPlan !== null ? r.weeklyPlan : '—'}</td>
-                                  <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-semibold text-slate-850">{r.weeklyAchieved !== null ? r.weeklyAchieved : '—'}</td>
-                                  <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-bold text-emerald-650 bg-emerald-50">{r.weeklyPct}</td>
-                                  <td className="p-2.5 border-r border-b border-slate-200 text-slate-600">{r.remark || '—'}</td>
+                                  {activeWprWeeks.map((wk) => {
+                                    const wkVal = r.weeklyData?.[wk.id] || { plan: '—', achieved: '—', pct: '—', remark: '—' };
+                                    return (
+                                      <React.Fragment key={wk.id}>
+                                        <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-slate-700">{wkVal.plan}</td>
+                                        <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-semibold text-slate-850">{wkVal.achieved}</td>
+                                        <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono font-bold text-emerald-650 bg-emerald-50">{wkVal.pct}</td>
+                                        <td className="p-2.5 border-r border-b border-slate-200 text-slate-600">{wkVal.remark}</td>
+                                      </React.Fragment>
+                                    );
+                                  })}
                                 </tr>
                               ))}
                               {(() => {
                                 const sectionMPlanTotal = sec.rows.reduce((s, r) => s + (Number(r.monthlyPlan) || 0), 0);
                                 const sectionMAchievedTotal = sec.rows.reduce((s, r) => s + (Number(r.monthlyAchieved) || 0), 0);
                                 const sectionMPct = sectionMPlanTotal > 0 ? Math.min(Math.round((sectionMAchievedTotal / sectionMPlanTotal) * 100), 100) : 0;
-
-                                const sectionWPlanTotal = sec.rows.reduce((s, r) => s + (Number(r.weeklyPlan) || 0), 0);
-                                const sectionWAchievedTotal = sec.rows.reduce((s, r) => s + (Number(r.weeklyAchieved) || 0), 0);
-                                const sectionWPct = sectionWPlanTotal > 0 ? Math.min(Math.round((sectionWAchievedTotal / sectionWPlanTotal) * 100), 100) : 0;
 
                                 return (
                                   <tr className="bg-slate-100 font-bold text-slate-800 text-[11px]">
@@ -1787,10 +1886,19 @@ Format with markdown. Be specific, professional, and actionable.`;
                                     <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono bg-slate-100/80">{sectionMPlanTotal}</td>
                                     <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono bg-slate-100/80">{sectionMAchievedTotal}</td>
                                     <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-emerald-700 bg-slate-100/80">{sectionMPct}%</td>
-                                    <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono bg-slate-100/80">{sectionWPlanTotal}</td>
-                                    <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono bg-slate-100/80">{sectionWAchievedTotal}</td>
-                                    <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-emerald-700 bg-slate-100/80">{sectionWPct}%</td>
-                                    <td className="p-2.5 border-r border-b border-slate-200 bg-slate-100/80">—</td>
+                                    {activeWprWeeks.map((wk) => {
+                                      const sectionWPlanTotal = sec.rows.reduce((s, r) => s + (Number(r.weeklyData?.[wk.id]?.plan) || 0), 0);
+                                      const sectionWAchievedTotal = sec.rows.reduce((s, r) => s + (Number(r.weeklyData?.[wk.id]?.achieved) || 0), 0);
+                                      const sectionWPct = sectionWPlanTotal > 0 ? Math.min(Math.round((sectionWAchievedTotal / sectionWPlanTotal) * 100), 100) : 0;
+                                      return (
+                                        <React.Fragment key={wk.id}>
+                                          <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono bg-slate-100/80">{sectionWPlanTotal}</td>
+                                          <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono bg-slate-100/80">{sectionWAchievedTotal}</td>
+                                          <td className="p-2.5 border-r border-b border-slate-200 text-right font-mono text-emerald-700 bg-slate-100/80">{sectionWPct}%</td>
+                                          <td className="p-2.5 border-r border-b border-slate-200 bg-slate-100/80">—</td>
+                                        </React.Fragment>
+                                      );
+                                    })}
                                   </tr>
                                 );
                               })()}

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -13,7 +13,6 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import { ClipboardList, CheckCircle2, Clock, AlertTriangle, Calendar, Save, X, ChevronsUpDown, HelpCircle, Printer } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
-import EmptyState from '@/components/shared/EmptyState';
 import { cn } from '@/lib/utils';
 import { formatCompactCurrencyINR, formatCurrencyINR, normalizeDateKey } from '@/lib/formatters';
 import { useAuth } from '@/lib/AuthContext';
@@ -32,8 +31,8 @@ import DprReviewDialog from '@/components/progress/DprReviewDialog';
 import WprSheetPanel from '@/components/progress/WprSheetPanel';
 import MprSheetPanel from '@/components/progress/MprSheetPanel';
 import { filterBudgetBySubProject, filterProgressBySubProject, filterWbsBySubProject } from '@/lib/subProjectScope';
-import { buildWprWeeksList, getDefaultWprWeekId } from '@/lib/wprWeeks';
 import { getMprMonthsList, getDefaultMprMonthId } from '@/lib/mprMonths';
+import { getMprActivitiesForDprDate } from '@/lib/mprDprIntegration';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 
 const weatherIcons = { clear: '☀️', cloudy: '⛅', rainy: '🌧️', stormy: '⛈️', hot: '🌡️' };
@@ -182,60 +181,52 @@ export default function SiteProgress() {
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   }, [selectedReportDate]);
 
-  const [selectedWeek, setSelectedWeek] = useState('');
-  const [selectedWprMonth, setSelectedWprMonth] = useState('');
+  const [wprYear, setWprYear] = useState(() => String(new Date().getFullYear()));
+  const [wprMonthNum, setWprMonthNum] = useState('');
+  const [wprWeekNum, setWprWeekNum] = useState('');
+  const [wprStartDate, setWprStartDate] = useState('');
+  const [wprEndDate, setWprEndDate] = useState('');
 
   const mprMonthsList = useMemo(() => getMprMonthsList(), []);
   const [selectedMprMonth, setSelectedMprMonth] = useState(() => getDefaultMprMonthId(mprMonthsList));
   const currentMprMonthObj = mprMonthsList.find(m => m.id === selectedMprMonth) || mprMonthsList[0];
 
-  const weeksList = useMemo(
-    () => buildWprWeeksList({
-      projectStartDate: selectedProject?.start_date || selectedProject?.created_date || null,
-    }),
-    [selectedProject?.start_date, selectedProject?.created_date, projectId]
-  );
+  const wprYearsList = useMemo(() => {
+    const yr = new Date().getFullYear();
+    return [yr, yr + 1, yr + 2, yr + 3, yr + 4, yr + 5].map(String);
+  }, []);
 
-  const wprMonths = useMemo(() => {
-    const months = [];
-    const seen = new Set();
-    for (const w of weeksList) {
-      if (!seen.has(w.monthKey)) {
-        seen.add(w.monthKey);
-        months.push({
-          key: w.monthKey,
-          label: w.monthLabel
-        });
-      }
-    }
-    return months;
-  }, [weeksList]);
+  const wprMonthsList = useMemo(() => [
+    { value: '01', label: 'January' },
+    { value: '02', label: 'February' },
+    { value: '03', label: 'March' },
+    { value: '04', label: 'April' },
+    { value: '05', label: 'May' },
+    { value: '06', label: 'June' },
+    { value: '07', label: 'July' },
+    { value: '08', label: 'August' },
+    { value: '09', label: 'September' },
+    { value: '10', label: 'October' },
+    { value: '11', label: 'November' },
+    { value: '12', label: 'December' },
+  ], []);
 
-  const filteredWeeksForDropdown = useMemo(() => {
-    return weeksList.filter(w => w.monthKey === selectedWprMonth);
-  }, [weeksList, selectedWprMonth]);
+  const selectedWeekObj = useMemo(() => {
+    const monthId = (wprYear && wprMonthNum) ? `${wprYear}-${wprMonthNum}` : '';
+    const weekNum = wprWeekNum ? Number(wprWeekNum) : null;
 
-  const handleWprMonthChange = (monthKey) => {
-    setSelectedWprMonth(monthKey);
-    const monthWeeks = weeksList.filter(w => w.monthKey === monthKey);
-    if (monthWeeks.length) {
-      setSelectedWeek(monthWeeks[0].id);
-    }
-  };
-
-  useEffect(() => {
-    if (!weeksList.length) {
-      setSelectedWeek('');
-      setSelectedWprMonth('');
-      return;
-    }
-    const targetWeekId = weeksList.some((w) => w.id === selectedWeek)
-      ? selectedWeek
-      : getDefaultWprWeekId(weeksList);
-    const weekObj = weeksList.find((w) => w.id === targetWeekId);
-    setSelectedWeek(targetWeekId);
-    setSelectedWprMonth(weekObj?.monthKey || '');
-  }, [weeksList, selectedWeek]);
+    return {
+      id: `wpr_${monthId || 'draft'}_w${weekNum || ''}_${wprStartDate || ''}_${wprEndDate || ''}`,
+      weekNum,
+      monthId,
+      monthKey: monthId,
+      startDate: wprStartDate,
+      endDate: wprEndDate,
+      wprYear,
+      wprMonthNum,
+      label: weekNum ? `Week ${weekNum}` : '',
+    };
+  }, [wprYear, wprMonthNum, wprWeekNum, wprStartDate, wprEndDate]);
 
   // Redirect if they try to access history tab directly (deprecated)
   useEffect(() => {
@@ -260,6 +251,20 @@ export default function SiteProgress() {
     enabled: !!projectId,
   });
 
+  const { data: allMprReports = [] } = useQuery({
+    queryKey: ['mpr-reports-all', projectId],
+    queryFn: () => projectId
+      ? base44.entities.MprReport.filter({ project_id: projectId })
+      : Promise.resolve([]),
+    enabled: !!projectId,
+  });
+
+  const { data: wbsHeader } = useQuery({
+    queryKey: ['wbs-header', projectId, subProjectId],
+    queryFn: () => base44.wbs.getHeader(projectId, subProjectId),
+    enabled: !!projectId && !!subProjectId,
+  });
+
   const { data: milestones = [] } = useQuery({
     queryKey: ['milestones', projectId],
     queryFn: () => projectId
@@ -267,6 +272,11 @@ export default function SiteProgress() {
       : Promise.resolve([]),
     enabled: !!projectId,
   });
+
+  const isWbsApproved = useMemo(() => {
+    if (!wbsHeader) return false;
+    return String(wbsHeader.status || '').toLowerCase() === 'approved';
+  }, [wbsHeader]);
 
   const wbsItems = useMemo(
     () => (isReady ? filterWbsBySubProject(allWbsItems, subProjectId) : []),
@@ -299,12 +309,84 @@ export default function SiteProgress() {
     [wbsItems]
   );
 
+  // Helper: resolve L1 approval status for any WBS item by walking up parent chain
+  const isL1ApprovedForActivity = useCallback((wbsItem) => {
+    if (!wbsItem || !Array.isArray(allWbsItems) || allWbsItems.length === 0) return false;
+
+    let current = wbsItem;
+    let depth = 0;
+    let l1Item = null;
+
+    while (current && depth < 5) {
+      const level = Number(current.level) || 0;
+      const levelText = String(current.level || '').toLowerCase();
+      if (level === 1 || levelText === 'l1') {
+        l1Item = current;
+        break;
+      }
+      if (!current.parent_id) break;
+      current = wbsById.get(current.parent_id) || allWbsItems.find((w) => w.id === current.parent_id);
+      depth++;
+    }
+
+    if (!l1Item) {
+      const codePrefix = String(wbsItem.code || '').split('.')[0];
+      if (codePrefix) {
+        l1Item = allWbsItems.find((w) => {
+          const lvl = Number(w.level) || 0;
+          const lvlTxt = String(w.level || '').toLowerCase();
+          const isL1 = lvl === 1 || lvlTxt === 'l1';
+          if (!isL1) return false;
+          const wCode = String(w.code || '');
+          return wCode === codePrefix || wCode === `${codePrefix}.0` || wCode.split('.')[0] === codePrefix;
+        });
+      }
+    }
+
+    if (!l1Item) return false;
+
+    // Check status on L1 WBS Item
+    const l1Status = String(l1Item.status || '').trim().toLowerCase();
+    if (l1Status === 'approved') return true;
+
+    // Also check wbsHeader l1_items if present
+    const l1Items = wbsHeader?.l1_items || [];
+    if (Array.isArray(l1Items) && l1Items.length > 0) {
+      const l1Record = l1Items.find(
+        (l) =>
+          l.id === l1Item.id ||
+          String(l.code) === String(l1Item.code || '') ||
+          String(l.code) === String(l1Item.code || '').split('.')[0]
+      );
+      if (l1Record && String(l1Record.status || '').toLowerCase() === 'approved') {
+        return true;
+      }
+    }
+
+    return false;
+  }, [wbsHeader, wbsById, allWbsItems]);
+
+  const mprPlannedActivities = useMemo(() => {
+    const all = getMprActivitiesForDprDate(allMprReports, selectedReportDate, allWbsItems, allBudgetItems, subProjectId);
+    // Only return activities whose parent L1 WBS head is approved
+    const l1Items = wbsHeader?.l1_items || [];
+    if (l1Items.length === 0) return all;
+    return all.filter((mpr) => {
+      if (!mpr.wbs_item_id) return true;
+      const wbsItem = wbsById.get(mpr.wbs_item_id) || allWbsItems.find((w) => w.id === mpr.wbs_item_id);
+      return isL1ApprovedForActivity(wbsItem);
+    });
+  }, [allMprReports, selectedReportDate, allWbsItems, allBudgetItems, subProjectId, wbsHeader, wbsById, isL1ApprovedForActivity]);
+
   const worksheetRows = useMemo(() => {
     const activityItems = wbsItems.filter((item) => {
       const levelNumber = Number(item.level);
       const levelText = String(item.level || '').trim().toLowerCase();
       const hasActivityId = String(item.activity_id || '').trim() !== '';
-      return levelNumber === 3 || levelText === 'l3' || hasActivityId;
+      const isActivity = levelNumber === 3 || levelText === 'l3' || hasActivityId;
+      if (!isActivity) return false;
+      // Only include activities under approved L1 heads
+      return isL1ApprovedForActivity(item);
     });
 
     const toWorksheetRow = (activity, extra = {}) => {
@@ -380,40 +462,78 @@ export default function SiteProgress() {
       .sort((a, b) => String(a.code || '').localeCompare(String(b.code || ''), undefined, { numeric: true }));
 
     return [...l3Rows, ...carryForwardRows];
-  }, [wbsItems, budgetByWbsId, entries]);
+  }, [wbsItems, budgetByWbsId, entries, wbsHeader, wbsById, isL1ApprovedForActivity]);
+
+  const worksheetRowsWithMpr = useMemo(() => {
+    const mprRows = (mprPlannedActivities || []).map((mpr) => {
+      const linkedWbs = mpr.wbs_item_id
+        ? wbsById.get(mpr.wbs_item_id) || allWbsItems.find((w) => w.id === mpr.wbs_item_id)
+        : null;
+      const linkedBudget = mpr.budget_item_id
+        ? budgetById.get(mpr.budget_item_id) || allBudgetItems.find((b) => b.id === mpr.budget_item_id)
+        : null;
+
+      return {
+        row_id: `mpr_${mpr.id}`,
+        budget_item_id_ref: mpr.budget_item_id || linkedBudget?.id || '',
+        wbs_item_id: mpr.wbs_item_id || linkedWbs?.id || '',
+        title: mpr.title,
+        code: mpr.code || linkedBudget?.code || linkedWbs?.code || '',
+        unit: mpr.unit || linkedBudget?.unit || linkedWbs?.unit || 'no',
+        quantity: mpr.totalBudgetQty || 0,
+        cost_per_unit: mpr.rate || linkedBudget?.cost_per_unit || 0,
+        parent_id: linkedWbs?.parent_id || null,
+        level: linkedWbs?.level || 3,
+        milestone_id: '',
+        activity_id_key: normalizeActivityKey(mpr.code || mpr.title),
+        source_upload_type: 'mpr_plan',
+        is_mpr_fetched: true,
+      };
+    });
+
+    const mprWbsIds = new Set(mprRows.map((r) => r.wbs_item_id).filter(Boolean));
+    const mprTitles = new Set(mprRows.map((r) => String(r.title || '').trim().toLowerCase()));
+
+    // Approved WBS rows for sub-project that are not in MPR Forecast
+    const otherApprovedWbsRows = (worksheetRows || []).filter(
+      (w) => !mprWbsIds.has(w.wbs_item_id) && !mprTitles.has(String(w.title || '').trim().toLowerCase())
+    );
+
+    return [...mprRows, ...otherApprovedWbsRows];
+  }, [worksheetRows, mprPlannedActivities, wbsById, allWbsItems, budgetById, allBudgetItems]);
 
   const worksheetCarryForwardCount = useMemo(
-    () => worksheetRows.filter((row) => row.is_l1_carry_forward).length,
-    [worksheetRows]
+    () => worksheetRowsWithMpr.filter((row) => row.is_l1_carry_forward).length,
+    [worksheetRowsWithMpr]
   );
 
   const worksheetRowById = useMemo(
-    () => new Map(worksheetRows.map((row) => [row.row_id, row])),
-    [worksheetRows]
+    () => new Map(worksheetRowsWithMpr.map((row) => [row.row_id, row])),
+    [worksheetRowsWithMpr]
   );
   const worksheetRowByBudgetId = useMemo(() => {
     const map = new Map();
-    worksheetRows.forEach((row) => {
+    worksheetRowsWithMpr.forEach((row) => {
       if (row.budget_item_id_ref) map.set(row.budget_item_id_ref, row);
     });
     return map;
-  }, [worksheetRows]);
+  }, [worksheetRowsWithMpr]);
   const worksheetRowByWbsId = useMemo(() => {
     const map = new Map();
-    worksheetRows.forEach((row) => {
+    worksheetRowsWithMpr.forEach((row) => {
       if (row.wbs_item_id) map.set(row.wbs_item_id, row);
     });
     return map;
-  }, [worksheetRows]);
+  }, [worksheetRowsWithMpr]);
   const worksheetRowByActivityId = useMemo(() => {
     const map = new Map();
-    worksheetRows.forEach((row) => {
+    worksheetRowsWithMpr.forEach((row) => {
       if (row.activity_id_key && !map.has(row.activity_id_key)) {
         map.set(row.activity_id_key, row);
       }
     });
     return map;
-  }, [worksheetRows]);
+  }, [worksheetRowsWithMpr]);
 
   const getEntryActivityKey = useCallback((entry) => {
     if (!entry) return '';
@@ -471,18 +591,10 @@ export default function SiteProgress() {
     enabled: !!projectId && !!subProjectId && !!selectedReportDate
   });
 
-  const { data: wbsHeader } = useQuery({
-    queryKey: ['wbs-header', projectId, subProjectId],
-    queryFn: () => base44.wbs.getHeader(projectId, subProjectId),
-    enabled: !!projectId && !!subProjectId,
-  });
 
   const isWbsUnapproved = useMemo(() => {
-    if (!projectId || !subProjectId) return false;
-    if (!wbsHeader) return true;
-    if (wbsHeader.status === 'draft') return true;
     return false;
-  }, [wbsHeader, projectId, subProjectId]);
+  }, []);
 
   const isSelectedDateLocked = useMemo(() => {
     if (isWbsUnapproved) return true;
@@ -900,28 +1012,178 @@ export default function SiteProgress() {
     getEntryActivityKey,
   ]);
 
-  const activeBudgetIds = useMemo(
-    () => [...new Set([...entryRowIds, ...manualRowIds])],
-    [entryRowIds, manualRowIds]
+  const activeBudgetItems = useMemo(() => {
+    if (!isReady) return [];
+
+    const activeSet = new Set([...entryRowIds, ...manualRowIds]);
+
+    // Auto-include MPR planned activities for current month
+    (mprPlannedActivities || []).forEach((mpr) => {
+      activeSet.add(`mpr_${mpr.id}`);
+    });
+
+    // Monthly Activity Memory & Pending Carry Forward for current month
+    const currentMonthKey = selectedReportDate.slice(0, 7);
+    const monthEntries = entries.filter(
+      (e) => normalizeDateKey(e.date).slice(0, 7) === currentMonthKey &&
+      (e.report_type === 'daily' || !e.report_type) &&
+      !e._is_aggregated
+    );
+
+    monthEntries.forEach((entry) => {
+      const rowId =
+        (entry.budget_item_id && worksheetRowByBudgetId.get(entry.budget_item_id)?.row_id) ||
+        (entry.wbs_item_id && worksheetRowByWbsId.get(entry.wbs_item_id)?.row_id) ||
+        (getEntryActivityKey(entry) && worksheetRowByActivityId.get(getEntryActivityKey(entry))?.row_id);
+
+      if (rowId) activeSet.add(rowId);
+    });
+
+    const items = [...activeSet].map((id) => worksheetRowById.get(id)).filter(Boolean);
+
+    return items
+      .map((row) => {
+        const totalQty = parseFloat(row.quantity) || 0;
+        const cumQtyBeforeToday = entries
+          .filter((e) => rowMatchesEntry(row, e) && normalizeDateKey(e.date) < selectedReportDate)
+          .reduce((s, e) => s + (parseFloat(e.quantity_done) || 0), 0);
+
+        const balanceQty = Math.max(0, totalQty - cumQtyBeforeToday);
+        const isPendingCarryForward = cumQtyBeforeToday > 0 && balanceQty > 0;
+        const isNewMprPlan = Boolean(row.is_mpr_fetched) && cumQtyBeforeToday === 0;
+
+        let priorityGroup = 3;
+        if (isPendingCarryForward) priorityGroup = 1;
+        else if (isNewMprPlan) priorityGroup = 2;
+
+        return {
+          ...row,
+          _qty_before_today: cumQtyBeforeToday,
+          _balance_qty: balanceQty,
+          _is_pending_carry_forward: isPendingCarryForward,
+          _is_new_mpr_plan: isNewMprPlan,
+          _priority_group: priorityGroup,
+        };
+      })
+      .sort((a, b) => {
+        if (a._priority_group !== b._priority_group) {
+          return a._priority_group - b._priority_group;
+        }
+        return String(a.code || a.title || '').localeCompare(String(b.code || b.title || ''), undefined, { numeric: true });
+      });
+  }, [
+    isReady,
+    entryRowIds,
+    manualRowIds,
+    mprPlannedActivities,
+    entries,
+    selectedReportDate,
+    worksheetRowById,
+    worksheetRowByBudgetId,
+    worksheetRowByWbsId,
+    worksheetRowByActivityId,
+    getEntryActivityKey,
+    rowMatchesEntry,
+  ]);
+
+  const activeBudgetRowIds = useMemo(
+    () => activeBudgetItems.map((item) => item.row_id),
+    [activeBudgetItems]
   );
 
+  const [collapsedGroups, setCollapsedGroups] = useState({});
+
+  const toggleGroupCollapse = useCallback((key) => {
+    setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
+
+  const getHierarchyForItem = useCallback((bItem) => {
+    const wbsId = bItem.wbs_item_id;
+    let l1Title = 'General Activities';
+    let l2Title = 'Main Head';
+    let l1Code = '';
+    let l2Code = '';
+
+    if (wbsId) {
+      const wbsItem = wbsById.get(wbsId) || allWbsItems.find((w) => w.id === wbsId);
+      if (wbsItem) {
+        const parentL2 = wbsItem.parent_id
+          ? wbsById.get(wbsItem.parent_id) || allWbsItems.find((w) => w.id === wbsItem.parent_id)
+          : null;
+        const parentL1 = parentL2
+          ? parentL2.parent_id
+            ? wbsById.get(parentL2.parent_id) || allWbsItems.find((w) => w.id === parentL2.parent_id)
+            : parentL2
+          : null;
+
+        if (parentL1) {
+          l1Code = parentL1.code || '';
+          l1Title = parentL1.title || parentL1.name || 'General Head';
+        }
+        if (parentL2 && parentL2 !== parentL1) {
+          l2Code = parentL2.code || '';
+          l2Title = parentL2.title || parentL2.name || 'Sub Head';
+        }
+      }
+    } else if (bItem.is_mpr_fetched) {
+      l1Title = 'MPR Forecast';
+      l2Title = 'Planned Activities';
+    }
+
+    const l1FullKey = l1Code ? `${l1Code} - ${l1Title}` : l1Title;
+    const l2FullKey = l2Code ? `${l2Code} - ${l2Title}` : l2Title;
+
+    return { l1FullKey, l2FullKey, l1Code, l1Title, l2Code, l2Title };
+  }, [wbsById, allWbsItems]);
+
+  const groupedWorksheetItems = useMemo(() => {
+    const map = new Map();
+
+    activeBudgetItems.forEach((bItem) => {
+      const { l1FullKey, l2FullKey, l1Code, l1Title, l2Code, l2Title } = getHierarchyForItem(bItem);
+
+      if (!map.has(l1FullKey)) {
+        map.set(l1FullKey, { l1FullKey, l1Code, l1Title, l2Groups: new Map() });
+      }
+      const l1Obj = map.get(l1FullKey);
+
+      if (!l1Obj.l2Groups.has(l2FullKey)) {
+        l1Obj.l2Groups.set(l2FullKey, { l2FullKey, l2Code, l2Title, items: [] });
+      }
+      l1Obj.l2Groups.get(l2FullKey).items.push(bItem);
+    });
+
+    return [...map.values()].map((l1) => ({
+      ...l1,
+      l2Groups: [...l1.l2Groups.values()],
+    }));
+  }, [activeBudgetItems, getHierarchyForItem]);
+
+  const prevReportDateRef = useRef(selectedReportDate);
+
+  // Reset manual weather override ONLY when report date actually changes
   useEffect(() => {
-    weatherManualRef.current = false;
-    setWeatherManuallyEdited(false);
+    if (prevReportDateRef.current !== selectedReportDate) {
+      prevReportDateRef.current = selectedReportDate;
+      weatherManualRef.current = false;
+      setWeatherManuallyEdited(false);
+      setWeatherCondition('');
+    }
+  }, [selectedReportDate]);
+
+  useEffect(() => {
+    if (weatherManualRef.current || weatherCondition) return;
+
     setWeatherInfo('');
     setWeatherError('');
 
     // Check if we have database entries first to prefill
-    const firstEntry = dprEntriesForSelectedDate.find(e => e.weather_condition);
+    const firstEntry = dprEntriesForSelectedDate.find((e) => e.weather_condition);
     if (firstEntry?.weather_condition) {
-      setWeatherCondition(firstEntry.weather_condition);
+      setWeatherCondition(firstEntry.weather_condition.toLowerCase());
       setWeatherInfo('Loaded from saved entries');
       return;
     }
-
-    setWeatherCondition('');
-
-    if (weatherManuallyEdited) return;
 
     if (!isReady || !selectedProject?.location) {
       if (isReady && !selectedProject?.location) {
@@ -993,7 +1255,7 @@ export default function SiteProgress() {
     return () => {
       cancelled = true;
     };
-  }, [isReady, selectedProject?.location, selectedReportDate, weatherManuallyEdited, dprEntriesForSelectedDate]);
+  }, [isReady, selectedProject?.location, selectedReportDate, dprEntriesForSelectedDate, weatherCondition]);
 
   // Sync state for tabular DPR sheet fields
   useEffect(() => {
@@ -1006,7 +1268,7 @@ export default function SiteProgress() {
     setDprState((prev) => {
       const next = {};
 
-      activeBudgetIds.forEach((rowId) => {
+      activeBudgetRowIds.forEach((rowId) => {
         const row = worksheetRowById.get(rowId);
         if (!row) return;
 
@@ -1047,7 +1309,7 @@ export default function SiteProgress() {
     });
 
     setLoadedScope(scopeKey);
-  }, [scopeKey, activeBudgetIds, worksheetRowById, dprEntriesForSelectedDate, isReady, loadedScope, rowMatchesEntry]);
+  }, [scopeKey, activeBudgetRowIds, worksheetRowById, dprEntriesForSelectedDate, isReady, loadedScope, rowMatchesEntry]);
 
   const getQtyBeforeForRow = useCallback((row) => {
     const itemProgress = entries.filter(
@@ -1105,15 +1367,15 @@ export default function SiteProgress() {
     handleInputChange(rowId, 'qty_executed', rawValue);
   }, [isSelectedDateLocked, worksheetRowById, getQtyBeforeForRow, toast]);
 
-  const handleAddActivity = (id) => {
+  const handleAddActivity = useCallback((id) => {
     if (isSelectedDateLocked) return;
     if (!id) return;
-    if (activeBudgetIds.includes(id)) return;
+    if (activeBudgetRowIds.includes(id)) return;
 
     const row = worksheetRowById.get(id);
     
     setManualRowIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
-    setDprState(prev => ({
+    setDprState((prev) => ({
       ...prev,
       [id]: prev[id] || {
         qty_executed: '',
@@ -1125,7 +1387,12 @@ export default function SiteProgress() {
         wbs_item_id: row?.wbs_item_id || ''
       }
     }));
-  };
+
+    toast({
+      title: 'Activity Added to DPR',
+      description: `Added "${row?.title || 'Activity'}" to today's worksheet for progress entry.`,
+    });
+  }, [isSelectedDateLocked, activeBudgetRowIds, worksheetRowById, toast]);
 
   const handleRemoveActivity = async (bItemId) => {
     if (isSelectedDateLocked) return;
@@ -1183,7 +1450,7 @@ export default function SiteProgress() {
     let deletedCount = 0;
     const persistedEntryIds = {};
 
-    for (const rowId of activeBudgetIds) {
+    for (const rowId of activeBudgetRowIds) {
       const state = dprState[rowId];
       const row = worksheetRowById.get(rowId);
       if (!row || !state) continue;
@@ -1330,16 +1597,14 @@ export default function SiteProgress() {
     },
   });
 
+
+
   const searchableActivities = useMemo(
-    () => worksheetRows.filter((item) => !activeBudgetIds.includes(item.row_id)),
-    [worksheetRows, activeBudgetIds]
+    () => worksheetRowsWithMpr.filter((item) => !activeBudgetRowIds.includes(item.row_id)),
+    [worksheetRowsWithMpr, activeBudgetRowIds]
   );
 
-  // Active budget items listed in DPR sheet
-  const activeBudgetItems = activeBudgetIds
-    .map((rowId) => worksheetRowById.get(rowId))
-    .filter(Boolean);
-  const modifiedCount = activeBudgetIds.filter(id => isRowModified(id)).length;
+  const modifiedCount = activeBudgetRowIds.filter((id) => isRowModified(id)).length;
 
   const getWorksheetReviewSection = useCallback(() => ({
     title: 'A. DPR Worksheet',
@@ -1424,9 +1689,6 @@ export default function SiteProgress() {
 
   const fmt = (v) => formatCompactCurrencyINR(v);
   const fmtFull = (v) => formatCurrencyINR(v);
-
-  // Weekly WPR computations
-  const currentWeekObj = weeksList.find(w => w.id === selectedWeek) || weeksList[0];
 
   return (
     <TooltipProvider>
@@ -1518,14 +1780,34 @@ export default function SiteProgress() {
             <div className="h-9 w-px bg-border hidden md:block self-end mb-1" />
 
             <div className="flex flex-col gap-1 justify-end">
-              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider leading-none">Select Month</span>
-              <Select value={selectedWprMonth} onValueChange={handleWprMonthChange}>
-                <SelectTrigger className="w-36 h-9 text-xs px-2">
-                  <SelectValue placeholder="Choose Month" />
+              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider leading-none">
+                Select Year <span className="text-red-500">*</span>
+              </span>
+              <Select value={wprYear} onValueChange={setWprYear}>
+                <SelectTrigger className="w-32 h-9 text-xs px-2">
+                  <SelectValue placeholder="Select Year" />
                 </SelectTrigger>
                 <SelectContent>
-                  {wprMonths.map(m => (
-                    <SelectItem key={m.key} value={m.key} className="text-xs">
+                  {wprYearsList.map((yr) => (
+                    <SelectItem key={yr} value={yr} className="text-xs">
+                      {yr}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex flex-col gap-1 justify-end">
+              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider leading-none">
+                Select Month <span className="text-red-500">*</span>
+              </span>
+              <Select value={wprMonthNum} onValueChange={setWprMonthNum}>
+                <SelectTrigger className="w-36 h-9 text-xs px-2">
+                  <SelectValue placeholder="Select Month" />
+                </SelectTrigger>
+                <SelectContent>
+                  {wprMonthsList.map((m) => (
+                    <SelectItem key={m.value} value={m.value} className="text-xs">
                       {m.label}
                     </SelectItem>
                   ))}
@@ -1533,22 +1815,45 @@ export default function SiteProgress() {
               </Select>
             </div>
 
-            <div className="h-9 w-px bg-border hidden md:block self-end mb-1" />
-
             <div className="flex flex-col gap-1 justify-end">
-              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider leading-none">Select Week</span>
-              <Select value={selectedWeek} onValueChange={setSelectedWeek} disabled={!filteredWeeksForDropdown.length}>
-                <SelectTrigger className="w-52 h-9 text-xs px-2">
-                  <SelectValue placeholder={filteredWeeksForDropdown.length ? 'Choose Week' : 'No weeks available'} />
+              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider leading-none">
+                Select Week <span className="text-red-500">*</span>
+              </span>
+              <Select value={wprWeekNum ? String(wprWeekNum) : ''} onValueChange={(v) => setWprWeekNum(v)}>
+                <SelectTrigger className="w-32 h-9 text-xs px-2">
+                  <SelectValue placeholder="Select Week" />
                 </SelectTrigger>
                 <SelectContent>
-                  {filteredWeeksForDropdown.map(w => (
-                    <SelectItem key={w.id} value={w.id} className="text-xs">
-                      Week {w.weekNum} ({w.startDate} to {w.endDate})
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="1" className="text-xs">Week 1</SelectItem>
+                  <SelectItem value="2" className="text-xs">Week 2</SelectItem>
+                  <SelectItem value="3" className="text-xs">Week 3</SelectItem>
+                  <SelectItem value="4" className="text-xs">Week 4</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="flex flex-col gap-1 justify-end">
+              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider leading-none">
+                Start Date <span className="text-red-500">*</span>
+              </span>
+              <Input
+                type="date"
+                value={wprStartDate}
+                onChange={(e) => setWprStartDate(e.target.value)}
+                className="w-36 h-9 text-xs px-2"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1 justify-end">
+              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider leading-none">
+                End Date <span className="text-red-500">*</span>
+              </span>
+              <Input
+                type="date"
+                value={wprEndDate}
+                onChange={(e) => setWprEndDate(e.target.value)}
+                className="w-36 h-9 text-xs px-2"
+              />
             </div>
           </>
         )}
@@ -1689,37 +1994,30 @@ export default function SiteProgress() {
 
               {isReady && (
                 <div className="space-y-4">
-                  {/* WBS Unapproved Warning Banner */}
-                  {isWbsUnapproved && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center gap-3 text-amber-800 font-sans shadow-sm">
-                      <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
-                      <div>
-                        <p className="text-sm font-semibold">DPR Locked — WBS Structure Awaiting Approval</p>
-                        <p className="text-xs text-amber-700/90 mt-0.5">
-                          The WBS structure is currently in <strong>{wbsHeader?.status?.replace('_', ' ') || 'Draft'}</strong> status. Downstream daily progress recording (DPR) is disabled and locked until selected Department Heads approve the WBS.
-                        </p>
-                      </div>
-                    </div>
-                  )}
 
-                  {wbsHeader?.status === 'partially_approved' && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-center gap-3 text-blue-800 font-sans shadow-sm">
-                      <AlertTriangle className="w-5 h-5 text-blue-600 shrink-0" />
-                      <div>
-                        <p className="text-sm font-semibold">Granular DPR Lock Active — WBS Partially Approved</p>
-                        <p className="text-xs text-blue-700/90 mt-0.5">
-                          Only approved categories are unlocked for daily progress recording (DPR). Unapproved categories remain locked.
-                        </p>
-                      </div>
-                    </div>
-                  )}
+
+
 
                   {/* Draft Banner */}
-                  {(!dprRecord || dprRecord.status === 'draft') && (
+                  {dprRecord?.status === 'draft' && !dprRecord.reopened_date && (
                     <div className="flex items-center gap-2 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 shadow-sm">
                       <Clock className="w-4 h-4 text-slate-500 shrink-0" />
                       <span>
                         <strong className="text-slate-800">Status: Draft</strong>
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Returned Banner */}
+                  {dprRecord?.status === 'draft' && dprRecord.reopened_date && (
+                    <div className="flex items-center gap-2 text-sm text-rose-800 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 shadow-sm">
+                      <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+                      <span>
+                        <strong className="text-rose-900">Status: Returned</strong> — Returned by {dprRecord.reopened_by?.split('@')[0]} on {(() => {
+                          const d = new Date(dprRecord.reopened_date);
+                          if (isNaN(d.getTime())) return dprRecord.reopened_date;
+                          return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+                        })()}{dprRecord.reopen_reason ? ` (Reason: ${dprRecord.reopen_reason})` : ''}.
                       </span>
                     </div>
                   )}
@@ -1944,13 +2242,18 @@ export default function SiteProgress() {
                             {searchableActivities.map((item) => (
                               <CommandItem
                                 key={item.row_id}
-                                value={`${item.code || ''} ${item.title || ''}`}
+                                value={`${item.code || ''} ${item.title || ''} ${item.row_id}`}
                                 onSelect={() => {
                                   handleAddActivity(item.row_id);
                                   setActivityPickerOpen(false);
                                   setSearchQuery('');
                                 }}
-                                className="gap-3 items-start py-2.5"
+                                onClick={() => {
+                                  handleAddActivity(item.row_id);
+                                  setActivityPickerOpen(false);
+                                  setSearchQuery('');
+                                }}
+                                className="gap-3 items-start py-2.5 cursor-pointer hover:bg-accent"
                               >
                                 <span className="font-mono text-xs font-semibold whitespace-nowrap min-w-[170px] max-w-[220px] shrink-0">
                                   {highlightText(item.code || '—', searchQuery)}
@@ -2136,9 +2439,10 @@ export default function SiteProgress() {
                           const rowId = bItem.row_id;
 
                           const itemProgress = entries.filter(
-                            (e) => rowMatchesEntry(bItem, e) &&
-                            (e.report_type === 'daily' || !e.report_type) &&
-                            !e._is_aggregated
+                            (e) =>
+                              rowMatchesEntry(bItem, e) &&
+                              (e.report_type === 'daily' || !e.report_type) &&
+                              !e._is_aggregated
                           );
 
                           const qtyBefore = itemProgress
@@ -2158,21 +2462,7 @@ export default function SiteProgress() {
                           const cumulativeVowd = cumulativeQty * rate;
                           const tomorrowVowd = tomorrowQty * rate;
 
-                          // Granular row-level locking by WBS status
-                          const wbsId = bItem.wbs_item_id;
-                          let l1Status = 'approved';
-                          if (wbsId) {
-                            const wbsItem = allWbsItems.find(w => w.id === wbsId);
-                            if (wbsItem) {
-                              const rootCode = String(wbsItem.code).split('.')[0];
-                              const l1Category = wbsHeader?.l1_items?.find(l => l.code === rootCode);
-                              if (l1Category) {
-                                l1Status = l1Category.status || 'draft';
-                              }
-                            }
-                          }
-                          const isRowLockedByWBS = l1Status !== 'approved';
-
+                          const isRowLockedByWBS = false;
                           const isComplete = percentComp >= 100;
                           const isCarryForwardRow = bItem.is_l1_carry_forward;
                           const rowModified = isRowModified(rowId);
@@ -2190,31 +2480,23 @@ export default function SiteProgress() {
                                       : ''
                               }`}
                             >
-                              <td className={`sticky left-0 border-r z-10 p-2.5 text-xs transition-colors min-w-[260px] ${
-                                rowModified
-                                  ? 'bg-amber-50/95 dark:bg-amber-950/20'
-                                  : isComplete
-                                    ? 'bg-emerald-50/95 dark:bg-emerald-950/20'
-                                    : isCarryForwardRow
-                                      ? 'bg-sky-50/95 dark:bg-sky-950/20'
-                                      : 'bg-card'
-                              }`}>
+                              <td
+                                className={`sticky left-0 border-r z-10 p-2.5 text-xs transition-colors min-w-[260px] pl-3 ${
+                                  rowModified
+                                    ? 'bg-amber-50/95 dark:bg-amber-950/20'
+                                    : isComplete
+                                      ? 'bg-emerald-50/95 dark:bg-emerald-950/20'
+                                      : isCarryForwardRow
+                                        ? 'bg-sky-50/95 dark:bg-sky-950/20'
+                                        : 'bg-card'
+                                }`}
+                              >
                                 {bItem.code && (
                                   <p className="font-mono text-[10px] text-muted-foreground leading-tight">{bItem.code}</p>
                                 )}
                                 <p className="font-semibold text-foreground leading-snug mt-0.5">
                                   {bItem.title}
-                                  {isRowLockedByWBS && (
-                                    <span className="ml-2 text-[9px] bg-amber-50 text-amber-700 font-bold px-1 py-0.5 rounded border border-amber-200" title={`Locked by WBS category status: ${l1Status}`}>
-                                      🔒 Locked
-                                    </span>
-                                  )}
                                 </p>
-                                {isCarryForwardRow && (
-                                  <p className="text-[10px] mt-1 inline-flex items-center rounded border border-sky-200 bg-sky-100 px-1.5 py-0.5 text-sky-700">
-                                    L1 carried (consumed {Number(bItem.carry_forward_consumed_qty || 0).toLocaleString()})
-                                  </p>
-                                )}
                               </td>
 
                               <td className="p-2.5 text-center text-xs text-muted-foreground border-r">{bItem.unit || '—'}</td>
@@ -2234,7 +2516,7 @@ export default function SiteProgress() {
                                   value={state.qty_executed ?? ''}
                                   onChange={(e) => handleQtyExecutedChange(rowId, e.target.value)}
                                   disabled={isSelectedDateLocked || isRowLockedByWBS || maxTodayQty <= 0}
-                                  title={isRowLockedByWBS ? `Locked by WBS status: ${l1Status}` : (maxTodayQty > 0 ? `Max today: ${maxTodayQty}` : 'No balance quantity remaining')}
+                                  title={maxTodayQty > 0 ? `Max today: ${maxTodayQty}` : 'No balance quantity remaining'}
                                 />
                               </td>
 
@@ -2276,16 +2558,19 @@ export default function SiteProgress() {
                                 {tomorrowQty > 0 ? fmtFull(tomorrowVowd) : '—'}
                               </td>
 
-                              <td className="p-2.5 border-l text-center">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleRemoveActivity(rowId)}
-                                  className="w-7 h-7 hover:bg-destructive/10 text-destructive/80 hover:text-destructive"
-                                  disabled={isSelectedDateLocked || isRowLockedByWBS}
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                </Button>
+                              <td className="p-2.5 text-center border-l bg-slate-50">
+                                {!isSelectedDateLocked && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                    onClick={() => handleRemoveActivity(rowId)}
+                                    title="Remove activity from worksheet"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </Button>
+                                )}
                               </td>
                             </tr>
                           );
@@ -2315,7 +2600,7 @@ export default function SiteProgress() {
             subProjectId=""
             selectedProject={selectedProject}
             selectedSubProject={null}
-            week={currentWeekObj}
+            week={selectedWeekObj}
             submittedBy={submittedBy}
           />
         </div>

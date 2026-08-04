@@ -92,11 +92,19 @@ async function runNonDestructiveMigrations(client) {
   `);
   await client.query(`
     ALTER TABLE projects
-    ADD COLUMN IF NOT EXISTS project_type VARCHAR(100)
-  `);
-  await client.query(`
-    ALTER TABLE projects
-    ADD COLUMN IF NOT EXISTS project_code VARCHAR(100)
+    ADD COLUMN IF NOT EXISTS project_type VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS project_code VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS elevation_photo_url TEXT,
+    ADD COLUMN IF NOT EXISTS plot_area NUMERIC(15, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS reservation_area NUMERIC(15, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS amenities_area NUMERIC(15, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS open_space_area NUMERIC(15, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS sanctioned_fsi NUMERIC(15, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS tdr NUMERIC(15, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS rcc_slab_area NUMERIC(15, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS built_up_area NUMERIC(15, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS saleable_area NUMERIC(15, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS building_configurations TEXT
   `);
   await client.query(`
     ALTER TABLE progress_entries

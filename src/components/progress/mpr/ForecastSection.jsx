@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -103,6 +103,27 @@ function ActivityCombobox({ row, onSelect, locked, activityOptions }) {
 }
 
 export default function ForecastSection({ rows, onChange, locked, activityOptions = [] }) {
+  // Build fast lookup maps: wbsItemId → option, budgetItemId → option
+  const optByWbsId = useMemo(() => {
+    const map = new Map();
+    activityOptions.forEach((opt) => { if (opt.wbsItemId) map.set(opt.wbsItemId, opt); });
+    return map;
+  }, [activityOptions]);
+  const optByBudgetId = useMemo(() => {
+    const map = new Map();
+    activityOptions.forEach((opt) => { if (opt.budgetItemId) map.set(opt.budgetItemId, opt); });
+    return map;
+  }, [activityOptions]);
+
+  /** Resolve the activity code for a row, supporting existing rows saved before activityCode existed. */
+  const resolveCode = (row) => {
+    if (row.activityCode) return row.activityCode;
+    const opt =
+      (row.wbsItemId && optByWbsId.get(row.wbsItemId)) ||
+      (row.budgetItemId && optByBudgetId.get(row.budgetItemId));
+    return opt?.code || '';
+  };
+
   const updateRow = (id, field, value) => {
     if (locked) return;
     onChange(rows.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
@@ -112,6 +133,7 @@ export default function ForecastSection({ rows, onChange, locked, activityOption
     onChange(rows.map((r) => (r.id === id ? {
       ...r,
       description: opt.title,
+      activityCode: opt.code || '',
       unit: opt.unit || '',
       rate: opt.rate ?? '',
       wbsItemId: opt.wbsItemId || '',
@@ -151,7 +173,6 @@ export default function ForecastSection({ rows, onChange, locked, activityOption
                 <HeaderCell label="Rate" align="right" tooltip="Auto-filled from the selected activity." />
                 <HeaderCell label="Total Amount" align="right" tooltip="Quantity × Rate." />
                 <HeaderCell label="Drawing Status" />
-                <HeaderCell label="Total Labor Required" align="right" />
                 <HeaderCell label="Cement Bags" align="right" />
                 {!locked && <th className="text-center p-2.5 font-semibold text-xs text-muted-foreground uppercase w-24">Add/Remove</th>}
               </tr>
@@ -160,16 +181,24 @@ export default function ForecastSection({ rows, onChange, locked, activityOption
               {rows.map((row, index) => {
                 const qty = forecastRowQty(row);
                 const amount = qty * (parseFloat(row.rate) || 0);
+                const displayCode = resolveCode(row);
                 return (
                   <tr key={row.id} className="border-b hover:bg-muted/20 transition-colors">
                     <td className="p-2 text-xs text-muted-foreground align-middle">{index + 1}</td>
                     <td className="p-2">
-                      <ActivityCombobox
-                        row={row}
-                        onSelect={(opt) => handleActivitySelect(row.id, opt)}
-                        locked={locked}
-                        activityOptions={activityOptions}
-                      />
+                      <div className="flex flex-col gap-0.5">
+                        <ActivityCombobox
+                          row={row}
+                          onSelect={(opt) => handleActivitySelect(row.id, opt)}
+                          locked={locked}
+                          activityOptions={activityOptions}
+                        />
+                        {displayCode && (
+                          <p className="font-mono text-[10px] text-muted-foreground leading-tight px-1 truncate">
+                            {displayCode}
+                          </p>
+                        )}
+                      </div>
                     </td>
                     <td className="p-2">
                       <div className="h-8.5 flex items-center justify-end px-3 text-xs rounded-md bg-muted/40 font-mono select-none">{row.unit || '—'}</div>
@@ -190,9 +219,6 @@ export default function ForecastSection({ rows, onChange, locked, activityOption
                     </td>
                     <td className="p-2">
                       <Input type="text" value={row.drawingStatus} onChange={(e) => updateRow(row.id, 'drawingStatus', e.target.value)} disabled={locked} className="h-8.5 text-xs bg-background w-32" />
-                    </td>
-                    <td className="p-2">
-                      <Input type="number" value={row.totalLabourRequired} onChange={(e) => updateRow(row.id, 'totalLabourRequired', e.target.value)} disabled={locked} className="h-8.5 text-xs text-right bg-background w-24" />
                     </td>
                     <td className="p-2">
                       <Input type="number" value={row.cementBags} onChange={(e) => updateRow(row.id, 'cementBags', e.target.value)} disabled={locked} className="h-8.5 text-xs text-right bg-background w-24" />

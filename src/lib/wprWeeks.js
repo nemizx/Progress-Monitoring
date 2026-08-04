@@ -207,3 +207,62 @@ export function getDefaultWprWeekId(weeks, asOfDate = new Date()) {
   const containing = pool.find((w) => w.startDate <= asOf && asOf <= w.endDate);
   return containing?.id || pool[0]?.id || weeks[0].id;
 }
+
+export function formatDisplayDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(`${dateStr}T00:00:00`);
+  if (isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+export function formatWprWeekLabel({ weekNum, startDate, endDate }) {
+  const startFmt = formatDisplayDate(startDate);
+  const endFmt = formatDisplayDate(endDate);
+  return `Week ${weekNum} (${startFmt} to ${endFmt})`;
+}
+
+export function validateWprWeekConfig({ monthKey, weekNum, startDate, endDate, existingWeeks = [], editingWeekId = null }) {
+  if (!startDate || !endDate) {
+    return { valid: false, error: 'Start Date and End Date are mandatory.' };
+  }
+
+  if (startDate > endDate) {
+    return { valid: false, error: 'Start Date cannot be greater than End Date.' };
+  }
+
+  const startMonth = String(startDate).slice(0, 7);
+  const endMonth = String(endDate).slice(0, 7);
+
+  if (monthKey && (startMonth !== monthKey || endMonth !== monthKey)) {
+    const monthLabel = new Date(`${monthKey}-01T00:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    return { valid: false, error: `Both Start Date and End Date must belong to ${monthLabel}.` };
+  }
+
+  const otherWeeks = (existingWeeks || []).filter((w) => w.id !== editingWeekId);
+
+  // Check duplicate week number
+  const duplicateWeek = otherWeeks.find((w) => Number(w.weekNum) === Number(weekNum));
+  if (duplicateWeek) {
+    return { valid: false, error: `Week ${weekNum} has already been configured for this month.` };
+  }
+
+  // Check date range overlap
+  const overlappingWeek = otherWeeks.find((w) => {
+    const s1 = startDate;
+    const e1 = endDate;
+    const s2 = w.startDate;
+    const e2 = w.endDate;
+    return s1 <= e2 && s2 <= e1;
+  });
+
+  if (overlappingWeek) {
+    const overlapLabel = formatWprWeekLabel({
+      weekNum: overlappingWeek.weekNum,
+      startDate: overlappingWeek.startDate,
+      endDate: overlappingWeek.endDate,
+    });
+    return { valid: false, error: `Date range (${startDate} to ${endDate}) overlaps with ${overlapLabel}.` };
+  }
+
+  return { valid: true, error: null };
+}

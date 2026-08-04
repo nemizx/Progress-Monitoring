@@ -1,0 +1,145 @@
+/* MPR Print Report Styling - Clean A4 Portrait Layout matching Planedge reference */
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+  
+  body {
+    background: #fff !important;
+    color: #000 !important;
+    font-family: Arial, Helvetica, sans-serif !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .no-print,
+  nav,
+  header,
+  aside,
+  button {
+    display: none !important;
+  }
+
+  .mpr-print-page {
+    page-break-after: always;
+    break-after: page;
+    box-shadow: none !important;
+    border: 1.5px solid #000 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    min-height: 275mm !important;
+    padding: 10mm 12mm !important;
+  }
+}
+
+.mpr-print-container {
+  font-family: Arial, Helvetica, sans-serif;
+  color: #1e293b;
+  background-color: #f8fafc;
+  padding: 1.5rem;
+}
+
+.mpr-print-page {
+  background: #ffffff;
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto 20px auto;
+  padding: 12mm 14mm;
+  box-sizing: border-box;
+  border: 1.5px solid #000000;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* Light Blue Section & Table Headers */
+.mpr-header-blue {
+  background-color: #dbeef8 !important;
+  color: #0f172a;
+  font-weight: 700;
+  border: 1.2px solid #000000;
+  font-size: 13px;
+}
+
+.mpr-sub-header-blue {
+  background-color: #e8f4fb !important;
+  color: #0f172a;
+  font-weight: 600;
+  border: 1px solid #000000;
+  font-size: 11.5px;
+}
+
+/* Table styling */
+.mpr-report-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  margin-bottom: 12px;
+  font-size: 11px;
+}
+
+.mpr-report-table th,
+.mpr-report-table td {
+  border: 1px solid #000000;
+  padding: 5.5px 7px;
+  vertical-align: middle;
+}
+
+.mpr-report-table th {
+  background-color: #dbeef8;
+  font-weight: 700;
+  text-align: center;
+  color: #000000;
+  font-size: 11px;
+}
+
+.mpr-report-table tr {
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+/* Document Footer */
+.mpr-doc-footer {
+  margin-top: auto;
+  padding-top: 8px;
+  font-size: 9.5px;
+  color: #334155;
+  border-top: 1px solid #cbd5e1;
+}
+
+.mpr-footer-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9.5px;
+}
+
+.mpr-footer-table td {
+  border: 1px solid #94a3b8;
+  padding: 3.5px 7px;
+  color: #475569;
+  font-weight: 600;
+}
+
+.mpr-footer-branding {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+  font-size: 9.5px;
+  color: #64748b;
+}
+
+.mpr-planedge-logo {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 800;
+  color: #0369a1;
+  font-size: 10.5px;
+}

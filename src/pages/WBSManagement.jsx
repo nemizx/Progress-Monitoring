@@ -1028,7 +1028,7 @@ export default function WBSManagement() {
     if (showUploadDialog && uploadFile) {
       parseSelectedUploadFile(uploadFile, uploadType);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [uploadType]);
 
   const openUploadDialog = (type = 'l1') => {

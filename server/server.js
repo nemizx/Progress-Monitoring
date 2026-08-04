@@ -360,7 +360,10 @@ app.post('/api/projects/save-with-subprojects', authenticateToken, async (req, r
     const allowedColumns = [
       'name', 'description', 'location', 'client', 'status',
       'start_date', 'end_date', 'budget', 'project_manager', 'priority',
-      'project_type', 'project_code', 'elevation_photo_url'
+      'project_type', 'project_code', 'elevation_photo_url',
+      'plot_area', 'reservation_area', 'amenities_area', 'open_space_area',
+      'sanctioned_fsi', 'tdr', 'rcc_slab_area', 'built_up_area', 'saleable_area',
+      'building_configurations'
     ];
 
     // 1. Save or Update Project
@@ -2413,15 +2416,19 @@ async function ensureExtendedTables() {
   `);
   await db.query(`
     ALTER TABLE projects
-    ADD COLUMN IF NOT EXISTS project_type VARCHAR(100)
-  `);
-  await db.query(`
-    ALTER TABLE projects
-    ADD COLUMN IF NOT EXISTS project_code VARCHAR(100)
-  `);
-  await db.query(`
-    ALTER TABLE projects
-    ADD COLUMN IF NOT EXISTS elevation_photo_url TEXT
+    ADD COLUMN IF NOT EXISTS project_type VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS project_code VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS elevation_photo_url TEXT,
+    ADD COLUMN IF NOT EXISTS plot_area NUMERIC(15, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS reservation_area NUMERIC(15, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS amenities_area NUMERIC(15, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS open_space_area NUMERIC(15, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS sanctioned_fsi NUMERIC(15, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS tdr NUMERIC(15, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS rcc_slab_area NUMERIC(15, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS built_up_area NUMERIC(15, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS saleable_area NUMERIC(15, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS building_configurations TEXT
   `);
   await db.query(`
     ALTER TABLE progress_entries

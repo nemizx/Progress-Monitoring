@@ -44,15 +44,15 @@ export default function WBSHealthPanel({ projectFilter }) {
   const { data: wbsItems = [], isLoading } = useQuery({
     queryKey: ['wbs-dashboard', projectFilter],
     queryFn: () => projectFilter
-      ? base44.entities.WBSItem.filter({ project_id: projectFilter }, 'order_index', 200)
-      : base44.entities.WBSItem.list('order_index', 200),
+      ? base44.entities.WBSItem.filter({ project_id: projectFilter }, 'order_index', 10000)
+      : base44.entities.WBSItem.list('order_index', 10000),
   });
 
   const { data: activities = [] } = useQuery({
     queryKey: ['activities-dashboard', projectFilter],
     queryFn: () => projectFilter
-      ? base44.entities.ScheduleActivity.filter({ project_id: projectFilter }, 'order_index', 500)
-      : base44.entities.ScheduleActivity.list('order_index', 500),
+      ? base44.entities.ScheduleActivity.filter({ project_id: projectFilter }, 'order_index', 10000)
+      : base44.entities.ScheduleActivity.list('order_index', 10000),
   });
 
   // Roll up status from activities to WBS items

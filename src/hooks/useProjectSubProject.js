@@ -33,7 +33,7 @@ export function useProjectSubProject({ fetchWbs = false } = {}) {
 
   const { data: wbsItems = [] } = useQuery({
     queryKey: ['wbs', projectId],
-    queryFn: () => base44.entities.WBSItem.filter({ project_id: projectId }, 'order_index', 500),
+    queryFn: () => base44.entities.WBSItem.filter({ project_id: projectId }, 'order_index', 10000),
     enabled: fetchWbs && !!projectId,
   });
 
