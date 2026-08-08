@@ -9,25 +9,29 @@ pg.types.setTypeParser(pg.types.builtins.DATE, (value) => value);
 const { Pool } = pg;
 
 // Use DATABASE_URL if available, otherwise fallback to individual config
-const isProduction = process.env.NODE_ENV === 'production';
-
 const dbUrl = process.env.DATABASE_URL;
 const isValidDbUrl = dbUrl && 
   (dbUrl.startsWith('postgres://') || dbUrl.startsWith('postgresql://')) && 
   !dbUrl.includes('psycopg2');
 
+const pgHost = process.env.PGHOST || 'localhost';
+const useSsl =
+  process.env.PGSSL === 'true' ||
+  process.env.NODE_ENV === 'production' ||
+  (!!pgHost && pgHost !== 'localhost' && pgHost !== '127.0.0.1' && pgHost !== 'db');
+
 const poolConfig = isValidDbUrl
   ? {
       connectionString: dbUrl,
-      ssl: isProduction ? { rejectUnauthorized: false } : false,
+      ssl: useSsl ? { rejectUnauthorized: false } : false,
     }
   : {
-      host: process.env.PGHOST || 'localhost',
+      host: pgHost,
       port: parseInt(process.env.PGPORT || '5432'),
       user: process.env.PGUSER || 'postgres',
       password: process.env.PGPASSWORD || 'password',
       database: process.env.PGDATABASE || 'progress_monitoring',
-      ssl: isProduction ? { rejectUnauthorized: false } : false,
+      ssl: useSsl ? { rejectUnauthorized: false } : false,
     };
 
 const pool = new Pool(poolConfig);

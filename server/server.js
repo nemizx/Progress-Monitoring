@@ -2769,9 +2769,24 @@ async function ensureExtendedTables() {
   }
 }
 
+// Serve Vite production build (Hostinger / single-process deploy)
+const clientDist = path.resolve(__dirname, '../dist');
+app.use(express.static(clientDist, { index: false }));
+
+// SPA fallback — keep API / uploads on Express routes above
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
+    return next();
+  }
+  res.sendFile(path.join(clientDist, 'index.html'), (err) => {
+    if (err) next(err);
+  });
+});
+
 // Start listening
 app.listen(PORT, async () => {
-  console.log(`Express server running on http://localhost:${PORT} in development mode`);
+  const mode = process.env.NODE_ENV || 'development';
+  console.log(`Express server running on http://localhost:${PORT} (${mode})`);
   try {
     await ensureExtendedTables();
     await seedWbsTemplateIfEmpty();
