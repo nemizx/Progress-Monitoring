@@ -39,7 +39,7 @@ export const createEmptyBillToCertifyRow = (extra = {}) => ({
   name: '',
   agencyName: '',
   billAmount: '',
-  certifiedDate: '',
+  raBillNo: '',
   remark: '',
   ...extra,
 });
@@ -62,7 +62,7 @@ export const isBillRowAchieved = (row) => {
     (row.billDate && String(row.billDate).trim() !== '') ||
     (row.agencyName && String(row.agencyName).trim() !== '') ||
     (row.billAmount !== '' && row.billAmount != null && String(row.billAmount).trim() !== '') ||
-    (row.certifiedDate && String(row.certifiedDate).trim() !== '') ||
+    (row.raBillNo && String(row.raBillNo).trim() !== '') ||
     (row.remark && String(row.remark).trim() !== '')
   );
 };
@@ -218,7 +218,7 @@ export const formatMonthYearLabel = (monthId) => {
   return date.toLocaleString('default', { month: 'long', year: 'numeric' });
 };
 
-export const getMprBaselineForWpr = (mprReports, weekNum, wprMonthId) => {
+export const getMprBaselineForWpr = (mprReports, weekNum, wprMonthId, weekStart, weekEnd) => {
   const targetPrevMonthId = wprMonthId ? getPreviousMonthId(wprMonthId) : null;
   const missingResult = {
     missing: true,
@@ -257,6 +257,11 @@ export const getMprBaselineForWpr = (mprReports, weekNum, wprMonthId) => {
     wprMonthLabel: formatMonthYearLabel(wprMonthId),
   };
 
+  // "Weekly Total Labour Count" from the MPR plan is a total headcount for the whole
+  // week; the WPR's "Avg. No Of Labour Allocated" plan needs a per-day average instead,
+  // rounded to a whole number (labour count is never shown in decimal).
+  const daysInThisWeek = inclusiveDaysBetween(weekStart, weekEnd) || 7;
+
   if (Array.isArray(rows) && rows.length > 0) {
     rows.forEach((row) => {
       const val = row[wkKey];
@@ -276,6 +281,10 @@ export const getMprBaselineForWpr = (mprReports, weekNum, wprMonthId) => {
             achieved: '',
             remark: '',
           });
+        }
+      } else if (row.parameterKey === 'avgLabour') {
+        if (!isNaN(numericPlan) && numericPlan > 0) {
+          baselines.avgLabour = Math.round(numericPlan / daysInThisWeek);
         }
       } else if (val !== '' && val != null) {
         baselines[row.parameterKey] = val;
@@ -334,24 +343,50 @@ export const sumPlanAchieved = (rows) => {
 export const labourRowTotal = (row) =>
   LABOUR_FIELDS.reduce((sum, field) => sum + (parseFloat(row?.[field]) || 0), 0);
 
-/** Average daily labour headcount for dates in [weekStart, weekEnd]. */
+/** Inclusive calendar days between YYYY-MM-DD dates. */
+const inclusiveDaysBetween = (start, end) => {
+  const startMs = new Date(`${start}T00:00:00`).getTime();
+  const endMs = new Date(`${end}T00:00:00`).getTime();
+  if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs) return 0;
+  return Math.round((endMs - startMs) / 86400000) + 1;
+};
+
+/** Total person-days (sum) across labour entries in [weekStart, weekEnd]. */
+export const calcWeeklyMandays = (labourEntries, weekStart, weekEnd) => {
+  const start = normalizeDateKey(weekStart);
+  const end = normalizeDateKey(weekEnd);
+  if (!start || !end) return 0;
+
+  return (labourEntries || []).reduce((sum, entry) => {
+    const date = normalizeDateKey(entry.date);
+    if (!date || date < start || date > end) return sum;
+    return sum + labourRowTotal(entry);
+  }, 0);
+};
+
+/**
+ * Average daily labour headcount for the selected date period.
+ * Uses total mandays ÷ inclusive calendar days, rounded to a whole number (no decimals).
+ */
 export const calcAvgWeeklyLabour = (labourEntries, weekStart, weekEnd) => {
   const start = normalizeDateKey(weekStart);
   const end = normalizeDateKey(weekEnd);
   if (!start || !end) return 0;
 
-  const byDate = {};
-  (labourEntries || []).forEach((entry) => {
-    const date = normalizeDateKey(entry.date);
-    if (!date || date < start || date > end) return;
-    byDate[date] = (byDate[date] || 0) + labourRowTotal(entry);
-  });
+  const daysInPeriod = inclusiveDaysBetween(start, end);
+  if (!daysInPeriod) return 0;
 
-  const days = Object.keys(byDate);
-  if (days.length === 0) return 0;
-  const total = days.reduce((sum, d) => sum + byDate[d], 0);
-  return Math.round(total / days.length);
+  const mandays = calcWeeklyMandays(labourEntries, start, end);
+  if (!mandays) return 0;
+  // Round to nearest whole labour count (no decimal places)
+  return Math.round(mandays / daysInPeriod);
 };
+
+/** Only count real daily entries — server also returns auto-generated weekly/monthly
+ * aggregate rows (report_type 'weekly'/'monthly' or _is_aggregated) which must be
+ * excluded here, otherwise VOWD gets double-counted. */
+const onlyDailyProgressEntries = (entries) =>
+  (entries || []).filter((e) => !e._is_aggregated && (e.report_type === 'daily' || !e.report_type));
 
 /** Sum of value_of_work_done for progress entries in the week. */
 export const calcWeeklyVowd = (progressEntries, weekStart, weekEnd) => {
@@ -359,7 +394,7 @@ export const calcWeeklyVowd = (progressEntries, weekStart, weekEnd) => {
   const end = normalizeDateKey(weekEnd);
   if (!start || !end) return 0;
 
-  const total = (progressEntries || []).reduce((sum, entry) => {
+  const total = onlyDailyProgressEntries(progressEntries).reduce((sum, entry) => {
     const date = normalizeDateKey(entry.date);
     if (!date || date < start || date > end) return sum;
     return sum + (parseFloat(entry.value_of_work_done) || 0);

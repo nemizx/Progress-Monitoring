@@ -13,10 +13,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { ArrowLeft, Plus, Target, Clock, Trash2, Settings, Users, Save, Building2, Pencil, ImagePlus, X } from 'lucide-react';
 import StatusBadge from '@/components/shared/StatusBadge';
 import ProgressRing from '@/components/shared/ProgressRing';
-import { formatCurrencyINR, formatDateIndian } from '@/lib/formatters';
+import { formatDateIndian } from '@/lib/formatters';
 import { useToast } from '@/components/ui/use-toast';
 import { PROJECT_TYPES, getProjectTypeLabel } from '@/lib/projectTypes';
 import { COMPANIES } from '@/lib/companies';
+import { ELEVATION_IMAGE_ACCEPT, validateElevationImageFile } from '@/config/branding';
 
 export default function ProjectDetail({ project, onBack }) {
   const [showAddMilestone, setShowAddMilestone] = useState(false);
@@ -32,9 +33,11 @@ export default function ProjectDetail({ project, onBack }) {
   });
   
   const [selectedUserToAssign, setSelectedUserToAssign] = useState('');
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoPreview, setLogoPreview] = useState('');
   const [elevationPhotoFile, setElevationPhotoFile] = useState(null);
   const [elevationPhotoPreview, setElevationPhotoPreview] = useState('');
-  const [uploadingElevationPhoto, setUploadingElevationPhoto] = useState(false);
+  const [uploadingImages, setUploadingImages] = useState(false);
 
   const parseBuildingConfigs = (raw) => {
     if (!raw) return [];
@@ -166,9 +169,34 @@ export default function ProjectDetail({ project, onBack }) {
     },
   });
 
+  const handleLogoChange = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const validation = validateElevationImageFile(file);
+    if (!validation.ok) {
+      toast({ title: 'Invalid image', description: validation.error, variant: 'destructive' });
+      return;
+    }
+    setLogoFile(file);
+    setLogoPreview(URL.createObjectURL(file));
+  };
+
+  const handleRemoveLogo = () => {
+    setLogoFile(null);
+    setLogoPreview('');
+    setProjectForm({ ...projectForm, logo_url: '' });
+  };
+
   const handleElevationPhotoChange = (e) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
+    const validation = validateElevationImageFile(file);
+    if (!validation.ok) {
+      toast({ title: 'Invalid image', description: validation.error, variant: 'destructive' });
+      return;
+    }
     setElevationPhotoFile(file);
     setElevationPhotoPreview(URL.createObjectURL(file));
   };
@@ -218,16 +246,24 @@ export default function ProjectDetail({ project, onBack }) {
       building_configurations: JSON.stringify(buildingConfigs),
     };
 
-    if (elevationPhotoFile) {
-      setUploadingElevationPhoto(true);
+    if (logoFile || elevationPhotoFile) {
+      setUploadingImages(true);
       try {
-        const res = await base44.integrations.Core.UploadFile({ file: elevationPhotoFile });
-        nextForm = { ...nextForm, elevation_photo_url: res.file_url || '' };
+        if (logoFile) {
+          const res = await base44.integrations.Core.UploadFile({ file: logoFile });
+          nextForm = { ...nextForm, logo_url: res.file_url || '' };
+          setLogoFile(null);
+          setLogoPreview('');
+        }
+        if (elevationPhotoFile) {
+          const res = await base44.integrations.Core.UploadFile({ file: elevationPhotoFile });
+          nextForm = { ...nextForm, elevation_photo_url: res.file_url || '' };
+          setElevationPhotoFile(null);
+          setElevationPhotoPreview('');
+        }
         setProjectForm(nextForm);
-        setElevationPhotoFile(null);
-        setElevationPhotoPreview('');
       } finally {
-        setUploadingElevationPhoto(false);
+        setUploadingImages(false);
       }
     }
     updateProjectMutation.mutate(nextForm);
@@ -384,19 +420,12 @@ export default function ProjectDetail({ project, onBack }) {
                     <> · <span className="font-medium text-foreground">{getProjectTypeLabel(project.project_type)}</span></>
                   )}
                 </p>
-                <div className="flex gap-2 mt-2">
-                  <StatusBadge status={project.status} />
-                  <StatusBadge status={project.priority} />
-                </div>
               </div>
             </div>
           </div>
-          {project.description && <p className="text-sm text-muted-foreground mt-4">{project.description}</p>}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 pt-6 border-t">
+          <div className="grid grid-cols-2 md:grid-cols-2 gap-4 mt-6 pt-6 border-t">
             <div><p className="text-xs text-muted-foreground">Start Date</p><p className="text-sm font-semibold">{formatDateIndian(project.start_date) || '—'}</p></div>
             <div><p className="text-xs text-muted-foreground">End Date</p><p className="text-sm font-semibold">{formatDateIndian(project.end_date) || '—'}</p></div>
-            <div><p className="text-xs text-muted-foreground">Budget</p><p className="text-sm font-semibold">{formatCurrencyINR(project.budget || 0)}</p></div>
-            <div><p className="text-xs text-muted-foreground">Spent</p><p className="text-sm font-semibold">{formatCurrencyINR(project.spent || 0)}</p></div>
           </div>
         </CardContent>
       </Card>
@@ -678,50 +707,6 @@ export default function ProjectDetail({ project, onBack }) {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label>Budget (INR)</Label>
-                      <Input 
-                        type="number" 
-                        value={projectForm.budget || ''} 
-                        onChange={e => setProjectForm({ ...projectForm, budget: parseFloat(e.target.value) || 0 })} 
-                      />
-                    </div>
-                    <div>
-                      <Label>Spent (INR)</Label>
-                      <Input 
-                        type="number" 
-                        value={projectForm.spent || ''} 
-                        onChange={e => setProjectForm({ ...projectForm, spent: parseFloat(e.target.value) || 0 })} 
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label>Status</Label>
-                      <Select value={projectForm.status} onValueChange={v => setProjectForm({...projectForm, status: v})}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {['planning','in_progress','on_hold','completed','delayed'].map(s => (
-                            <SelectItem key={s} value={s}>{s.replace(/_/g,' ')}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label>Priority</Label>
-                      <Select value={projectForm.priority} onValueChange={v => setProjectForm({...projectForm, priority: v})}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {['low','medium','high','critical'].map(p => (
-                            <SelectItem key={p} value={p}>{p.charAt(0).toUpperCase()+p.slice(1)}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
                   <div>
                     <Label>Progress ({projectForm.progress || 0}%)</Label>
                     <Slider 
@@ -734,22 +719,63 @@ export default function ProjectDetail({ project, onBack }) {
                   </div>
 
                   <div>
-                    <Label>Description</Label>
-                    <Textarea
-                      value={projectForm.description || ''}
-                      onChange={e => setProjectForm({ ...projectForm, description: e.target.value })}
-                      rows={3}
+                    <Label>Project Logo</Label>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 mb-1">
+                      JPG, JPEG or PNG. Max 5 MB.
+                    </p>
+                    {(logoPreview || projectForm.logo_url) ? (
+                      <div className="relative mt-1 rounded-lg border overflow-hidden bg-muted/20 w-28 h-28">
+                        <img
+                          src={logoPreview || projectForm.logo_url}
+                          alt="Project Logo"
+                          className="w-full h-full object-contain"
+                        />
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="icon"
+                          className="absolute top-2 right-2 h-7 w-7"
+                          onClick={handleRemoveLogo}
+                          title="Delete logo"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </Button>
+                        <label
+                          htmlFor="edit-logo-photo-input"
+                          className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-md bg-black/60 text-white text-[11px] px-2 py-1 cursor-pointer hover:bg-black/70 transition-colors"
+                        >
+                          <ImagePlus className="w-3 h-3" /> Replace
+                        </label>
+                      </div>
+                    ) : (
+                      <label
+                        htmlFor="edit-logo-photo-input"
+                        className="mt-1 flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed py-6 text-xs text-muted-foreground cursor-pointer hover:bg-muted/40 transition-colors"
+                      >
+                        <ImagePlus className="w-5 h-5" />
+                        Click to upload Project Logo
+                      </label>
+                    )}
+                    <input
+                      id="edit-logo-photo-input"
+                      type="file"
+                      accept={ELEVATION_IMAGE_ACCEPT}
+                      className="hidden"
+                      onChange={handleLogoChange}
                     />
                   </div>
 
                   <div>
-                    <Label>Elevation Photo</Label>
+                    <Label>Project Elevation Image</Label>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 mb-1">
+                      JPG, JPEG or PNG. Max 5 MB.
+                    </p>
                     {(elevationPhotoPreview || projectForm.elevation_photo_url) ? (
-                      <div className="relative mt-1 rounded-lg border overflow-hidden">
+                      <div className="relative mt-1 rounded-lg border overflow-hidden bg-muted/20">
                         <img
                           src={elevationPhotoPreview || projectForm.elevation_photo_url}
-                          alt="Elevation"
-                          className="w-full h-40 object-cover"
+                          alt="Project Elevation"
+                          className="w-full h-40 object-contain"
                         />
                         <Button
                           type="button"
@@ -757,6 +783,7 @@ export default function ProjectDetail({ project, onBack }) {
                           size="icon"
                           className="absolute top-2 right-2 h-7 w-7"
                           onClick={handleRemoveElevationPhoto}
+                          title="Delete image"
                         >
                           <X className="w-3.5 h-3.5" />
                         </Button>
@@ -773,13 +800,13 @@ export default function ProjectDetail({ project, onBack }) {
                         className="mt-1 flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed py-6 text-xs text-muted-foreground cursor-pointer hover:bg-muted/40 transition-colors"
                       >
                         <ImagePlus className="w-5 h-5" />
-                        Click to upload building elevation photo
+                        Click to upload Project Elevation Image
                       </label>
                     )}
                     <input
                       id="edit-elevation-photo-input"
                       type="file"
-                      accept="image/*"
+                      accept={ELEVATION_IMAGE_ACCEPT}
                       className="hidden"
                       onChange={handleElevationPhotoChange}
                     />
@@ -880,6 +907,41 @@ export default function ProjectDetail({ project, onBack }) {
                           value={projectForm.saleable_area ?? ''}
                           onChange={e => setProjectForm({ ...projectForm, saleable_area: e.target.value })}
                           placeholder="0.0"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Other Details Section */}
+                  <div className="pt-4 border-t space-y-4">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                      <Building2 className="w-3.5 h-3.5 text-primary" /> Other Details
+                    </h4>
+                    <div className="grid grid-cols-1 gap-3">
+                      <div>
+                        <Label className="text-xs">N. A. Order No.</Label>
+                        <Input
+                          value={projectForm.na_order_no ?? ''}
+                          onChange={e => setProjectForm({ ...projectForm, na_order_no: e.target.value })}
+                          placeholder="Enter N. A. Order No."
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">
+                          Sanction of building permit and Commencement Certificate No.
+                        </Label>
+                        <Input
+                          value={projectForm.building_permit_cc_no ?? ''}
+                          onChange={e => setProjectForm({ ...projectForm, building_permit_cc_no: e.target.value })}
+                          placeholder="Enter building permit / CC No."
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Fire and Emergency Service Department</Label>
+                        <Input
+                          value={projectForm.fire_emergency_dept ?? ''}
+                          onChange={e => setProjectForm({ ...projectForm, fire_emergency_dept: e.target.value })}
+                          placeholder="Enter Fire & Emergency Service Department details"
                         />
                       </div>
                     </div>
@@ -1070,10 +1132,10 @@ export default function ProjectDetail({ project, onBack }) {
                     type="button"
                     className="w-full gap-2 bg-primary text-white"
                     onClick={handleSaveProjectDetails}
-                    disabled={updateProjectMutation.isPending || uploadingElevationPhoto || !projectForm.name?.trim()}
+                    disabled={updateProjectMutation.isPending || uploadingImages || !projectForm.name?.trim()}
                   >
                     <Save className="w-4 h-4" />
-                    {uploadingElevationPhoto ? 'Uploading Photo...' : updateProjectMutation.isPending ? 'Saving...' : 'Save Project Details'}
+                    {uploadingImages ? 'Uploading Image...' : updateProjectMutation.isPending ? 'Saving...' : 'Save Project Details'}
                   </Button>
                 </CardContent>
               </Card>

@@ -30,6 +30,11 @@ function HeaderCell({ label, tooltip, align }) {
   );
 }
 
+// Always resolve the parameter label from the current master list rather than the
+// name stored on the row, so renaming a parameter here also updates rows that were
+// saved earlier under the old label (e.g. existing draft/approved MPRs).
+const PARAM_NAME_BY_KEY = new Map(WPR_PLANNING_PARAMETERS.map((p) => [p.key, p.name]));
+
 export default function PlanForNextMonthSection({ rows = [], onChange, locked, forecastRows = [] }) {
   const vowdByWeek = React.useMemo(() => ({
     week1: calcForecastWeeklyVowd(forecastRows, 'week1'),
@@ -112,7 +117,6 @@ export default function PlanForNextMonthSection({ rows = [], onChange, locked, f
               <tr className="border-b bg-muted/50">
                 <th className="text-left p-2.5 font-semibold text-xs text-muted-foreground uppercase w-10">#</th>
                 <HeaderCell label="Parameter / Activity Name" tooltip="WPR Planning Parameter or specific activity description." />
-                <HeaderCell label="Unit / Type" tooltip="Unit of measurement or parameter category." />
                 <HeaderCell label="Week 1 Plan" align="right" tooltip="Target value for Week 1 of next month." />
                 <HeaderCell label="Week 2 Plan" align="right" tooltip="Target value for Week 2 of next month." />
                 <HeaderCell label="Week 3 Plan" align="right" tooltip="Target value for Week 3 of next month." />
@@ -147,7 +151,7 @@ export default function PlanForNextMonthSection({ rows = [], onChange, locked, f
                       <div className="space-y-1">
                         {isFirstOfGroup && (
                           <span className="text-xs font-semibold text-foreground block">
-                            {row.parameterName || 'Parameter'}
+                            {PARAM_NAME_BY_KEY.get(row.parameterKey) || row.parameterName || 'Parameter'}
                           </span>
                         )}
                         {row.isMultiRow && (
@@ -161,12 +165,6 @@ export default function PlanForNextMonthSection({ rows = [], onChange, locked, f
                           />
                         )}
                       </div>
-                    </td>
-
-                    <td className="p-2">
-                      <span className="text-xs text-muted-foreground font-mono bg-muted/40 px-2 py-1 rounded inline-block">
-                        {row.unit || '—'}
-                      </span>
                     </td>
 
                     {['week1', 'week2', 'week3', 'week4'].map((wk) => {
@@ -211,7 +209,14 @@ export default function PlanForNextMonthSection({ rows = [], onChange, locked, f
                               variant="outline"
                               size="icon"
                               className="h-7 w-7 border-emerald-200 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700"
-                              onClick={() => addSubItemRow(row.parameterKey, row.parameterName, row.unit, index)}
+                              onClick={() =>
+                                addSubItemRow(
+                                  row.parameterKey,
+                                  PARAM_NAME_BY_KEY.get(row.parameterKey) || row.parameterName,
+                                  row.unit,
+                                  index
+                                )
+                              }
                               title="Add sub-item"
                             >
                               <Plus className="w-3.5 h-3.5" />

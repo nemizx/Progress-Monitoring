@@ -3,17 +3,16 @@ import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Plus, Search, ImagePlus, X, Trash2 } from 'lucide-react';
-import StatusBadge from '@/components/shared/StatusBadge';
 import EmptyState from '@/components/shared/EmptyState';
 import ProjectDetail from '@/components/projects/ProjectDetail';
 import { PROJECT_TYPES } from '@/lib/projectTypes';
 import { COMPANIES } from '@/lib/companies';
 import { useAuth } from '@/lib/AuthContext';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { ELEVATION_IMAGE_ACCEPT, validateElevationImageFile } from '@/config/branding';
 
 export default function Projects() {
   const { user } = useAuth();
@@ -32,11 +31,14 @@ export default function Projects() {
     project_type: '', project_code: '',
     plot_area: '', reservation_area: '', amenities_area: '', open_space_area: '',
     sanctioned_fsi: '', tdr: '', rcc_slab_area: '', built_up_area: '', saleable_area: '',
+    na_order_no: '', building_permit_cc_no: '', fire_emergency_dept: '',
   });
   const [buildingConfigs, setBuildingConfigs] = useState([]);
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoPreview, setLogoPreview] = useState('');
   const [elevationPhotoFile, setElevationPhotoFile] = useState(null);
   const [elevationPhotoPreview, setElevationPhotoPreview] = useState('');
-  const [uploadingElevationPhoto, setUploadingElevationPhoto] = useState(false);
+  const [uploadingImages, setUploadingImages] = useState(false);
 
   const queryClient = useQueryClient();
 
@@ -67,8 +69,11 @@ export default function Projects() {
       project_type: '', project_code: '',
       plot_area: '', reservation_area: '', amenities_area: '', open_space_area: '',
       sanctioned_fsi: '', tdr: '', rcc_slab_area: '', built_up_area: '', saleable_area: '',
+      na_order_no: '', building_permit_cc_no: '', fire_emergency_dept: '',
     });
     setBuildingConfigs([]);
+    setLogoFile(null);
+    setLogoPreview('');
     setElevationPhotoFile(null);
     setElevationPhotoPreview('');
     setEditingProjectId(null);
@@ -77,41 +82,120 @@ export default function Projects() {
     setPendingNavigationAction(null);
   };
 
+  const handleLogoChange = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const validation = validateElevationImageFile(file);
+    if (!validation.ok) {
+      setValidationError(validation.error);
+      return;
+    }
+    setValidationError('');
+    setLogoFile(file);
+    setLogoPreview(URL.createObjectURL(file));
+  };
+
   const handleElevationPhotoChange = (e) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
+    const validation = validateElevationImageFile(file);
+    if (!validation.ok) {
+      setValidationError(validation.error);
+      return;
+    }
+    setValidationError('');
     setElevationPhotoFile(file);
     setElevationPhotoPreview(URL.createObjectURL(file));
   };
 
   const isFormDirty = useMemo(() => {
+    const numVal = (v) => {
+      if (v === '' || v === null || v === undefined) return 0;
+      const n = parseFloat(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const strVal = (v) => (v == null ? '' : String(v));
+    const normalizeConfigs = (raw) => {
+      if (!raw) return [];
+      if (Array.isArray(raw)) return raw;
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    };
+
     if (!editingProjectId) {
-      return (form.name?.trim() !== '' || form.project_code?.trim() !== '') || buildingConfigs.length > 0;
+      const hasBasicFields =
+        form.name?.trim() !== '' ||
+        form.project_code?.trim() !== '' ||
+        form.description?.trim() !== '' ||
+        form.location?.trim() !== '' ||
+        form.client?.trim() !== '' ||
+        form.project_manager?.trim() !== '' ||
+        form.start_date !== '' ||
+        form.end_date !== '' ||
+        numVal(form.budget) !== 0 ||
+        (form.project_type && form.project_type !== '') ||
+        numVal(form.plot_area) !== 0 ||
+        numVal(form.reservation_area) !== 0 ||
+        numVal(form.amenities_area) !== 0 ||
+        numVal(form.open_space_area) !== 0 ||
+        numVal(form.sanctioned_fsi) !== 0 ||
+        numVal(form.tdr) !== 0 ||
+        numVal(form.rcc_slab_area) !== 0 ||
+        numVal(form.built_up_area) !== 0 ||
+        numVal(form.saleable_area) !== 0 ||
+        form.na_order_no?.trim() !== '' ||
+        form.building_permit_cc_no?.trim() !== '' ||
+        form.fire_emergency_dept?.trim() !== '' ||
+        buildingConfigs.length > 0 ||
+        logoFile !== null ||
+        elevationPhotoFile !== null;
+      return hasBasicFields;
     }
 
     const originalProject = projects.find(p => p.id === editingProjectId);
     if (!originalProject) return false;
 
-    const formFieldsChanged = 
-      (form.name || '') !== (originalProject.name || '') ||
-      (form.description || '') !== (originalProject.description || '') ||
-      (form.location || '') !== (originalProject.location || '') ||
-      (form.client || '') !== (originalProject.client || '') ||
+    const formFieldsChanged =
+      strVal(form.name) !== strVal(originalProject.name) ||
+      strVal(form.description) !== strVal(originalProject.description) ||
+      strVal(form.location) !== strVal(originalProject.location) ||
+      strVal(form.client) !== strVal(originalProject.client) ||
       (form.status || 'planning') !== (originalProject.status || 'planning') ||
-      (form.start_date || '') !== (originalProject.start_date || '') ||
-      (form.end_date || '') !== (originalProject.end_date || '') ||
-      (parseFloat(form.budget) || 0) !== (parseFloat(originalProject.budget) || 0) ||
-      (form.project_manager || '') !== (originalProject.project_manager || '') ||
+      strVal(form.start_date) !== strVal(originalProject.start_date) ||
+      strVal(form.end_date) !== strVal(originalProject.end_date) ||
+      numVal(form.budget) !== numVal(originalProject.budget) ||
+      strVal(form.project_manager) !== strVal(originalProject.project_manager) ||
       (form.priority || 'medium') !== (originalProject.priority || 'medium') ||
       (form.project_type || 'residential') !== (originalProject.project_type || 'residential') ||
-      (form.project_code || '') !== (originalProject.project_code || '') ||
-      (form.elevation_photo_url || '') !== (originalProject.elevation_photo_url || '') ||
+      strVal(form.project_code) !== strVal(originalProject.project_code) ||
+      numVal(form.plot_area) !== numVal(originalProject.plot_area) ||
+      numVal(form.reservation_area) !== numVal(originalProject.reservation_area) ||
+      numVal(form.amenities_area) !== numVal(originalProject.amenities_area) ||
+      numVal(form.open_space_area) !== numVal(originalProject.open_space_area) ||
+      numVal(form.sanctioned_fsi) !== numVal(originalProject.sanctioned_fsi) ||
+      numVal(form.tdr) !== numVal(originalProject.tdr) ||
+      numVal(form.rcc_slab_area) !== numVal(originalProject.rcc_slab_area) ||
+      numVal(form.built_up_area) !== numVal(originalProject.built_up_area) ||
+      numVal(form.saleable_area) !== numVal(originalProject.saleable_area) ||
+      strVal(form.na_order_no) !== strVal(originalProject.na_order_no) ||
+      strVal(form.building_permit_cc_no) !== strVal(originalProject.building_permit_cc_no) ||
+      strVal(form.fire_emergency_dept) !== strVal(originalProject.fire_emergency_dept) ||
+      strVal(form.logo_url) !== strVal(originalProject.logo_url) ||
+      strVal(form.elevation_photo_url) !== strVal(originalProject.elevation_photo_url) ||
+      logoFile !== null ||
       elevationPhotoFile !== null;
 
-    const configsChanged = JSON.stringify(buildingConfigs) !== (originalProject.building_configurations || '[]');
+    const configsChanged =
+      JSON.stringify(buildingConfigs) !== JSON.stringify(normalizeConfigs(originalProject.building_configurations));
 
     return formFieldsChanged || configsChanged;
-  }, [form, editingProjectId, projects, buildingConfigs, elevationPhotoFile]);
+  }, [form, editingProjectId, projects, buildingConfigs, logoFile, elevationPhotoFile]);
 
   const buildingTotals = useMemo(() => {
     return buildingConfigs.reduce((acc, row) => {
@@ -155,16 +239,26 @@ export default function Projects() {
       return;
     }
 
-    let elevation_photo_url = form.elevation_photo_url || elevationPhotoPreview || '';
-    if (elevationPhotoFile) {
-      setUploadingElevationPhoto(true);
+    let logo_url = form.logo_url || '';
+    let elevation_photo_url = form.elevation_photo_url || '';
+    if (logoFile || elevationPhotoFile) {
+      setUploadingImages(true);
       try {
-        const res = await base44.integrations.Core.UploadFile({ file: elevationPhotoFile });
-        elevation_photo_url = res.file_url || '';
+        if (logoFile) {
+          const res = await base44.integrations.Core.UploadFile({ file: logoFile });
+          logo_url = res.file_url || '';
+        }
+        if (elevationPhotoFile) {
+          const res = await base44.integrations.Core.UploadFile({ file: elevationPhotoFile });
+          elevation_photo_url = res.file_url || '';
+        }
       } catch (err) {
-        console.error('Failed to upload logo:', err);
+        console.error('Failed to upload image:', err);
+        setValidationError('Failed to upload image. Please try again.');
+        setUploadingImages(false);
+        return;
       } finally {
-        setUploadingElevationPhoto(false);
+        setUploadingImages(false);
       }
     }
 
@@ -186,6 +280,7 @@ export default function Projects() {
       client: form.client.trim(),
       project_type: form.project_type,
       budget: form.budget || 0,
+      logo_url,
       elevation_photo_url,
       building_configurations: JSON.stringify(buildingConfigs),
     };
@@ -267,6 +362,11 @@ export default function Projects() {
       rcc_slab_area: project.rcc_slab_area ?? '',
       built_up_area: project.built_up_area ?? '',
       saleable_area: project.saleable_area ?? '',
+      na_order_no: project.na_order_no || '',
+      building_permit_cc_no: project.building_permit_cc_no || '',
+      fire_emergency_dept: project.fire_emergency_dept || '',
+      logo_url: project.logo_url || '',
+      elevation_photo_url: project.elevation_photo_url || '',
     });
     let configs = parseBuildingConfigs(project.building_configurations);
     const existingSubProjects = allSubProjects.filter(sp => sp.project_id === project.id);
@@ -284,6 +384,8 @@ export default function Projects() {
     }
 
     setBuildingConfigs(configs);
+    setLogoPreview(project.logo_url || '');
+    setLogoFile(null);
     setElevationPhotoPreview(project.elevation_photo_url || '');
     setElevationPhotoFile(null);
     setValidationError('');
@@ -470,67 +572,6 @@ export default function Projects() {
                 />
               </div>
 
-              {/* Budget */}
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-slate-600">Budget</Label>
-                <Input
-                  type="number"
-                  value={form.budget}
-                  onChange={e => setForm({ ...form, budget: parseFloat(e.target.value) || '' })}
-                  className="bg-white border-slate-200 focus:border-slate-400 focus:ring-0 rounded-lg text-sm"
-                />
-              </div>
-
-              {/* Priority */}
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-slate-600">Priority</Label>
-                <Select
-                  value={form.priority}
-                  onValueChange={v => setForm({ ...form, priority: v })}
-                >
-                  <SelectTrigger className="bg-white border-slate-200 focus:border-slate-400 focus:ring-0 rounded-lg text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="critical">Critical</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Status */}
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold text-slate-600">Status</Label>
-                <Select
-                  value={form.status}
-                  onValueChange={v => setForm({ ...form, status: v })}
-                >
-                  <SelectTrigger className="bg-white border-slate-200 focus:border-slate-400 focus:ring-0 rounded-lg text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="planning">Planning</SelectItem>
-                    <SelectItem value="in_progress">In Progress</SelectItem>
-                    <SelectItem value="on_hold">On Hold</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="delayed">Delayed</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Description */}
-              <div className="md:col-span-2 space-y-1.5">
-                <Label className="text-xs font-semibold text-slate-600">Notes</Label>
-                <Textarea
-                  value={form.description}
-                  onChange={e => setForm({ ...form, description: e.target.value })}
-                  rows={3}
-                  className="bg-white border-slate-200 focus:border-slate-400 focus:ring-0 rounded-lg text-sm resize-none"
-                />
-              </div>
-
               {/* Area Details Section */}
               <div className="md:col-span-2 pt-4 border-t space-y-3">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Area Details</h4>
@@ -631,6 +672,44 @@ export default function Projects() {
                       value={form.saleable_area ?? ''}
                       onChange={e => setForm({ ...form, saleable_area: e.target.value })}
                       placeholder="0.0"
+                      className="bg-white border-slate-200 text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Other Details Section */}
+              <div className="md:col-span-2 pt-4 border-t space-y-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Other Details</h4>
+                <div className="grid grid-cols-1 gap-3">
+                  <div>
+                    <Label className="text-xs font-medium text-slate-600">N. A. Order No.</Label>
+                    <Input
+                      value={form.na_order_no ?? ''}
+                      onChange={e => setForm({ ...form, na_order_no: e.target.value })}
+                      placeholder="Enter N. A. Order No."
+                      className="bg-white border-slate-200 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs font-medium text-slate-600">
+                      Sanction of building permit and Commencement Certificate No.
+                    </Label>
+                    <Input
+                      value={form.building_permit_cc_no ?? ''}
+                      onChange={e => setForm({ ...form, building_permit_cc_no: e.target.value })}
+                      placeholder="Enter building permit / CC No."
+                      className="bg-white border-slate-200 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs font-medium text-slate-600">
+                      Fire and Emergency Service Department
+                    </Label>
+                    <Input
+                      value={form.fire_emergency_dept ?? ''}
+                      onChange={e => setForm({ ...form, fire_emergency_dept: e.target.value })}
+                      placeholder="Enter Fire & Emergency Service Department details"
                       className="bg-white border-slate-200 text-sm"
                     />
                   </div>
@@ -826,12 +905,12 @@ export default function Projects() {
             <div className="pt-2">
               <Button
                 onClick={handleSave}
-                disabled={!isFormDirty || saveMutation.isPending || uploadingElevationPhoto}
+                disabled={!isFormDirty || saveMutation.isPending || uploadingImages}
                 className="bg-[#0f172a] hover:bg-[#1e293b] text-white font-medium px-6 py-2 rounded-lg text-sm flex items-center gap-2 shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Plus className="w-4 h-4" />
-                {uploadingElevationPhoto
-                  ? 'Uploading Logo...'
+                {uploadingImages
+                  ? 'Uploading Image...'
                   : editingProjectId
                     ? (saveMutation.isPending ? 'Updating...' : 'Update Project')
                     : (saveMutation.isPending ? 'Saving...' : 'Save Project')}
@@ -839,46 +918,119 @@ export default function Projects() {
             </div>
           </div>
 
-          {/* Right Column: Logo & Sub-projects */}
+          {/* Right Column: Logo & Elevation */}
           <div className="space-y-6 lg:border-l lg:pl-8 border-slate-100">
-            {/* Logo Section */}
+            {/* Project Logo */}
             <div className="space-y-3">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Project Logo</h3>
-              <div className="border border-dashed border-slate-200 rounded-xl p-4 flex flex-col items-center justify-center bg-slate-50/50 min-h-[140px] text-center">
-                {elevationPhotoPreview || form.elevation_photo_url ? (
-                  <div className="relative w-24 h-24 rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
-                    <img src={elevationPhotoPreview || form.elevation_photo_url} alt="Logo" className="w-full h-full object-cover" />
-                    <button
-                      type="button"
-                      className="absolute top-1.5 right-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-full p-1 shadow-sm transition-colors"
-                      onClick={() => {
-                        setElevationPhotoFile(null);
-                        setElevationPhotoPreview('');
-                        setForm({ ...form, elevation_photo_url: '' });
-                      }}
+              <div className="border border-dashed border-slate-200 rounded-xl p-4 flex flex-col items-center justify-center bg-slate-50/50 min-h-[120px] text-center">
+                {logoPreview || form.logo_url ? (
+                  <div className="relative w-24 h-24">
+                    <div className="relative w-24 h-24 rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
+                      <img
+                        src={logoPreview || form.logo_url}
+                        alt="Project Logo"
+                        className="w-full h-full object-contain"
+                      />
+                      <button
+                        type="button"
+                        className="absolute top-1.5 right-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-full p-1 shadow-sm transition-colors"
+                        onClick={() => {
+                          setLogoFile(null);
+                          setLogoPreview('');
+                          setForm({ ...form, logo_url: '' });
+                        }}
+                        title="Delete logo"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <label
+                      htmlFor="logo-image-upload"
+                      className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 border border-slate-200 hover:border-slate-300 rounded-lg text-xs font-medium bg-white text-slate-600 shadow-sm hover:bg-slate-50 cursor-pointer transition-colors"
                     >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+                      <ImagePlus className="w-3.5 h-3.5 text-slate-400" />
+                      Replace Logo
+                    </label>
                   </div>
                 ) : (
                   <div className="space-y-3 flex flex-col items-center">
-                    <p className="text-xs text-slate-400 max-w-[180px]">Select a logo image file to upload. Max 5 MB.</p>
+                    <p className="text-xs text-slate-400 max-w-[180px]">
+                      Upload project logo (JPG, JPEG, PNG). Max 5 MB.
+                    </p>
                     <label
-                      htmlFor="logo-upload"
+                      htmlFor="logo-image-upload"
                       className="inline-flex items-center gap-2 px-3 py-1.5 border border-slate-200 hover:border-slate-300 rounded-lg text-xs font-medium bg-white text-slate-600 shadow-sm hover:bg-slate-50 cursor-pointer transition-colors"
                     >
                       <ImagePlus className="w-3.5 h-3.5 text-slate-400" />
                       Choose Logo Image
                     </label>
-                    <input
-                      id="logo-upload"
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={handleElevationPhotoChange}
-                    />
                   </div>
                 )}
+                <input
+                  id="logo-image-upload"
+                  type="file"
+                  accept={ELEVATION_IMAGE_ACCEPT}
+                  className="hidden"
+                  onChange={handleLogoChange}
+                />
+              </div>
+            </div>
+
+            {/* Project Elevation Image */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Project Elevation Image</h3>
+              <div className="border border-dashed border-slate-200 rounded-xl p-4 flex flex-col items-center justify-center bg-slate-50/50 min-h-[140px] text-center">
+                {elevationPhotoPreview || form.elevation_photo_url ? (
+                  <div className="relative w-full max-w-[220px]">
+                    <div className="relative w-full aspect-[4/3] rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
+                      <img
+                        src={elevationPhotoPreview || form.elevation_photo_url}
+                        alt="Project Elevation"
+                        className="w-full h-full object-contain"
+                      />
+                      <button
+                        type="button"
+                        className="absolute top-1.5 right-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-full p-1 shadow-sm transition-colors"
+                        onClick={() => {
+                          setElevationPhotoFile(null);
+                          setElevationPhotoPreview('');
+                          setForm({ ...form, elevation_photo_url: '' });
+                        }}
+                        title="Delete image"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <label
+                      htmlFor="elevation-image-upload"
+                      className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 border border-slate-200 hover:border-slate-300 rounded-lg text-xs font-medium bg-white text-slate-600 shadow-sm hover:bg-slate-50 cursor-pointer transition-colors"
+                    >
+                      <ImagePlus className="w-3.5 h-3.5 text-slate-400" />
+                      Replace Image
+                    </label>
+                  </div>
+                ) : (
+                  <div className="space-y-3 flex flex-col items-center">
+                    <p className="text-xs text-slate-400 max-w-[200px]">
+                      Upload project elevation image (JPG, JPEG, PNG). Max 5 MB.
+                    </p>
+                    <label
+                      htmlFor="elevation-image-upload"
+                      className="inline-flex items-center gap-2 px-3 py-1.5 border border-slate-200 hover:border-slate-300 rounded-lg text-xs font-medium bg-white text-slate-600 shadow-sm hover:bg-slate-50 cursor-pointer transition-colors"
+                    >
+                      <ImagePlus className="w-3.5 h-3.5 text-slate-400" />
+                      Choose Elevation Image
+                    </label>
+                  </div>
+                )}
+                <input
+                  id="elevation-image-upload"
+                  type="file"
+                  accept={ELEVATION_IMAGE_ACCEPT}
+                  className="hidden"
+                  onChange={handleElevationPhotoChange}
+                />
               </div>
             </div>
           </div>
@@ -948,8 +1100,10 @@ export default function Projects() {
                       {/* Logo */}
                       <td className="p-3 text-center">
                         <div className="w-10 h-10 rounded-lg border border-slate-100 bg-slate-50 overflow-hidden mx-auto flex items-center justify-center shadow-xs">
-                          {project.elevation_photo_url ? (
-                            <img src={project.elevation_photo_url} alt="Logo" className="w-full h-full object-cover" />
+                          {project.logo_url ? (
+                            <img src={project.logo_url} alt="Project Logo" className="w-full h-full object-cover" />
+                          ) : project.elevation_photo_url ? (
+                            <img src={project.elevation_photo_url} alt="Project" className="w-full h-full object-cover" />
                           ) : (
                             <ImagePlus className="w-4 h-4 text-slate-300" />
                           )}
@@ -961,10 +1115,6 @@ export default function Projects() {
                         <span className="hover:underline hover:text-slate-900">
                           {project.name}
                         </span>
-                        <div className="flex gap-1.5 mt-1 flex-wrap">
-                          <StatusBadge status={project.status} className="scale-90 origin-left" />
-                          <StatusBadge status={project.priority} className="scale-90 origin-left" />
-                        </div>
                       </td>
  
                       {/* Code */}

@@ -66,7 +66,7 @@ export default forwardRef(function ContractorLabourPanel({
   }, [subProjects, subProjectId]);
 
   // 3. Fetch Contractor Labours for current date and subproject
-  const { data: dateEntries = [], isLoading: entriesLoading } = useQuery({
+  const { data: dateEntries = [], isLoading: entriesLoading, isFetching: entriesFetching } = useQuery({
     queryKey: ['contractor-labours', projectId, subProjectId, selectedDate],
     queryFn: () => base44.entities.ContractorLabour.filter({
       project_id: projectId,
@@ -86,6 +86,22 @@ export default forwardRef(function ContractorLabourPanel({
     enabled: !!projectId && !!selectedDate,
   });
 
+  const mapEntryToRow = useCallback((e) => ({
+    id: e.id,
+    contractor_id: e.contractor_id,
+    type_of_work: e.type_of_work || '',
+    unit: e.unit || 'Nos',
+    carpenter: e.carpenter !== null && e.carpenter !== undefined ? String(e.carpenter) : '',
+    barbender: e.barbender !== null && e.barbender !== undefined ? String(e.barbender) : '',
+    mason: e.mason !== null && e.mason !== undefined ? String(e.mason) : '',
+    skilled_other: e.skilled_other !== null && e.skilled_other !== undefined ? String(e.skilled_other) : '',
+    carpenter_helper: e.carpenter_helper !== null && e.carpenter_helper !== undefined ? String(e.carpenter_helper) : '',
+    barbender_helper: e.barbender_helper !== null && e.barbender_helper !== undefined ? String(e.barbender_helper) : '',
+    semi_skilled_other: e.semi_skilled_other !== null && e.semi_skilled_other !== undefined ? String(e.semi_skilled_other) : '',
+    mc: e.mc !== null && e.mc !== undefined ? String(e.mc) : '',
+    fc: e.fc !== null && e.fc !== undefined ? String(e.fc) : '',
+  }), []);
+
   // 5. Sync DB entries to local state — reset immediately when date/scope changes
   const syncKey = `${projectId}:${subProjectId}:${selectedDate}`;
   useEffect(() => {
@@ -95,30 +111,14 @@ export default forwardRef(function ContractorLabourPanel({
   }, [syncKey]);
 
   useEffect(() => {
-    if (entriesLoading || loadedKey === syncKey) return;
+    // Wait until the query has settled so we never hydrate from a stale empty cache mid-refetch
+    if (entriesLoading || entriesFetching) return;
+    if (loadedKey === syncKey) return;
 
-    if (dateEntries.length > 0) {
-      setRows(dateEntries.map(e => ({
-        id: e.id,
-        contractor_id: e.contractor_id,
-        type_of_work: e.type_of_work || '',
-        unit: 'Nos',
-        carpenter: e.carpenter !== null ? String(e.carpenter) : '',
-        barbender: e.barbender !== null ? String(e.barbender) : '',
-        mason: e.mason !== null ? String(e.mason) : '',
-        skilled_other: e.skilled_other !== null ? String(e.skilled_other) : '',
-        carpenter_helper: e.carpenter_helper !== null ? String(e.carpenter_helper) : '',
-        barbender_helper: e.barbender_helper !== null ? String(e.barbender_helper) : '',
-        semi_skilled_other: e.semi_skilled_other !== null ? String(e.semi_skilled_other) : '',
-        mc: e.mc !== null ? String(e.mc) : '',
-        fc: e.fc !== null ? String(e.fc) : '',
-      })));
-    } else {
-      setRows([]);
-    }
+    setRows(dateEntries.length > 0 ? dateEntries.map(mapEntryToRow) : []);
     setLoadedKey(syncKey);
     setDeletedIds([]);
-  }, [dateEntries, syncKey, loadedKey, entriesLoading]);
+  }, [dateEntries, syncKey, loadedKey, entriesLoading, entriesFetching, mapEntryToRow]);
 
   // Map contractor_id to Company Name
   const contractorNameMap = useMemo(() => {
@@ -276,14 +276,15 @@ export default forwardRef(function ContractorLabourPanel({
     if (deletedIds.length > 0) {
       await Promise.all(deletedIds.map(id => base44.entities.ContractorLabour.delete(id)));
     }
-    await Promise.all(rows.map(r => {
+
+    const savedEntries = await Promise.all(rows.map(async (r) => {
       const payload = {
         project_id: projectId,
         sub_project_id: subProjectId,
         contractor_id: r.contractor_id,
         type_of_work: r.type_of_work || null,
         date: selectedDate,
-        unit: r.unit || null,
+        unit: r.unit || 'Nos',
         carpenter: r.carpenter === '' ? 0 : parseFloat(r.carpenter) || 0,
         barbender: r.barbender === '' ? 0 : parseFloat(r.barbender) || 0,
         mason: r.mason === '' ? 0 : parseFloat(r.mason) || 0,
@@ -299,6 +300,8 @@ export default forwardRef(function ContractorLabourPanel({
       }
       return base44.entities.ContractorLabour.update(r.id, payload);
     }));
+
+    return savedEntries.filter(Boolean);
   }, [deletedIds, rows, projectId, subProjectId, selectedDate]);
 
   const getReviewData = useCallback(() => ({
@@ -336,15 +339,43 @@ export default forwardRef(function ContractorLabourPanel({
       }),
   }), [rows, contractorNameMap]);
 
+  const reloadAfterSave = useCallback(async (savedEntries = []) => {
+    setDeletedIds([]);
+
+    // Keep saved rows visible immediately (replace temp_ ids with persisted ids)
+    if (savedEntries.length > 0) {
+      setRows(savedEntries.map(mapEntryToRow));
+      setLoadedKey(syncKey);
+    }
+
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['contractor-labours', projectId, subProjectId, selectedDate] }),
+      queryClient.invalidateQueries({ queryKey: ['contractor-labours-project-date', projectId, selectedDate] }),
+      queryClient.invalidateQueries({ queryKey: ['mpr-labours', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['wpr-labours'] }),
+    ]);
+
+    // Re-hydrate from fresh server data once refetch settles (do not clear rows first)
+    const fresh = await queryClient.fetchQuery({
+      queryKey: ['contractor-labours', projectId, subProjectId, selectedDate],
+      queryFn: () => base44.entities.ContractorLabour.filter({
+        project_id: projectId,
+        sub_project_id: subProjectId,
+        date: selectedDate,
+      }),
+    });
+    setRows((fresh || []).map(mapEntryToRow));
+    setLoadedKey(syncKey);
+    setDeletedIds([]);
+  }, [mapEntryToRow, syncKey, queryClient, projectId, subProjectId, selectedDate]);
+
   useDprPanelRef(ref, {
     validate: () => null,
     getReviewData,
+    isDirty: () => modifiedCount > 0,
     save: async () => {
-      await performSave();
-      queryClient.invalidateQueries({ queryKey: ['contractor-labours', projectId, subProjectId, selectedDate] });
-      queryClient.invalidateQueries({ queryKey: ['contractor-labours-project-date', projectId, selectedDate] });
-      setDeletedIds([]);
-      setLoadedKey('');
+      const savedEntries = await performSave();
+      await reloadAfterSave(savedEntries);
     },
   });
 
@@ -402,7 +433,7 @@ export default forwardRef(function ContractorLabourPanel({
             ⚠️ {modifiedCount} unsaved
           </Badge>
         )}
-        {rows.length > 0 && !isDateLocked && (
+        {!isDateLocked && (
           <Button
             variant="outline"
             size="sm"
@@ -425,7 +456,12 @@ export default forwardRef(function ContractorLabourPanel({
       )}
 
       {/* Empty State / Initial Contractor Search Selector */}
-      {rows.length === 0 ? (
+      {entriesLoading || (entriesFetching && loadedKey !== syncKey) ? (
+        <div className="border border-dashed rounded-xl p-8 max-w-xl mx-auto my-6 text-center space-y-3 bg-card shadow-sm">
+          <Loader2 className="w-6 h-6 animate-spin mx-auto text-primary" />
+          <p className="text-xs text-muted-foreground">Loading saved labour details…</p>
+        </div>
+      ) : rows.length === 0 ? (
         <div className="border border-dashed rounded-xl p-8 max-w-xl mx-auto my-6 text-center space-y-4 bg-card shadow-sm">
           <div className="bg-primary/10 p-3 rounded-full w-12 h-12 flex items-center justify-center mx-auto text-primary">
             <Users className="w-6 h-6" />

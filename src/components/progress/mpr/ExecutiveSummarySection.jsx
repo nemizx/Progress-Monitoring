@@ -4,14 +4,12 @@ import 'react-quill/dist/quill.snow.css';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Building2, Image as ImageIcon, UserCheck, ShieldCheck, PenTool } from 'lucide-react';
+import { UserCheck, ShieldCheck, PenTool } from 'lucide-react';
 
 export default function ExecutiveSummarySection({
   value,
   onChange,
   locked,
-  elevationPhotoUrl,
-  projectName,
   signOff = {},
   onSignOffChange,
   submittedBy = '',
@@ -37,32 +35,6 @@ export default function ExecutiveSummarySection({
 
   return (
     <div className="space-y-4 font-sans">
-      {elevationPhotoUrl && (
-        <Card className="border shadow-sm p-4 bg-slate-900 text-white overflow-hidden">
-          <div className="flex flex-col md:flex-row items-center gap-6">
-            <div className="relative w-full md:w-64 h-40 rounded-lg overflow-hidden border border-slate-700 shadow-md shrink-0 bg-slate-950 flex items-center justify-center">
-              <img
-                src={elevationPhotoUrl}
-                alt={`${projectName || 'Project'} Elevation`}
-                className="w-full h-full object-cover"
-              />
-            </div>
-            <div className="flex-1 space-y-2 text-center md:text-left">
-              <span className="inline-flex items-center gap-1.5 text-[10px] font-bold tracking-wider uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-full">
-                <ImageIcon className="w-3 h-3 text-emerald-400" /> Project Elevation Picture
-              </span>
-              <h3 className="text-xl font-bold tracking-tight text-white flex items-center justify-center md:justify-start gap-2">
-                <Building2 className="w-5 h-5 text-slate-400" />
-                {projectName || 'Project Elevation View'}
-              </h3>
-              <p className="text-xs text-slate-300">
-                Official project elevation view uploaded in Project Master for user Monthly Progress Reporting (MPR) and print reports.
-              </p>
-            </div>
-          </div>
-        </Card>
-      )}
-
       <Card className="border shadow-sm p-3">
         <div className="mb-2 text-xs font-semibold text-muted-foreground">Executive Summary</div>
         <ReactQuill

@@ -8,19 +8,19 @@ import { Plus, Minus, HelpCircle } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { formatInputCurrency, parseCurrencyInputValue } from '@/lib/formatters';
 
-function HeaderCell({ label, tooltip, align = 'left', width }) {
+function HeaderCell({ label, tooltip, align = 'left', width, wrapHeaders = false }) {
   const justify = align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start';
   return (
     <th
-      className={`p-2.5 font-semibold text-xs text-muted-foreground uppercase ${align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left'}`}
+      className={`p-2 font-semibold text-[11px] leading-tight text-muted-foreground uppercase ${align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left'}`}
       style={width ? { width } : undefined}
     >
-      <div className={`flex items-center gap-1 select-none ${justify}`}>
-        <span>{label}</span>
+      <div className={`flex items-start gap-1 select-none ${justify}`}>
+        <span className={wrapHeaders ? 'whitespace-normal break-words' : 'whitespace-nowrap'}>{label}</span>
         {tooltip && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+              <HelpCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
             </TooltipTrigger>
             <TooltipContent className="max-w-[220px] text-center font-sans font-normal normal-case">
               {tooltip}
@@ -126,6 +126,10 @@ export default function MprMultiRowTable({
   locked = false,
   minWidth = 900,
   tableLayout = 'auto',
+  canRemoveRow,
+  emptyFallbackRows = true,
+  fitContainer = false,
+  wrapHeaders = false,
 }) {
   const updateRow = (id, field, value) => {
     if (locked) return;
@@ -141,47 +145,78 @@ export default function MprMultiRowTable({
 
   const removeRow = (index) => {
     if (locked) return;
+    const row = rows[index];
+    if (typeof canRemoveRow === 'function' && !canRemoveRow(row, index)) return;
     const filtered = rows.filter((_, i) => i !== index);
-    onChange(filtered.length === 0 ? [createRow()] : filtered);
+    if (filtered.length === 0 && emptyFallbackRows) {
+      onChange([createRow()]);
+      return;
+    }
+    onChange(filtered);
   };
 
   return (
     <TooltipProvider>
       <Card className="overflow-hidden border shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm font-sans border-collapse" style={{ minWidth: minWidth || undefined, tableLayout }}>
+        <div className={fitContainer ? 'overflow-hidden' : 'overflow-x-auto'}>
+          <table
+            className="w-full text-sm font-sans border-collapse"
+            style={{
+              minWidth: fitContainer ? undefined : (minWidth || undefined),
+              tableLayout: fitContainer ? 'fixed' : tableLayout,
+              width: '100%',
+            }}
+          >
             <thead>
               <tr className="border-b bg-muted/50">
-                <th className="text-left p-2.5 font-semibold text-xs text-muted-foreground uppercase w-10">#</th>
+                <th className="text-left p-2 font-semibold text-[11px] text-muted-foreground uppercase w-8">#</th>
                 {columns.map((col) => (
-                  <HeaderCell key={col.key} label={col.label} tooltip={col.tooltip} align={col.align} width={col.width} />
+                  <HeaderCell
+                    key={col.key}
+                    label={col.label}
+                    tooltip={col.tooltip}
+                    align={col.align}
+                    width={col.width}
+                    wrapHeaders={wrapHeaders || fitContainer}
+                  />
                 ))}
                 {!locked && (
-                  <th className="text-center p-2.5 font-semibold text-xs text-muted-foreground uppercase w-24">Add/Remove</th>
+                  <th className="text-center p-2 font-semibold text-[11px] text-muted-foreground uppercase w-20">Add/Remove</th>
                 )}
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, index) => (
-                <tr key={row.id} className="border-b hover:bg-muted/20 transition-colors">
-                  <td className="p-2 text-xs text-muted-foreground align-middle">{index + 1}</td>
-                  {columns.map((col) => (
-                    <Cell key={col.key} col={col} row={row} onChange={updateRow} locked={locked} />
-                  ))}
-                  {!locked && (
-                    <td className="p-2 text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <Button type="button" variant="outline" size="icon" className="h-7 w-7 border-emerald-200 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700" onClick={() => addRow(index)}>
-                          <Plus className="w-3.5 h-3.5" />
-                        </Button>
-                        <Button type="button" variant="outline" size="icon" className="h-7 w-7 text-destructive border-red-100 hover:bg-red-50 hover:text-destructive" onClick={() => removeRow(index)}>
-                          <Minus className="w-3.5 h-3.5" />
-                        </Button>
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              ))}
+              {rows.map((row, index) => {
+                const allowRemove = typeof canRemoveRow === 'function' ? canRemoveRow(row, index) : true;
+                return (
+                  <tr key={row.id} className="border-b hover:bg-muted/20 transition-colors">
+                    <td className="p-2 text-xs text-muted-foreground align-middle">{index + 1}</td>
+                    {columns.map((col) => (
+                      <Cell key={col.key} col={col} row={row} onChange={updateRow} locked={locked} />
+                    ))}
+                    {!locked && (
+                      <td className="p-2 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <Button type="button" variant="outline" size="icon" className="h-7 w-7 border-emerald-200 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700" onClick={() => addRow(index)}>
+                            <Plus className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-7 w-7 text-destructive border-red-100 hover:bg-red-50 hover:text-destructive disabled:opacity-40"
+                            onClick={() => removeRow(index)}
+                            disabled={!allowRemove}
+                            title={allowRemove ? 'Remove row' : 'Auto-fetched from Project Master'}
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

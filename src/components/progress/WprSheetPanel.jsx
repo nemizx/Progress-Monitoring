@@ -587,10 +587,10 @@ function Point6BillsSection({
                       <tr className="border-b bg-muted/20">
                         <th className="text-left p-2 text-xs font-semibold text-muted-foreground w-10">#</th>
                         <th className="text-left p-2 text-xs font-semibold text-muted-foreground w-32">Bill Date</th>
-                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground">Bills to Certify</th>
+                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground">Work</th>
                         <th className="text-left p-2 text-xs font-semibold text-muted-foreground">Name of Agency</th>
                         <th className="text-left p-2 text-xs font-semibold text-muted-foreground w-32">Bill Amount</th>
-                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground w-36">Certified Date</th>
+                        <th className="text-left p-2 text-xs font-semibold text-muted-foreground w-36">RA Bill No</th>
                         <th className="text-left p-2 text-xs font-semibold text-muted-foreground">Remark</th>
                         {!locked ? (
                           <th className="text-center p-2 text-xs font-semibold text-muted-foreground w-20">Action</th>
@@ -638,10 +638,10 @@ function Point6BillsSection({
                             </td>
                             <td className="p-2">
                               <Input
-                                type="date"
-                                value={row.certifiedDate || ''}
-                                onChange={(e) => updateRow(row.id, 'certifiedDate', e.target.value)}
+                                value={row.raBillNo || ''}
+                                onChange={(e) => updateRow(row.id, 'raBillNo', e.target.value)}
                                 disabled={locked}
+                                placeholder="RA Bill No"
                               />
                             </td>
                             <td className="p-2">
@@ -738,20 +738,39 @@ export default function WprSheetPanel({
   });
 
   const { data: labourEntries = [], isLoading: labourLoading } = useQuery({
-    queryKey: ['wpr-labours', projectId, subProjectId || 'project', weekStart, weekEnd],
+    queryKey: ['wpr-labours', projectId, weekStart, weekEnd],
     queryFn: () =>
       base44.entities.ContractorLabour.filter({
         project_id: projectId,
-        ...(subProjectId ? { sub_project_id: subProjectId } : {}),
-      }, '-date', 2000),
+      }, '-date', 5000),
     enabled: !!projectId && !!weekStart && !!weekEnd,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
   });
 
-  const { data: allProgress = [], isLoading: progressLoading } = useQuery({
+  const labourInPeriod = useMemo(() => {
+    const start = normalizeDateKey(weekStart);
+    const end = normalizeDateKey(weekEnd);
+    if (!start || !end) return [];
+    return (labourEntries || []).filter((entry) => {
+      const date = normalizeDateKey(entry.date);
+      return date && date >= start && date <= end;
+    });
+  }, [labourEntries, weekStart, weekEnd]);
+
+  const { data: rawAllProgress = [], isLoading: progressLoading } = useQuery({
     queryKey: ['wpr-progress', projectId],
     queryFn: () => base44.entities.ProgressEntry.filter({ project_id: projectId }, '-date', 2000),
     enabled: !!projectId,
   });
+
+  // Server also returns auto-generated weekly/monthly aggregate rows alongside daily
+  // entries — exclude them here so VOWD is never double-counted.
+  const allProgress = useMemo(
+    () => rawAllProgress.filter((e) => !e._is_aggregated && (e.report_type === 'daily' || !e.report_type)),
+    [rawAllProgress]
+  );
 
   const { data: allBudgetItems = [] } = useQuery({
     queryKey: ['budgetItems', projectId],
@@ -779,8 +798,8 @@ export default function WprSheetPanel({
   );
 
   const avgLabour = useMemo(
-    () => calcAvgWeeklyLabour(labourEntries, weekStart, weekEnd),
-    [labourEntries, weekStart, weekEnd]
+    () => calcAvgWeeklyLabour(labourInPeriod, weekStart, weekEnd),
+    [labourInPeriod, weekStart, weekEnd]
   );
 
   const weeklyVowd = useMemo(
@@ -790,8 +809,8 @@ export default function WprSheetPanel({
 
   const wprMonthId = week?.monthId || (week?.startDate ? String(week.startDate).slice(0, 7) : '');
   const mprBaselineInfo = useMemo(() => {
-    return getMprBaselineForWpr(allMprReports, week?.weekNum, wprMonthId);
-  }, [allMprReports, week?.weekNum, wprMonthId]);
+    return getMprBaselineForWpr(allMprReports, week?.weekNum, wprMonthId, weekStart, weekEnd);
+  }, [allMprReports, week?.weekNum, wprMonthId, weekStart, weekEnd]);
 
   // Reset when week/scope changes
   useEffect(() => {
@@ -805,7 +824,7 @@ export default function WprSheetPanel({
 
   // Hydrate from saved report + locked computed fields
   useEffect(() => {
-    if (reportLoading || !weekId || loadedKey === scopeKey) return;
+    if (reportLoading || labourLoading || !weekId || loadedKey === scopeKey) return;
 
     const existing = existingReports[0];
     const parsed = parseWprFormData(existing?.form_data);
@@ -919,6 +938,7 @@ export default function WprSheetPanel({
   }, [
     existingReports,
     reportLoading,
+    labourLoading,
     scopeKey,
     weekId,
     loadedKey,
@@ -989,7 +1009,6 @@ export default function WprSheetPanel({
         week_id: weekId,
         week_start: weekStart,
         week_end: weekEnd,
-        week_num: week?.weekNum || 1,
         status: nextStatus,
         form_data: JSON.stringify(formData),
         submitted_by: submittedBy || 'Supervisor',
@@ -1011,68 +1030,87 @@ export default function WprSheetPanel({
 
   const syncAchievedToMpr = async () => {
     const achievedReqs = (form.materialRequisitions || []).filter(isRequisitionRowAchieved);
-    const achievedBills = (form.billsToCertify || []).filter(isBillRowAchieved);
+    const filledBills = (form.billsToCertify || []).filter(isBillRowAchieved);
 
-    if (achievedReqs.length === 0 && achievedBills.length === 0) return;
+    if (achievedReqs.length === 0 && filledBills.length === 0) return;
+
+    const targetMonthId = wprMonthId || (weekStart ? String(weekStart).slice(0, 7) : '');
+    if (!targetMonthId) return;
 
     try {
-      const mprList = await base44.entities.MprReport.filter({ project_id: projectId });
-      if (mprList && mprList.length > 0) {
-        const currentMpr = mprList[0];
-        let mprFormData = currentMpr.form_data;
-        if (typeof mprFormData === 'string') {
-          try { mprFormData = JSON.parse(mprFormData); } catch { mprFormData = {}; }
+      const mprList = await base44.entities.MprReport.filter({
+        project_id: projectId,
+        month_id: targetMonthId,
+      });
+      if (!mprList || mprList.length === 0) return;
+
+      const currentMpr = mprList[0];
+      let mprFormData = currentMpr.form_data;
+      if (typeof mprFormData === 'string') {
+        try { mprFormData = JSON.parse(mprFormData); } catch { mprFormData = {}; }
+      }
+      if (!mprFormData) mprFormData = {};
+
+      let updatedReqs = Array.isArray(mprFormData.materialRequisitions) ? [...mprFormData.materialRequisitions] : [];
+      let updatedBills = Array.isArray(mprFormData.contractorBills) ? [...mprFormData.contractorBills] : [];
+
+      achievedReqs.forEach((r) => {
+        const existsIdx = updatedReqs.findIndex((m) => m.id === r.id || (m.requisitionNo && m.requisitionNo === r.requisitionNo));
+        const itemObj = {
+          id: r.id || `req_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          date: r.date || '',
+          requisitionNo: r.requisitionNo || '',
+          particulars: r.name || r.subItemName || '',
+          unit: r.unit || '',
+          qty: r.qty || '',
+          receivedDate: r.receivedDate || '',
+          remarks: r.remark || '',
+        };
+        if (existsIdx >= 0) {
+          updatedReqs[existsIdx] = { ...updatedReqs[existsIdx], ...itemObj };
+        } else {
+          updatedReqs.push(itemObj);
         }
-        if (!mprFormData) mprFormData = {};
+      });
 
-        let updatedReqs = Array.isArray(mprFormData.materialRequisitions) ? [...mprFormData.materialRequisitions] : [];
-        let updatedBills = Array.isArray(mprFormData.contractorBills) ? [...mprFormData.contractorBills] : [];
-
-        achievedReqs.forEach((r) => {
-          const existsIdx = updatedReqs.findIndex((m) => m.id === r.id || (m.requisitionNo && m.requisitionNo === r.requisitionNo));
-          const itemObj = {
-            id: r.id || `req_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-            date: r.date || '',
-            requisitionNo: r.requisitionNo || '',
-            particulars: r.name || r.subItemName || '',
-            unit: r.unit || '',
-            qty: r.qty || '',
-            receivedDate: r.receivedDate || '',
-            remarks: r.remark || '',
-          };
-          if (existsIdx >= 0) {
-            updatedReqs[existsIdx] = { ...updatedReqs[existsIdx], ...itemObj };
-          } else {
-            updatedReqs.push(itemObj);
-          }
-        });
-
-        achievedBills.forEach((b) => {
-          const existsIdx = updatedBills.findIndex((m) => m.id === b.id);
-          const itemObj = {
-            id: b.id || `bill_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-            date: b.billDate || '',
-            work: b.name || b.subItemName || '',
-            raBillNo: '',
-            agencyName: b.agencyName || '',
-            amount: b.billAmount || '',
-            certifiedDate: b.certifiedDate || '',
-          };
-          if (existsIdx >= 0) {
-            updatedBills[existsIdx] = { ...updatedBills[existsIdx], ...itemObj };
+      filledBills.forEach((b) => {
+        const itemObj = {
+          id: b.id || `bill_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          date: b.billDate || '',
+          work: b.name || b.subItemName || '',
+          raBillNo: b.raBillNo || '',
+          agencyName: b.agencyName || '',
+          amount: b.billAmount ?? '',
+        };
+        const existsIdx = updatedBills.findIndex((m) => m.id === itemObj.id);
+        if (existsIdx >= 0) {
+          updatedBills[existsIdx] = { ...updatedBills[existsIdx], ...itemObj };
+        } else {
+          // Drop a single trailing empty placeholder row when appending the first real bill
+          if (
+            updatedBills.length === 1 &&
+            !updatedBills[0].date &&
+            !updatedBills[0].work &&
+            !updatedBills[0].raBillNo &&
+            !updatedBills[0].agencyName &&
+            (updatedBills[0].amount === '' || updatedBills[0].amount == null)
+          ) {
+            updatedBills = [itemObj];
           } else {
             updatedBills.push(itemObj);
           }
-        });
+        }
+      });
 
-        await base44.entities.MprReport.update(currentMpr.id, {
-          form_data: JSON.stringify({
-            ...mprFormData,
-            materialRequisitions: updatedReqs,
-            contractorBills: updatedBills,
-          }),
-        });
-      }
+      await base44.entities.MprReport.update(currentMpr.id, {
+        form_data: JSON.stringify({
+          ...mprFormData,
+          materialRequisitions: updatedReqs,
+          contractorBills: updatedBills,
+        }),
+      });
+      queryClient.invalidateQueries({ queryKey: ['mpr-report', projectId, targetMonthId] });
+      queryClient.invalidateQueries({ queryKey: ['wpr-reports-for-mpr', projectId, targetMonthId] });
     } catch (err) {
       console.warn('Sync to MPR failed:', err);
     }
@@ -1264,28 +1302,28 @@ export default function WprSheetPanel({
         pctLabel: `Total % Achieved: ${formatPct(billsSummary.plan, billsSummary.achieved)}`,
         columns: [
           { key: 'sr', label: '#' },
-          { key: 'name', label: 'Bills to Certify' },
+          { key: 'name', label: 'Work' },
           { key: 'agencyName', label: 'Name of Agency' },
           { key: 'billDate', label: 'Bill Date' },
-          { key: 'certifiedDate', label: 'Certified Date' },
+          { key: 'raBillNo', label: 'RA Bill No' },
           { key: 'remark', label: 'Remark' },
         ],
         rows: (form.billsToCertify || [])
-          .filter((r) => (r.name || '').trim() || (r.agencyName || '').trim() || (r.billDate || '').trim() || (r.certifiedDate || '').trim())
+          .filter((r) => (r.name || '').trim() || (r.agencyName || '').trim() || (r.billDate || '').trim() || (r.raBillNo || '').trim())
           .map((r, i) => ({
             id: r.id,
             sr: i + 1,
             name: r.name || '—',
             agencyName: r.agencyName || '—',
             billDate: r.billDate || '—',
-            certifiedDate: r.certifiedDate || '—',
+            raBillNo: r.raBillNo || '—',
             remark: r.remark || '—',
           })),
       };
 
       return [
         simpleRow('1. Avg. No Of Labour Allocated', form.avgLabour.plan, avgLabour, {
-          tooltip: 'Average daily labour headcount for the week, auto-calculated from Contractor Labour entries.',
+          tooltip: 'Average daily labour for the selected Start–End dates (total mandays ÷ days in period), from saved Contractor Labour on DPRs.',
         }),
         simpleRow('2. No. of Construction Milestones to Achieve (Building wise)', form.milestones.plan, form.milestones.achieved, {
           tooltip: 'Number of construction milestones planned versus achieved this week, building-wise.',
@@ -1400,7 +1438,7 @@ export default function WprSheetPanel({
             )}
             <PlanAchievedRow
               label="1. Avg. No Of Labour Allocated"
-              tooltip="Average daily labour headcount for the week, auto-calculated from Contractor Labour entries."
+              tooltip="Average daily labour for the selected Start–End dates (total mandays ÷ days in period), from saved Contractor Labour on DPRs."
               plan={form.avgLabour.plan}
               achieved={avgLabour}
               onPlanChange={(v) => updateSimple('avgLabour', 'plan', v)}
@@ -1588,7 +1626,7 @@ export default function WprSheetPanel({
       )}
 
       {!loading && (
-        <div className="flex justify-end gap-3 bg-card border rounded-xl p-4 shadow-sm">
+        <div className="flex flex-wrap justify-end gap-3 bg-card border rounded-xl p-4 shadow-sm">
           {!isLocked ? (
             <>
               <Button

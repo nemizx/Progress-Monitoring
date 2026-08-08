@@ -1,7 +1,13 @@
 export function formatCurrencyINR(value, options = {}) {
   const num = Number(value) || 0;
+  const decimals = options.decimals ?? 0;
   // Use Intl.NumberFormat for Indian grouping and INR symbol
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: options.decimals ?? 0 }).format(num);
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  }).format(num);
 }
 
 export function formatCompactCurrencyINR(value) {
@@ -25,9 +31,10 @@ export function formatCompactCurrencyINR(value) {
   return isNegative ? `-${formatted}` : formatted;
 }
 
-export function formatNumberIndian(value) {
+export function formatNumberIndian(value, decimals) {
   const num = Number(value) || 0;
-  return new Intl.NumberFormat('en-IN').format(num);
+  const options = decimals == null ? {} : { minimumFractionDigits: decimals, maximumFractionDigits: decimals };
+  return new Intl.NumberFormat('en-IN', options).format(num);
 }
 
 /**

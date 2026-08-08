@@ -112,6 +112,28 @@ function ReviewSection({ section }) {
               </tr>
             ))}
           </tbody>
+          {section.footer && (
+            <tfoot>
+              <tr className="border-t-2 bg-muted/30 font-bold">
+                {section.columns.map((col, idx) => {
+                  const isFirst = idx === 0;
+                  const value = isFirst
+                    ? (section.footer.label || 'Total VOWD')
+                    : (section.footer[col.key] ?? '');
+                  return (
+                    <td
+                      key={col.key}
+                      className={`p-2 whitespace-nowrap ${alignClass(col.align)} ${
+                        col.key === 'today_vowd' ? 'text-emerald-800 font-mono' : col.align === 'right' ? 'font-mono' : ''
+                      }`}
+                    >
+                      {value}
+                    </td>
+                  );
+                })}
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
     </div>

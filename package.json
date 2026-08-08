@@ -13,7 +13,12 @@
     "lint": "eslint . --quiet",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc -p ./jsconfig.json",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:restart": "docker compose down && docker compose up -d --build",
+    "docker:logs": "docker compose logs -f",
+    "docker:ps": "docker compose ps"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^17.0.0",

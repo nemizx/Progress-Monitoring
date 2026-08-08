@@ -58,6 +58,23 @@ export function getPreviousMonthId(monthIdValue) {
   return monthId(d.getFullYear(), d.getMonth());
 }
 
+/** 'YYYY-MM' -> next 'YYYY-MM'. */
+export function getNextMonthId(monthIdValue) {
+  if (!monthIdValue) return '';
+  const [year, month] = monthIdValue.split('-').map(Number);
+  if (!year || !month) return '';
+  const d = new Date(year, month - 1 + 1, 1);
+  return monthId(d.getFullYear(), d.getMonth());
+}
+
+/** Human label for a 'YYYY-MM' id (e.g. "September 2026"). */
+export function getMonthLabelFromId(monthIdValue) {
+  if (!monthIdValue) return '';
+  const [year, month] = monthIdValue.split('-').map(Number);
+  if (!year || !month) return '';
+  return new Date(year, month - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+}
+
 /** Number of calendar days in a 'YYYY-MM' month. */
 export function getDaysInMonthId(monthIdValue) {
   if (!monthIdValue) return 0;

@@ -57,7 +57,24 @@ const storage = multer.diskStorage({
     cb(null, file.fieldname + '-' + uniqueSuffix + ext);
   }
 });
-const upload = multer({ storage });
+
+const ALLOWED_IMAGE_MIME = new Set(['image/jpeg', 'image/jpg', 'image/png']);
+const ALLOWED_IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png']);
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+const upload = multer({
+  storage,
+  limits: { fileSize: MAX_IMAGE_BYTES },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const mime = String(file.mimetype || '').toLowerCase();
+    if (ALLOWED_IMAGE_MIME.has(mime) || ALLOWED_IMAGE_EXT.has(ext)) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error('Only JPG, JPEG, or PNG images are allowed.'));
+  },
+});
 
 // Entity to table mapping
 const tableMap = {
@@ -360,10 +377,11 @@ app.post('/api/projects/save-with-subprojects', authenticateToken, async (req, r
     const allowedColumns = [
       'name', 'description', 'location', 'client', 'status',
       'start_date', 'end_date', 'budget', 'project_manager', 'priority',
-      'project_type', 'project_code', 'elevation_photo_url',
+      'project_type', 'project_code', 'elevation_photo_url', 'logo_url',
       'plot_area', 'reservation_area', 'amenities_area', 'open_space_area',
       'sanctioned_fsi', 'tdr', 'rcc_slab_area', 'built_up_area', 'saleable_area',
-      'building_configurations'
+      'building_configurations',
+      'na_order_no', 'building_permit_cc_no', 'fire_emergency_dept'
     ];
 
     // 1. Save or Update Project
@@ -855,6 +873,15 @@ app.post('/api/dprs/reopen', authenticateToken, async (req, res) => {
         last_updated_date = CURRENT_TIMESTAMP
       WHERE id = $3
     `, [req.user.email, reason || '', dpr.id]);
+
+    // Unlock worksheet progress entries so returned DPR can be edited/saved freely
+    await db.query(`
+      UPDATE progress_entries
+      SET status = 'draft'
+      WHERE project_id = $1
+        AND date = $2
+        AND (report_type = 'daily' OR report_type IS NULL)
+    `, [project_id, date]);
 
     await db.query('COMMIT');
 
@@ -1830,10 +1857,14 @@ app.put('/api/entities/:entity/:id', authenticateToken, async (req, res) => {
     if (entity === 'ProgressEntry') {
       const existingRes = await db.query('SELECT status, quantity_done FROM progress_entries WHERE id = $1', [id]);
       if (existingRes.rows.length > 0 && existingRes.rows[0].status === 'approved') {
-        const existing = existingRes.rows[0];
-        const newQty = parseFloat(data.quantity_done);
-        if (newQty < parseFloat(existing.quantity_done)) {
-          return res.status(400).json({ error: 'Cost Control Lock: Approved progress quantity/cost cannot be decreased.' });
+        // Allow free edits when saving back as draft (e.g. after DPR return/reopen)
+        const nextStatus = String(data.status || '').toLowerCase();
+        if (nextStatus !== 'draft') {
+          const existing = existingRes.rows[0];
+          const newQty = parseFloat(data.quantity_done);
+          if (!Number.isNaN(newQty) && newQty < parseFloat(existing.quantity_done)) {
+            return res.status(400).json({ error: 'Cost Control Lock: Approved progress quantity/cost cannot be decreased.' });
+          }
         }
       }
     }
@@ -2003,16 +2034,23 @@ app.post('/api/entities/:entity/bulk', authenticateToken, async (req, res) => {
 });
 
 // --- Upload API Route ---
-app.post('/api/upload', authenticateToken, upload.single('file'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
-  }
-  
-  // Return the statically accessible URL
-  const file_url = `/uploads/${req.file.filename}`;
-  res.json({
-    file_url,
-    file_name: req.file.originalname
+app.post('/api/upload', authenticateToken, (req, res) => {
+  upload.single('file')(req, res, (err) => {
+    if (err) {
+      const message = err.code === 'LIMIT_FILE_SIZE'
+        ? 'Image must be 5 MB or smaller.'
+        : (err.message || 'Upload failed');
+      return res.status(400).json({ error: message });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const file_url = `/uploads/${req.file.filename}`;
+    res.json({
+      file_url,
+      file_name: req.file.originalname
+    });
   });
 });
 
@@ -2419,6 +2457,7 @@ async function ensureExtendedTables() {
     ADD COLUMN IF NOT EXISTS project_type VARCHAR(100),
     ADD COLUMN IF NOT EXISTS project_code VARCHAR(100),
     ADD COLUMN IF NOT EXISTS elevation_photo_url TEXT,
+    ADD COLUMN IF NOT EXISTS logo_url TEXT,
     ADD COLUMN IF NOT EXISTS plot_area NUMERIC(15, 2) DEFAULT 0,
     ADD COLUMN IF NOT EXISTS reservation_area NUMERIC(15, 2) DEFAULT 0,
     ADD COLUMN IF NOT EXISTS amenities_area NUMERIC(15, 2) DEFAULT 0,
@@ -2428,7 +2467,10 @@ async function ensureExtendedTables() {
     ADD COLUMN IF NOT EXISTS rcc_slab_area NUMERIC(15, 2) DEFAULT 0,
     ADD COLUMN IF NOT EXISTS built_up_area NUMERIC(15, 2) DEFAULT 0,
     ADD COLUMN IF NOT EXISTS saleable_area NUMERIC(15, 2) DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS building_configurations TEXT
+    ADD COLUMN IF NOT EXISTS building_configurations TEXT,
+    ADD COLUMN IF NOT EXISTS na_order_no TEXT,
+    ADD COLUMN IF NOT EXISTS building_permit_cc_no TEXT,
+    ADD COLUMN IF NOT EXISTS fire_emergency_dept TEXT
   `);
   await db.query(`
     ALTER TABLE progress_entries

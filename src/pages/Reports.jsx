@@ -348,9 +348,9 @@ export default function Reports() {
         }
         if (key === 'billsToCertify') {
           if (field === 'plan') {
-            return sum + rows.filter((row) => (row.name || row.agencyName || row.billDate || '').trim() !== '' || String(row.plan || '').trim() !== '').length;
+            return sum + rows.filter((row) => (row.name || row.agencyName || row.billDate || row.raBillNo || '').trim() !== '' || String(row.plan || '').trim() !== '').length;
           } else {
-            return sum + rows.filter((row) => String(row.certifiedDate || '').trim() !== '' || (row.achieved !== '' && row.achieved != null && Number(row.achieved) > 0)).length;
+            return sum + rows.filter((row) => String(row.raBillNo || '').trim() !== '' || (row.achieved !== '' && row.achieved != null && Number(row.achieved) > 0)).length;
           }
         }
         return sum + rows.filter(row => row.name && String(row[field] || '').trim() !== '').length;
@@ -568,7 +568,7 @@ export default function Reports() {
   const wprDetailedSections = useMemo(() => {
     const sections = [
       { key: 'materialRequisitions', title: '5. No of Requisition Of Material', nameLabel: 'Requisition' },
-      { key: 'billsToCertify', title: '6. Bills to certify', nameLabel: 'Bills to Certify' },
+      { key: 'billsToCertify', title: '6. Bills to certify', nameLabel: 'Work' },
       { key: 'leadershipInputs', title: '7. No. of leadership input / client inputs / consultant inputs to be adopted', nameLabel: 'Feedback' },
       { key: 'mockUpActivities', title: '8. Mock up Activity', nameLabel: 'Mock up Activity' },
       { key: 'contractorsMobilized', title: '9. Contractors to be Mobilized', nameLabel: 'Contractor' },
@@ -602,7 +602,7 @@ export default function Reports() {
                 monthlyAchieved += parseFloat(r.achieved) || (r.receivedDate && String(r.receivedDate).trim() !== '' ? 1 : 0);
               } else if (sec.key === 'billsToCertify') {
                 monthlyPlan += parseFloat(r.plan) || 1;
-                monthlyAchieved += parseFloat(r.achieved) || (r.certifiedDate && String(r.certifiedDate).trim() !== '' ? 1 : 0);
+                monthlyAchieved += parseFloat(r.achieved) || (r.raBillNo && String(r.raBillNo).trim() !== '' ? 1 : 0);
               } else {
                 monthlyPlan += parseFloat(r.plan) || 0;
                 monthlyAchieved += parseFloat(r.achieved) || 0;
@@ -637,7 +637,7 @@ export default function Reports() {
                   wAchieved += parseFloat(r.achieved) || (r.receivedDate && String(r.receivedDate).trim() !== '' ? 1 : 0);
                 } else if (sec.key === 'billsToCertify') {
                   wPlan += parseFloat(r.plan) || 1;
-                  wAchieved += parseFloat(r.achieved) || (r.certifiedDate && String(r.certifiedDate).trim() !== '' ? 1 : 0);
+                  wAchieved += parseFloat(r.achieved) || (r.raBillNo && String(r.raBillNo).trim() !== '' ? 1 : 0);
                 } else {
                   wPlan += parseFloat(r.plan) || 0;
                   wAchieved += parseFloat(r.achieved) || 0;
@@ -737,7 +737,7 @@ export default function Reports() {
       return {
         ...activity,
         _row_type: 'wbs',
-        sub_project_id: activity.sub_project_id || null,
+        sub_project_id: activity.sub_project_id || linkedBudget?.sub_project_id || null,
         activity_code: activity.activity_code || activity.activity_id || activity.code || '',
         title: linkedBudget?.title || activity.title || activity.name || 'Activity',
         unit: linkedBudget?.unit || activity.unit || '',
@@ -779,7 +779,7 @@ export default function Reports() {
       return {
         id: entry.id + '_orphan',
         _row_type: 'orphan',
-        sub_project_id: null, // will go into unassigned group
+        sub_project_id: wbs?.sub_project_id || budget?.sub_project_id || entry.sub_project_id || null,
         activity_code: budget?.code || wbs?.activity_code || wbs?.code || '',
         title: budget?.title || wbs?.title || wbs?.name || entry.work_done_description || `Entry #${idx + 1}`,
         unit: entry.unit || budget?.unit || '',
@@ -1311,13 +1311,6 @@ Format with markdown. Be specific, professional, and actionable.`;
                           </tr>
                         );
 
-                        const assignedSubProjectIds = new Set(subProjects.map(s => s.id));
-                        const unassignedItems = dprWorksheetData.filter(w => !w.sub_project_id || !assignedSubProjectIds.has(w.sub_project_id));
-
-                        const subSections = subProjects
-                          .map(sub => ({ sub, items: dprWorksheetData.filter(w => w.sub_project_id === sub.id) }))
-                          .filter(({ items }) => items.length > 0);
-
                         if (dprWorksheetData.length === 0) {
                           return (
                             <tr>
@@ -1326,27 +1319,60 @@ Format with markdown. Be specific, professional, and actionable.`;
                           );
                         }
 
+                        const assignedSubProjectIds = new Set(subProjects.map((s) => s.id));
+                        const fallbackSubId = subProjects.find((s) =>
+                          dprWorksheetData.some((w) => w.sub_project_id === s.id)
+                        )?.id || subProjects[0]?.id || null;
+
+                        // Attach any leftover rows to a real sub-project — never "Other / Unassigned"
+                        const normalizedRows = dprWorksheetData.map((w) => ({
+                          ...w,
+                          sub_project_id:
+                            w.sub_project_id && assignedSubProjectIds.has(w.sub_project_id)
+                              ? w.sub_project_id
+                              : fallbackSubId,
+                        }));
+
+                        const subSections = subProjects
+                          .map((sub) => ({ sub, items: normalizedRows.filter((w) => w.sub_project_id === sub.id) }))
+                          .filter(({ items }) => items.length > 0);
+
+                        const flatItems = subSections.length > 0
+                          ? subSections.flatMap(({ items }) => items)
+                          : normalizedRows;
+
+                        const totalTodayVowd = flatItems.reduce((s, i) => s + (Number(i.today_vowd) || 0), 0);
+                        const totalCumulativeVowd = flatItems.reduce((s, i) => s + (Number(i.cumulative_vowd) || 0), 0);
+                        const totalTomorrowVowd = flatItems.reduce((s, i) => s + (Number(i.tomorrow_vowd) || 0), 0);
+                        const totalTodayQty = flatItems.reduce((s, i) => s + (Number(i.today_qty) || 0), 0);
+
                         let srCounter = 0;
                         return (
                           <>
-                            {subSections.map(({ sub, items }) => (
-                              <React.Fragment key={sub.id}>
-                                <tr className="bg-primary/5 font-semibold text-primary">
-                                  <td colSpan={13} className="p-2 pl-4 text-xs font-bold border-b">{sub.name}</td>
-                                </tr>
-                                {items.map((item) => <DprRow key={item.id} item={item} index={++srCounter} />)}
-                              </React.Fragment>
-                            ))}
-                            {unassignedItems.length > 0 && (
-                              <React.Fragment>
-                                {subSections.length > 0 && (
-                                  <tr className="bg-muted/30 font-semibold text-muted-foreground">
-                                    <td colSpan={13} className="p-2 pl-4 text-xs font-bold border-b">Other / Unassigned</td>
+                            {subSections.length > 0 ? (
+                              subSections.map(({ sub, items }) => (
+                                <React.Fragment key={sub.id}>
+                                  <tr className="bg-primary/5 font-semibold text-primary">
+                                    <td colSpan={13} className="p-2 pl-4 text-xs font-bold border-b">{sub.name}</td>
                                   </tr>
-                                )}
-                                {unassignedItems.map((item) => <DprRow key={item.id} item={item} index={++srCounter} />)}
-                              </React.Fragment>
+                                  {items.map((item) => <DprRow key={item.id} item={item} index={++srCounter} />)}
+                                </React.Fragment>
+                              ))
+                            ) : (
+                              flatItems.map((item) => <DprRow key={item.id} item={item} index={++srCounter} />)
                             )}
+                            <tr className="bg-[#E8EEF7] border-t-2 border-slate-300 font-bold">
+                              <td colSpan={6} className="p-2.5 pl-4 text-xs uppercase tracking-wide border-r">Total VOWD</td>
+                              <td className="p-2.5 text-right font-mono border-r">{totalTodayQty || '—'}</td>
+                              <td className="p-2.5 border-r" />
+                              <td className="p-2.5 border-r" />
+                              <td className="p-2.5 text-right font-mono border-r text-emerald-800">{formatCurrencyINR(totalTodayVowd)}</td>
+                              <td className="p-2.5 text-right font-mono border-r">{formatCurrencyINR(totalCumulativeVowd)}</td>
+                              <td className="p-2.5 border-r" />
+                              <td className="p-2.5 text-right font-mono text-muted-foreground">
+                                {totalTomorrowVowd > 0 ? formatCurrencyINR(totalTomorrowVowd) : '—'}
+                              </td>
+                            </tr>
                           </>
                         );
                       })()}
@@ -1398,13 +1424,22 @@ Format with markdown. Be specific, professional, and actionable.`;
               <CardContent className="p-0">
                 {(() => {
                   const assignedIds = new Set(subProjects.map((s) => s.id));
-                  const unassigned = contractorLabourData.filter(
-                    (l) => !l.sub_project_id || !assignedIds.has(l.sub_project_id)
-                  );
+                  const fallbackSubId = subProjects.find((s) =>
+                    contractorLabourData.some((l) => l.sub_project_id === s.id)
+                  )?.id || subProjects[0]?.id || null;
+
+                  const normalizedLabour = contractorLabourData.map((l) => ({
+                    ...l,
+                    sub_project_id:
+                      l.sub_project_id && assignedIds.has(l.sub_project_id)
+                        ? l.sub_project_id
+                        : fallbackSubId,
+                  }));
+
                   const subSections = subProjects
                     .map((sub) => ({
                       sub,
-                      items: contractorLabourData.filter((l) => l.sub_project_id === sub.id),
+                      items: normalizedLabour.filter((l) => l.sub_project_id === sub.id),
                     }))
                     .filter(({ items }) => items.length > 0);
 
@@ -1418,17 +1453,15 @@ Format with markdown. Be specific, professional, and actionable.`;
 
                   const tableRows = [];
                   let ctr = 0;
-                  subSections.forEach(({ sub, items }) => {
-                    tableRows.push({ _groupLabel: sub.name });
-                    items.forEach((l) => {
-                      tableRows.push({ ...l, sr: ++ctr });
+                  if (subSections.length > 0) {
+                    subSections.forEach(({ sub, items }) => {
+                      tableRows.push({ _groupLabel: sub.name });
+                      items.forEach((l) => {
+                        tableRows.push({ ...l, sr: ++ctr });
+                      });
                     });
-                  });
-                  if (unassigned.length > 0) {
-                    if (subSections.length > 0) {
-                      tableRows.push({ _groupLabel: 'Other / Unassigned' });
-                    }
-                    unassigned.forEach((l) => {
+                  } else {
+                    normalizedLabour.forEach((l) => {
                       tableRows.push({ ...l, sr: ++ctr });
                     });
                   }

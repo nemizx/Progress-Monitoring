@@ -33,6 +33,7 @@ import MprSheetPanel from '@/components/progress/MprSheetPanel';
 import { filterBudgetBySubProject, filterProgressBySubProject, filterWbsBySubProject } from '@/lib/subProjectScope';
 import { getMprMonthsList, getDefaultMprMonthId } from '@/lib/mprMonths';
 import { getMprActivitiesForDprDate } from '@/lib/mprDprIntegration';
+import { buildWeeksForMonth } from '@/lib/wprWeeks';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 
 const weatherIcons = { clear: '☀️', cloudy: '⛅', rainy: '🌧️', stormy: '⛈️', hot: '🌡️' };
@@ -227,6 +228,16 @@ export default function SiteProgress() {
       label: weekNum ? `Week ${weekNum}` : '',
     };
   }, [wprYear, wprMonthNum, wprWeekNum, wprStartDate, wprEndDate]);
+
+  // Auto-fill Start/End from month week rules when Year / Month / Week change
+  useEffect(() => {
+    if (!wprYear || !wprMonthNum || !wprWeekNum) return;
+    const weeks = buildWeeksForMonth(new Date(`${wprYear}-${wprMonthNum}-01T00:00:00`));
+    const match = weeks.find((w) => Number(w.weekNum) === Number(wprWeekNum));
+    if (!match) return;
+    setWprStartDate(match.startDate);
+    setWprEndDate(match.endDate);
+  }, [wprYear, wprMonthNum, wprWeekNum]);
 
   // Redirect if they try to access history tab directly (deprecated)
   useEffect(() => {
@@ -599,7 +610,9 @@ export default function SiteProgress() {
   const isSelectedDateLocked = useMemo(() => {
     if (isWbsUnapproved) return true;
     if (user?.role === 'admin') return false;
-    const status = dprRecord?.status || 'draft';
+    const status = String(dprRecord?.status || 'draft').toLowerCase();
+    // Returned DPRs are draft + reopened_date — must remain editable/saveable
+    if (status === 'draft' || status === 'returned') return false;
     return status === 'pending' || status === 'approved';
   }, [dprRecord, user, isWbsUnapproved]);
 
@@ -609,23 +622,44 @@ export default function SiteProgress() {
   const [showReopenDialog, setShowReopenDialog] = useState(false);
   const [reopenReason, setReopenReason] = useState('');
 
+  const persistAllDprSections = async () => {
+    if (!weatherCondition) {
+      const err = new Error('Select a weather condition for the day before saving the DPR.');
+      err.code = 'WEATHER_REQUIRED';
+      throw err;
+    }
+
+    // Save labour / side panels first so worksheet failures cannot skip MPR inputs
+    for (const panelRef of dprPanelRefs) {
+      if (panelRef.current?.save) {
+        await panelRef.current.save();
+      }
+    }
+
+    const { savedCount, deletedCount } = await persistWorksheetDpr();
+
+    await queryClient.invalidateQueries({ queryKey: ['mpr-labours', projectId] });
+    await queryClient.invalidateQueries({ queryKey: ['wpr-labours'] });
+
+    return { savedCount, deletedCount };
+  };
+
   const handleSubmitForApproval = async () => {
     setIsSubmitting(true);
     try {
-      // First save all current changes automatically
-      await handleConfirmSubmitDpr();
+      // Persist worksheet + labour/panels first — never submit if save fails
+      await persistAllDprSections();
 
-      // Now submit
       await base44.dprs.submit(projectId, subProjectId, selectedReportDate);
       await queryClient.invalidateQueries({ queryKey: ['dprHeader', projectId, subProjectId, selectedReportDate] });
-      
+
       toast({
         title: 'DPR Submitted',
         description: 'DPR has been locked and submitted for Project Manager approval.',
       });
     } catch (e) {
       toast({
-        title: 'Submission Failed',
+        title: e?.code === 'WEATHER_REQUIRED' ? 'Weather Required' : 'Submission Failed',
         description: e.message || 'Unable to submit DPR.',
         variant: 'destructive',
       });
@@ -637,8 +671,12 @@ export default function SiteProgress() {
   const handleApproveDpr = async () => {
     setIsSubmitting(true);
     try {
+      // Persist any unsaved labour/panels before locking as approved
+      await persistAllDprSections();
+
       await base44.dprs.approve(projectId, subProjectId, selectedReportDate);
       await queryClient.invalidateQueries({ queryKey: ['dprHeader', projectId, subProjectId, selectedReportDate] });
+      await queryClient.invalidateQueries({ queryKey: ['mpr-labours', projectId] });
 
       toast({
         title: 'DPR Approved',
@@ -646,7 +684,7 @@ export default function SiteProgress() {
       });
     } catch (e) {
       toast({
-        title: 'Approval Failed',
+        title: e?.code === 'WEATHER_REQUIRED' ? 'Weather Required' : 'Approval Failed',
         description: e.message || 'Unable to approve DPR.',
         variant: 'destructive',
       });
@@ -669,12 +707,13 @@ export default function SiteProgress() {
     try {
       await base44.dprs.reopen(projectId, subProjectId, selectedReportDate, reopenReason);
       await queryClient.invalidateQueries({ queryKey: ['dprHeader', projectId, subProjectId, selectedReportDate] });
+      await queryClient.invalidateQueries({ queryKey: ['progress'] });
       setShowReopenDialog(false);
       setReopenReason('');
 
       toast({
         title: 'DPR Reopened',
-        description: 'DPR has been returned to Draft status and unlocked.',
+        description: 'DPR has been returned to Draft status and unlocked. You can edit and save again.',
       });
     } catch (e) {
       toast({
@@ -682,6 +721,8 @@ export default function SiteProgress() {
         description: e.message || 'Unable to reopen DPR.',
         variant: 'destructive',
       });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -766,7 +807,7 @@ export default function SiteProgress() {
         return {
           ...activity,
           _row_type: 'wbs',
-          sub_project_id: activity.sub_project_id || null,
+          sub_project_id: activity.sub_project_id || linkedBudget?.sub_project_id || subProjectId || null,
           activity_code: activity.activity_code || activity.activity_id || activity.code || '',
           title: linkedBudget?.title || activity.title || activity.name || 'Activity',
           unit: linkedBudget?.unit || activity.unit || '',
@@ -807,7 +848,7 @@ export default function SiteProgress() {
         return {
           id: entry.id + '_orphan',
           _row_type: 'orphan',
-          sub_project_id: null,
+          sub_project_id: wbs?.sub_project_id || budget?.sub_project_id || entry.sub_project_id || subProjectId || null,
           activity_code: budget?.code || wbs?.activity_code || wbs?.code || '',
           title: budget?.title || wbs?.title || wbs?.name || entry.work_done_description || `Entry #${idx + 1}`,
           unit: entry.unit || budget?.unit || '',
@@ -1090,6 +1131,37 @@ export default function SiteProgress() {
     () => activeBudgetItems.map((item) => item.row_id),
     [activeBudgetItems]
   );
+
+  const worksheetVowdTotals = useMemo(() => {
+    return activeBudgetItems.reduce(
+      (acc, bItem) => {
+        const rowId = bItem.row_id;
+        const qtyBefore = entries
+          .filter(
+            (e) =>
+              rowMatchesEntry(bItem, e) &&
+              (e.report_type === 'daily' || !e.report_type) &&
+              !e._is_aggregated &&
+              normalizeDateKey(e.date) < selectedReportDate
+          )
+          .reduce((sum, e) => sum + (parseFloat(e.quantity_done) || 0), 0);
+
+        const state = dprState[rowId] || {};
+        const todayQty = state.qty_executed === '' ? 0 : parseFloat(state.qty_executed) || 0;
+        const tomorrowQty = state.tomorrow_qty === '' ? 0 : parseFloat(state.tomorrow_qty) || 0;
+        const rate = parseFloat(bItem.cost_per_unit) || 0;
+        const cumulativeQty = qtyBefore + todayQty;
+
+        return {
+          todayQty: acc.todayQty + todayQty,
+          todayVowd: acc.todayVowd + todayQty * rate,
+          cumulativeVowd: acc.cumulativeVowd + cumulativeQty * rate,
+          tomorrowVowd: acc.tomorrowVowd + tomorrowQty * rate,
+        };
+      },
+      { todayQty: 0, todayVowd: 0, cumulativeVowd: 0, tomorrowVowd: 0 }
+    );
+  }, [activeBudgetItems, entries, dprState, selectedReportDate, rowMatchesEntry]);
 
   const [collapsedGroups, setCollapsedGroups] = useState({});
 
@@ -1430,6 +1502,37 @@ export default function SiteProgress() {
       return;
     }
 
+    // Today Qty is mandatory only when activities are on the worksheet
+    if (activeBudgetItems.length > 0) {
+      const missingQtyRows = activeBudgetItems.filter((row) => {
+        const qtyBefore = getQtyBeforeForRow(row);
+        const totalQty = parseFloat(row.quantity) || 0;
+        const maxTodayQty = Math.max(0, totalQty - qtyBefore);
+        // Fully completed activities cannot take Today Qty — skip mandatory check
+        if (maxTodayQty <= 0) return false;
+
+        const state = dprState[row.row_id] || {};
+        const raw = state.qty_executed;
+        if (raw === '' || raw === null || raw === undefined) return true;
+        const num = Number(raw);
+        return Number.isNaN(num);
+      });
+
+      if (missingQtyRows.length > 0) {
+        const names = missingQtyRows
+          .slice(0, 3)
+          .map((r) => r.title || r.code || 'Activity')
+          .join(', ');
+        const more = missingQtyRows.length > 3 ? ` (+${missingQtyRows.length - 3} more)` : '';
+        toast({
+          title: 'Today Qty Required',
+          description: `Enter Today Qty for every activity on the worksheet before saving. Missing: ${names}${more}.`,
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+
     for (const panelRef of dprPanelRefs) {
       const error = panelRef.current?.validate?.();
       if (error) {
@@ -1470,7 +1573,7 @@ export default function SiteProgress() {
           labor_count: parseFloat(state.labor_count) || 0,
           issues_reported: state.issues || '',
           weather_condition: weatherCondition,
-          status: 'approved',
+          status: (dprRecord?.status === 'pending' || dprRecord?.status === 'approved') ? 'approved' : 'draft',
           value_of_work_done: (parseFloat(state.qty_executed) || 0) * (parseFloat(row.cost_per_unit) || 0),
           milestone_id: row.milestone_id || null,
         };
@@ -1519,25 +1622,9 @@ export default function SiteProgress() {
   };
 
   const handleConfirmSubmitDpr = async () => {
-    if (!weatherCondition) {
-      setShowReviewDialog(false);
-      toast({
-        title: 'Weather Required',
-        description: 'Select a weather condition for the day before saving the DPR.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
     setIsSubmitting(true);
     try {
-      const { savedCount, deletedCount } = await persistWorksheetDpr();
-
-      for (const panelRef of dprPanelRefs) {
-        if (panelRef.current?.save) {
-          await panelRef.current.save();
-        }
-      }
+      const { savedCount, deletedCount } = await persistAllDprSections();
 
       setShowReviewDialog(false);
       const detailParts = [];
@@ -1550,7 +1637,7 @@ export default function SiteProgress() {
     } catch (e) {
       console.error('Error saving DPR:', e);
       toast({
-        title: 'Failed to Save DPR',
+        title: e?.code === 'WEATHER_REQUIRED' ? 'Weather Required' : 'Failed to Save DPR',
         description: e?.message || 'Unable to save DPR. Please check backend logs.',
         variant: 'destructive',
       });
@@ -1606,31 +1693,8 @@ export default function SiteProgress() {
 
   const modifiedCount = activeBudgetRowIds.filter((id) => isRowModified(id)).length;
 
-  const getWorksheetReviewSection = useCallback(() => ({
-    title: 'A. DPR Worksheet',
-    columns: [
-      {
-        key: 'activity',
-        label: 'Activity',
-        tooltip: 'The WBS activity or line item this entry was logged against.',
-        render: (r) => (
-          <div>
-            {r.code && <div className="font-mono text-[10px] text-muted-foreground">{r.code}</div>}
-            <div className="font-semibold">{r.title}</div>
-          </div>
-        ),
-      },      { key: 'unit', label: 'Unit', tooltip: 'Unit of measurement for this activity (e.g. Cum, Sqm, MT, Rmt).' },
-      { key: 'total_qty', label: 'Total Qty', tooltip: 'Total planned quantity of work for this activity, from the WBS/budget.' },
-      { key: 'today_qty', label: 'Today Qty', tooltip: 'Quantity of work executed on this activity today.' },
-      { key: 'balance_qty', label: 'Balance Qty', tooltip: 'Remaining quantity of work still to be completed.' },
-      { key: 'cumulative_qty', label: 'Cumulative Qty', tooltip: "Total quantity completed till date, including today's entry." },
-      { key: 'percent_comp', label: '% Comp.', tooltip: 'Percentage of total planned quantity completed till date.' },
-      { key: 'today_vowd', label: "Today's VOWD", tooltip: 'Value of Work Done today (Today Qty × rate).', render: (r) => formatCurrencyINR(r.today_vowd) },
-      { key: 'cumulative_vowd', label: 'Cumulative VOWD', tooltip: 'Total Value of Work Done till date.', render: (r) => formatCurrencyINR(r.cumulative_vowd) },
-      { key: 'tomorrow_qty', label: 'QTY Plan Tomorrow', tooltip: 'Quantity of work planned to be executed tomorrow.' },
-      { key: 'tomorrow_vowd', label: 'VOWD Plan Tomorrow', tooltip: 'Expected Value of Work Done tomorrow, based on the planned quantity.', render: (r) => formatCurrencyINR(r.tomorrow_vowd) },
-    ],
-    rows: activeBudgetItems.map((row) => {
+  const getWorksheetReviewSection = useCallback(() => {
+    const rows = activeBudgetItems.map((row) => {
       const state = dprState[row.row_id] || {};
       const itemProgress = entries.filter(
         (e) => rowMatchesEntry(row, e) && (e.report_type === 'daily' || !e.report_type) && !e._is_aggregated
@@ -1657,8 +1721,51 @@ export default function SiteProgress() {
         tomorrow_qty: tomorrowQty || '—',
         tomorrow_vowd: tomorrowQty * rate,
       };
-    }).filter((row) => row.today_qty !== '—' || row.tomorrow_qty !== '—'),
-  }), [activeBudgetItems, dprState, entries, rowMatchesEntry, selectedReportDate]);
+    }).filter((row) => row.today_qty !== '—' || row.tomorrow_qty !== '—');
+
+    const totals = rows.reduce(
+      (acc, r) => ({
+        today_vowd: acc.today_vowd + (parseFloat(r.today_vowd) || 0),
+        cumulative_vowd: acc.cumulative_vowd + (parseFloat(r.cumulative_vowd) || 0),
+        tomorrow_vowd: acc.tomorrow_vowd + (parseFloat(r.tomorrow_vowd) || 0),
+      }),
+      { today_vowd: 0, cumulative_vowd: 0, tomorrow_vowd: 0 }
+    );
+
+    return {
+      title: 'A. DPR Worksheet',
+      columns: [
+        {
+          key: 'activity',
+          label: 'Activity',
+          tooltip: 'The WBS activity or line item this entry was logged against.',
+          render: (r) => (
+            <div>
+              {r.code && <div className="font-mono text-[10px] text-muted-foreground">{r.code}</div>}
+              <div className="font-semibold">{r.title}</div>
+            </div>
+          ),
+        },
+        { key: 'unit', label: 'Unit', tooltip: 'Unit of measurement for this activity (e.g. Cum, Sqm, MT, Rmt).' },
+        { key: 'total_qty', label: 'Total Qty', tooltip: 'Total planned quantity of work for this activity, from the WBS/budget.' },
+        { key: 'today_qty', label: 'Today Qty', tooltip: 'Quantity of work executed on this activity today.' },
+        { key: 'balance_qty', label: 'Balance Qty', tooltip: 'Remaining quantity of work still to be completed.' },
+        { key: 'cumulative_qty', label: 'Cumulative Qty', tooltip: "Total quantity completed till date, including today's entry." },
+        { key: 'percent_comp', label: '% Comp.', tooltip: 'Percentage of total planned quantity completed till date.' },
+        { key: 'today_vowd', label: "Today's VOWD", tooltip: 'Value of Work Done today (Today Qty × rate).', render: (r) => formatCurrencyINR(r.today_vowd) },
+        { key: 'cumulative_vowd', label: 'Cumulative VOWD', tooltip: 'Total Value of Work Done till date.', render: (r) => formatCurrencyINR(r.cumulative_vowd) },
+        { key: 'tomorrow_qty', label: 'QTY Plan Tomorrow', tooltip: 'Quantity of work planned to be executed tomorrow.' },
+        { key: 'tomorrow_vowd', label: 'VOWD Plan Tomorrow', tooltip: 'Expected Value of Work Done tomorrow, based on the planned quantity.', render: (r) => formatCurrencyINR(r.tomorrow_vowd) },
+      ],
+      rows,
+      footer: {
+        label: 'Total VOWD',
+        today_vowd: formatCurrencyINR(totals.today_vowd),
+        cumulative_vowd: formatCurrencyINR(totals.cumulative_vowd),
+        tomorrow_vowd: totals.tomorrow_vowd > 0 ? formatCurrencyINR(totals.tomorrow_vowd) : '—',
+      },
+    };
+  }, [activeBudgetItems, dprState, entries, rowMatchesEntry, selectedReportDate]);
 
   const reviewSections = useMemo(() => {
     const sections = [getWorksheetReviewSection()];
@@ -1935,7 +2042,7 @@ export default function SiteProgress() {
                       disabled={isSubmitting || !isReady || isSelectedDateLocked}
                       className={cn(
                         "gap-2 font-semibold h-10 px-4 text-sm shadow-sm transition-colors text-white",
-                        isSelectedDateLocked 
+                        isSelectedDateLocked || isSubmitting || !isReady
                           ? "bg-slate-300 cursor-not-allowed hover:bg-slate-300"
                           : "bg-slate-800 hover:bg-slate-900"
                       )}
@@ -2407,8 +2514,8 @@ export default function SiteProgress() {
                           <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-24">
                             <HeaderWithTooltip text="Total Qty" tooltip="Total planned quantity of work for this activity, from the WBS/budget." />
                           </th>
-                          <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-24">
-                            <HeaderWithTooltip text="Today Qty" tooltip="Quantity of work executed on this activity today." />
+                          <th className="text-center p-2.5 font-bold text-[11px] text-amber-950 uppercase tracking-wide border-r w-28 bg-amber-200/90">
+                            <HeaderWithTooltip text="Today Qty *" tooltip="Quantity of work executed on this activity today. Required when an activity is added to the worksheet." />
                           </th>
                           <th className="text-center p-2.5 font-bold text-[11px] text-foreground uppercase tracking-wide border-r w-24">
                             <HeaderWithTooltip text="Balance Qty" tooltip="Remaining quantity of work still to be completed (Total Qty − Cumulative Completed Qty)." />
@@ -2505,18 +2612,26 @@ export default function SiteProgress() {
                                 {totalQty.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                               </td>
 
-                              <td className="p-2.5 text-center border-r">
+                              <td className="p-2.5 text-center border-r bg-amber-50/80 dark:bg-amber-950/20">
                                 <Input
                                   type="number"
                                   step="any"
                                   min={0}
                                   max={maxTodayQty}
-                                  className="w-20 mx-auto text-right h-8 text-xs font-mono font-semibold"
-                                  placeholder="0"
+                                  className={cn(
+                                    "w-24 mx-auto text-right h-8 text-xs font-mono font-bold",
+                                    "border-2 border-amber-400 bg-amber-100/90 text-amber-950",
+                                    "placeholder:text-amber-700/50",
+                                    "focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:border-amber-500",
+                                    "shadow-sm"
+                                  )}
+                                  placeholder="Enter qty"
                                   value={state.qty_executed ?? ''}
                                   onChange={(e) => handleQtyExecutedChange(rowId, e.target.value)}
                                   disabled={isSelectedDateLocked || isRowLockedByWBS || maxTodayQty <= 0}
-                                  title={maxTodayQty > 0 ? `Max today: ${maxTodayQty}` : 'No balance quantity remaining'}
+                                  title={maxTodayQty > 0 ? `Required — Max today: ${maxTodayQty}` : 'No balance quantity remaining'}
+                                  required
+                                  aria-required="true"
                                 />
                               </td>
 
@@ -2576,6 +2691,32 @@ export default function SiteProgress() {
                           );
                         })}
                       </tbody>
+                      <tfoot>
+                        <tr className="border-t-2 border-slate-300 bg-[#E8EEF7]">
+                          <td className="sticky left-0 z-10 bg-[#E8EEF7] p-2.5 text-xs font-bold uppercase tracking-wide border-r pl-3">
+                            Total VOWD
+                          </td>
+                          <td className="p-2.5 border-r" />
+                          <td className="p-2.5 border-r" />
+                          <td className="p-2.5 text-right font-mono text-xs font-bold border-r">
+                            {worksheetVowdTotals.todayQty.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-2.5 border-r" />
+                          <td className="p-2.5 border-r" />
+                          <td className="p-2.5 border-r" />
+                          <td className="p-2.5 text-right font-mono text-xs font-bold border-r text-emerald-800">
+                            {fmtFull(worksheetVowdTotals.todayVowd)}
+                          </td>
+                          <td className="p-2.5 text-right font-mono text-xs font-bold border-r">
+                            {fmtFull(worksheetVowdTotals.cumulativeVowd)}
+                          </td>
+                          <td className="p-2.5 border-r" />
+                          <td className="p-2.5 text-right font-mono text-xs font-bold border-r text-muted-foreground">
+                            {worksheetVowdTotals.tomorrowVowd > 0 ? fmtFull(worksheetVowdTotals.tomorrowVowd) : '—'}
+                          </td>
+                          <td className="p-2.5 border-l bg-[#E8EEF7]" />
+                        </tr>
+                      </tfoot>
                     </table>
                   </div>
                 </Card>

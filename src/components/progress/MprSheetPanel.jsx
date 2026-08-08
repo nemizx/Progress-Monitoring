@@ -11,6 +11,8 @@ import {
   createDefaultMprForm,
   createEmptyScheduleSummaryRow,
   parseMprFormData,
+  parseBuildingConfigurations,
+  syncProjectConfigurationFromMaster,
   calcMonthlyVowd,
   calcMonthlyMandays,
   calcMonthlyAvgManpower,
@@ -19,8 +21,16 @@ import {
   sumForecastField,
   sumForecastAmountForSteel,
   forecastRowQty,
+  planForNextMonthRowTotal,
+  collectWprBillsForMonth,
+  mergeContractorBillsFromWpr,
+  collectWprRequisitionsForMonth,
+  mergeMaterialRequisitionsFromWpr,
+  ensureMaterialReconciliationTemplate,
+  ensureKeyActivitiesTemplate,
+  ensureWorkCompletionStatus,
 } from '@/lib/mprForm';
-import { getPreviousMonthId, getDaysInMonthId } from '@/lib/mprMonths';
+import { getPreviousMonthId, getDaysInMonthId, getNextMonthId, getMonthLabelFromId } from '@/lib/mprMonths';
 import MprReviewDialog from '@/components/progress/MprReviewDialog';
 import MprPrintReport from '@/components/progress/mpr/MprPrintReport';
 import ExecutiveSummarySection from '@/components/progress/mpr/ExecutiveSummarySection';
@@ -28,6 +38,7 @@ import ProjectScheduleSummarySection from '@/components/progress/mpr/ProjectSche
 import DelaySummarySection from '@/components/progress/mpr/DelaySummarySection';
 import MaterialConsumptionSection from '@/components/progress/mpr/MaterialConsumptionSection';
 import PlanVsAchievementSection from '@/components/progress/mpr/PlanVsAchievementSection';
+import WorkCompletionStatusSection from '@/components/progress/mpr/WorkCompletionStatusSection';
 import ContractorBillsSection from '@/components/progress/mpr/ContractorBillsSection';
 import MaterialRequisitionSection from '@/components/progress/mpr/MaterialRequisitionSection';
 import MaterialReconciliationSection from '@/components/progress/mpr/MaterialReconciliationSection';
@@ -48,6 +59,7 @@ const SECTIONS = [
   { id: 'delay-summary', label: 'Delay Summary' },
   { id: 'material-consumption', label: 'Material, VOWD & Labor' },
   { id: 'plan-vs-achievement', label: 'Plan V/s Achievement' },
+  { id: 'work-completion-status', label: 'Work Completion Status' },
   { id: 'contractor-bills', label: 'Contractor Bills' },
   { id: 'material-requisition', label: 'Material Requisition' },
   { id: 'material-reconciliation', label: 'Material Reconciliation' },
@@ -176,13 +188,15 @@ export default function MprSheetPanel({
   const prevMonthId = getPreviousMonthId(monthId);
   const prev2MonthId = getPreviousMonthId(prevMonthId);
   const daysInMonth = getDaysInMonthId(monthId);
+  const nextMonthLabel = getMonthLabelFromId(getNextMonthId(monthId));
 
   const { data: fetchedProject } = useQuery({
     queryKey: ['project', projectId],
     queryFn: () => base44.entities.Project.get(projectId),
-    enabled: !!projectId && !selectedProject,
+    enabled: !!projectId,
+    refetchOnMount: 'always',
   });
-  const projectData = selectedProject || fetchedProject;
+  const projectData = fetchedProject || selectedProject;
 
   const { data: existingReports = [], isLoading: reportLoading } = useQuery({
     queryKey: ['mpr-report', projectId, monthId],
@@ -220,17 +234,42 @@ export default function MprSheetPanel({
     enabled: !!projectId,
   });
 
-  const { data: progressEntries = [], isLoading: progressLoading } = useQuery({
+  const { data: rawProgressEntries = [], isLoading: progressLoading } = useQuery({
     queryKey: ['mpr-progress', projectId],
     queryFn: () => base44.entities.ProgressEntry.filter({ project_id: projectId }, '-date', 5000),
     enabled: !!projectId,
   });
+
+  // Server also returns auto-generated weekly/monthly aggregate rows alongside daily
+  // entries — exclude them here so VOWD / quantities are never double-counted.
+  const progressEntries = useMemo(
+    () => rawProgressEntries.filter((e) => !e._is_aggregated && (e.report_type === 'daily' || !e.report_type)),
+    [rawProgressEntries]
+  );
 
   const { data: labourEntries = [], isLoading: labourLoading } = useQuery({
     queryKey: ['mpr-labours', projectId],
     queryFn: () => base44.entities.ContractorLabour.filter({ project_id: projectId }, '-date', 5000),
     enabled: !!projectId,
   });
+
+  const { data: wprReports = [] } = useQuery({
+    queryKey: ['wpr-reports-for-mpr', projectId, monthId],
+    queryFn: () => base44.entities.WprReport.filter({ project_id: projectId }),
+    enabled: !!projectId && !!monthId,
+    staleTime: 0,
+    refetchOnMount: 'always',
+  });
+
+  const wprContractorBills = useMemo(
+    () => collectWprBillsForMonth(wprReports, monthId),
+    [wprReports, monthId]
+  );
+
+  const wprMaterialRequisitions = useMemo(
+    () => collectWprRequisitionsForMonth(wprReports, monthId),
+    [wprReports, monthId]
+  );
 
   const budgetItemsById = useMemo(() => new Map(budgetItems.map((b) => [b.id, b])), [budgetItems]);
   const wbsItemsById = useMemo(() => new Map(wbsItems.map((w) => [w.id, w])), [wbsItems]);
@@ -267,8 +306,19 @@ export default function MprSheetPanel({
   const thisMonthForecastTotal = useMemo(() => sumForecastAmount(form.forecast), [form.forecast]);
   const thisMonthForecastCement = useMemo(() => sumForecastField(form.forecast, 'cementBags'), [form.forecast]);
   const thisMonthForecastSteel = useMemo(() => sumForecastAmountForSteel(form.forecast, wbsItemsById), [form.forecast, wbsItemsById]);
-  const thisMonthForecastLabour = useMemo(() => sumForecastField(form.forecast, 'totalLabourRequired'), [form.forecast]);
-  const thisMonthForecastLabourAvg = daysInMonth ? thisMonthForecastLabour / daysInMonth : 0;
+
+  // "Next Month Target" for labour is sourced from the "Weekly Plan for Next Month"
+  // section's Total Month Plan for the "Weekly Total Labour Count" row, not the
+  // separate Forecast tab, so both sections stay consistent.
+  const nextMonthLabourPlanTotal = useMemo(
+    () =>
+      (form.planForNextMonth || [])
+        .filter((row) => row.parameterKey === 'avgLabour')
+        .reduce((sum, row) => sum + planForNextMonthRowTotal(row), 0),
+    [form.planForNextMonth]
+  );
+  const daysInNextMonth = useMemo(() => getDaysInMonthId(getNextMonthId(monthId)), [monthId]);
+  const nextMonthLabourPlanAvg = daysInNextMonth ? nextMonthLabourPlanTotal / daysInNextMonth : 0;
 
   const prevForecastRows = prevForm?.forecast || [];
   const prevForecastTotal = useMemo(() => sumForecastAmount(prevForecastRows), [prevForecastRows]);
@@ -276,6 +326,19 @@ export default function MprSheetPanel({
   const prevForecastSteel = useMemo(() => sumForecastAmountForSteel(prevForecastRows, wbsItemsById), [prevForecastRows, wbsItemsById]);
   const prevForecastLabour = useMemo(() => sumForecastField(prevForecastRows, 'totalLabourRequired'), [prevForecastRows]);
   const prevForecastLabourAvg = daysInMonth ? prevForecastLabour / daysInMonth : 0;
+
+  // Target (this month) for Mandays / Average Man Power should carry forward exactly
+  // what the previous month's MPR showed as its "Next Month Target" — i.e. the Total
+  // Month Plan of "Weekly Total Labour Count" from that month's Weekly Plan for Next
+  // Month tab — so it auto-fetches into the new month's Target column.
+  const prevMonthLabourPlanTotal = useMemo(
+    () =>
+      (prevForm?.planForNextMonth || [])
+        .filter((row) => row.parameterKey === 'avgLabour')
+        .reduce((sum, row) => sum + planForNextMonthRowTotal(row), 0),
+    [prevForm]
+  );
+  const prevMonthLabourPlanAvg = daysInMonth ? prevMonthLabourPlanTotal / daysInMonth : 0;
 
   // Plan V/s Achievement — auto-seeded from prev month forecast + this month's executed activities
   const planVsAchievementRows = useMemo(() => {
@@ -307,25 +370,40 @@ export default function MprSheetPanel({
       const title = budgetItem?.title || wbsItem?.title || entry.work_done_description;
       const key = normalizeKey(title);
       if (!key) return;
+      // Same rate fallback the DPR worksheet uses: Budget Item cost_per_unit first,
+      // then the WBS activity's own lumsum_rate for activities with no linked budget item.
+      const resolvedRate = parseFloat(budgetItem?.cost_per_unit ?? wbsItem?.lumsum_rate ?? 0) || 0;
       const existing = byKey.get(key) || {
         activityKey: key,
         activity: title,
         unit: budgetItem?.unit || wbsItem?.unit || entry.unit || '',
-        rate: parseFloat(budgetItem?.cost_per_unit) || 0,
+        rate: resolvedRate,
         plannedQty: 0,
         achievedQty: 0,
+        achievedVowd: 0,
       };
       existing.achievedQty += parseFloat(entry.quantity_done) || 0;
+      // Sum the VOWD already recorded on the DPR entry directly, rather than
+      // re-deriving it from the rate — this stays correct even if the rate lookup
+      // above still can't resolve to anything for a given activity.
+      existing.achievedVowd = (existing.achievedVowd || 0) + (parseFloat(entry.value_of_work_done) || 0);
       if (!existing.unit) existing.unit = budgetItem?.unit || wbsItem?.unit || entry.unit || '';
-      if (!existing.rate) existing.rate = parseFloat(budgetItem?.cost_per_unit) || 0;
+      if (!existing.rate) existing.rate = resolvedRate;
       byKey.set(key, existing);
     });
 
-    return Array.from(byKey.values()).map((row) => ({
-      ...row,
-      plannedAmount: row.plannedQty * row.rate,
-      achievedAmount: row.achievedQty * row.rate,
-    }));
+    return Array.from(byKey.values()).map((row) => {
+      // Last-resort fallback: if no rate could be resolved anywhere but we do have
+      // both an achieved quantity and a recorded VOWD, back into the effective rate
+      // so the Rate column is never blank when an amount is clearly showing.
+      const rate = row.rate || (row.achievedQty ? (row.achievedVowd || 0) / row.achievedQty : 0);
+      return {
+        ...row,
+        rate,
+        plannedAmount: row.plannedQty * rate,
+        achievedAmount: row.achievedVowd || (row.achievedQty * rate),
+      };
+    });
   }, [prevForecastRows, progressEntries, budgetItemsById, wbsItemsById, monthStart, monthEnd]);
 
   // Reset when month/project changes
@@ -343,9 +421,32 @@ export default function MprSheetPanel({
     const existing = existingReports[0];
     const parsed = parseMprFormData(existing?.form_data);
     const base = createDefaultMprForm();
+    const masterConfigs = parseBuildingConfigurations(projectData?.building_configurations);
 
     if (parsed) {
-      setForm({ ...base, ...parsed });
+      const merged = { ...base, ...parsed };
+      merged.projectConfiguration = syncProjectConfigurationFromMaster(
+        masterConfigs,
+        merged.projectConfiguration
+      );
+      merged.materialReconciliation = ensureMaterialReconciliationTemplate(merged.materialReconciliation);
+      merged.keyActivities = ensureKeyActivitiesTemplate(merged.keyActivities);
+      merged.workCompletionStatus = ensureWorkCompletionStatus(merged.workCompletionStatus);
+      // Coerce Average Man Power to whole numbers (legacy drafts may still store decimals).
+      const amp = merged.materialConsumption?.avgManpower;
+      if (amp) {
+        const roundOrBlank = (v) => (v === '' || v == null ? v : Math.round(Number(v) || 0));
+        merged.materialConsumption = {
+          ...merged.materialConsumption,
+          avgManpower: {
+            ...amp,
+            target: roundOrBlank(amp.target),
+            achieved: roundOrBlank(amp.achieved) ?? 0,
+            nextMonthTarget: roundOrBlank(amp.nextMonthTarget) ?? 0,
+          },
+        };
+      }
+      setForm(merged);
       setReportId(existing.id);
       setStatus(existing.status || 'draft');
     } else {
@@ -358,33 +459,112 @@ export default function MprSheetPanel({
           vowd: { target: prevForecastTotal || '', achieved: 0, nextMonthTarget: 0 },
           cement: { target: prevForecastCement || '', achieved: '', nextMonthTarget: 0 },
           steel: { target: prevForecastSteel, achieved: 0, nextMonthTarget: 0 },
-          mandays: { target: prevForecastLabour || '', achieved: 0, nextMonthTarget: 0 },
-          avgManpower: { target: Math.round(prevForecastLabourAvg * 100) / 100 || '', achieved: 0, nextMonthTarget: 0 },
+          mandays: { target: prevMonthLabourPlanTotal || prevForecastLabour || '', achieved: 0, nextMonthTarget: 0 },
+          avgManpower: {
+            target: Math.round(prevMonthLabourPlanAvg) || Math.round(prevForecastLabourAvg) || '',
+            achieved: 0,
+            nextMonthTarget: 0,
+          },
         },
+        projectConfiguration: syncProjectConfigurationFromMaster(masterConfigs, []),
       });
       setReportId(null);
       setStatus('draft');
     }
     setLoadedKey(scopeKey);
-  }, [existingReports, reportLoading, scopeKey, monthId, month, loadedKey, prevForecastTotal, prevForecastCement, prevForecastSteel, prevForecastLabour, prevForecastLabourAvg]);
+  }, [existingReports, reportLoading, scopeKey, monthId, month, loadedKey, prevForecastTotal, prevForecastCement, prevForecastSteel, prevForecastLabour, prevForecastLabourAvg, prevMonthLabourPlanTotal, prevMonthLabourPlanAvg, projectData?.building_configurations]);
 
-  // Keep locked computed fields in sync while editing
+  // Keep Project Configuration in sync with Project Master Sub Projects on open/refresh
+  useEffect(() => {
+    if (isLocked || loadedKey !== scopeKey || !projectData) return;
+    const masterConfigs = parseBuildingConfigurations(projectData.building_configurations);
+    setForm((prev) => {
+      const nextRows = syncProjectConfigurationFromMaster(masterConfigs, prev.projectConfiguration);
+      const prevJson = JSON.stringify(prev.projectConfiguration || []);
+      const nextJson = JSON.stringify(nextRows);
+      if (prevJson === nextJson) return prev;
+      return { ...prev, projectConfiguration: nextRows };
+    });
+  }, [isLocked, loadedKey, scopeKey, projectData?.building_configurations, projectData?.updated_date]);
+
+  // Pull WPR "6. Bills to certify" into MPR Contractor Bills (Date / Work / RA Bill No / Agency / Amount)
   useEffect(() => {
     if (isLocked || loadedKey !== scopeKey) return;
-    setForm((prev) => ({
-      ...prev,
-      materialConsumption: {
-        vowd: { ...prev.materialConsumption.vowd, achieved: monthlyVowd, nextMonthTarget: thisMonthForecastTotal },
-        cement: { ...prev.materialConsumption.cement, nextMonthTarget: thisMonthForecastCement },
-        steel: { ...prev.materialConsumption.steel, target: prevForecastSteel, achieved: monthlySteelVowd, nextMonthTarget: thisMonthForecastSteel },
-        mandays: { ...prev.materialConsumption.mandays, achieved: monthlyMandays, nextMonthTarget: thisMonthForecastLabour },
-        avgManpower: { ...prev.materialConsumption.avgManpower, achieved: monthlyAvgManpower, nextMonthTarget: Math.round(thisMonthForecastLabourAvg * 100) / 100 },
-      },
-    }));
+    if (!wprContractorBills.length) return;
+
+    setForm((prev) => {
+      const merged = mergeContractorBillsFromWpr(prev.contractorBills, wprContractorBills);
+      if (JSON.stringify(prev.contractorBills) === JSON.stringify(merged)) return prev;
+      return { ...prev, contractorBills: merged };
+    });
+  }, [isLocked, loadedKey, scopeKey, wprContractorBills]);
+
+  // Pull WPR "5. No of Requisition Of Material" into MPR Material Requisition (achieved only)
+  useEffect(() => {
+    if (isLocked || loadedKey !== scopeKey) return;
+    if (!wprMaterialRequisitions.length) return;
+
+    setForm((prev) => {
+      const merged = mergeMaterialRequisitionsFromWpr(prev.materialRequisitions, wprMaterialRequisitions);
+      if (JSON.stringify(prev.materialRequisitions) === JSON.stringify(merged)) return prev;
+      return { ...prev, materialRequisitions: merged };
+    });
+  }, [isLocked, loadedKey, scopeKey, wprMaterialRequisitions]);
+
+  // Keep locked computed fields in sync while editing. Also backfill Target from the
+  // previous month's "Next Month Target" whenever Target is still blank — this covers
+  // reports that were already created before their Target could be auto-fetched, without
+  // ever overwriting a value the user has actually entered.
+  useEffect(() => {
+    if (isLocked || loadedKey !== scopeKey) return;
+    const isBlank = (v) => v === '' || v === null || v === undefined;
+    const avgManpowerFallback = Math.round(prevMonthLabourPlanAvg) || Math.round(prevForecastLabourAvg) || '';
+
+    setForm((prev) => {
+      const mc = prev.materialConsumption;
+      return {
+        ...prev,
+        materialConsumption: {
+          vowd: {
+            ...mc.vowd,
+            target: isBlank(mc.vowd.target) && prevForecastTotal ? prevForecastTotal : mc.vowd.target,
+            achieved: monthlyVowd,
+            nextMonthTarget: thisMonthForecastTotal,
+          },
+          cement: {
+            ...mc.cement,
+            target: isBlank(mc.cement.target) && prevForecastCement ? prevForecastCement : mc.cement.target,
+            nextMonthTarget: thisMonthForecastCement,
+          },
+          steel: { ...mc.steel, target: prevForecastSteel, achieved: monthlySteelVowd, nextMonthTarget: thisMonthForecastSteel },
+          mandays: {
+            ...mc.mandays,
+            target: isBlank(mc.mandays.target) && (prevMonthLabourPlanTotal || prevForecastLabour)
+              ? (prevMonthLabourPlanTotal || prevForecastLabour)
+              : mc.mandays.target,
+            achieved: monthlyMandays,
+            nextMonthTarget: nextMonthLabourPlanTotal,
+          },
+          avgManpower: {
+            ...mc.avgManpower,
+            // Always coerce to whole numbers — legacy saved targets may still have decimals.
+            target: (() => {
+              const t = isBlank(mc.avgManpower.target) && avgManpowerFallback
+                ? avgManpowerFallback
+                : mc.avgManpower.target;
+              return isBlank(t) ? t : Math.round(Number(t) || 0);
+            })(),
+            achieved: monthlyAvgManpower,
+            nextMonthTarget: Math.round(nextMonthLabourPlanAvg),
+          },
+        },
+      };
+    });
   }, [
     isLocked, loadedKey, scopeKey, monthlyVowd, monthlySteelVowd, monthlyMandays, monthlyAvgManpower,
-    thisMonthForecastTotal, thisMonthForecastCement, thisMonthForecastSteel, thisMonthForecastLabour, thisMonthForecastLabourAvg,
-    prevForecastSteel,
+    thisMonthForecastTotal, thisMonthForecastCement, thisMonthForecastSteel, nextMonthLabourPlanTotal, nextMonthLabourPlanAvg,
+    prevForecastSteel, prevForecastTotal, prevForecastCement, prevForecastLabour, prevForecastLabourAvg,
+    prevMonthLabourPlanTotal, prevMonthLabourPlanAvg,
   ]);
 
   const updateSection = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
@@ -478,8 +658,11 @@ export default function MprSheetPanel({
       .map((r, i) => ({ id: r.id, sr: i + 1, ...r }));
 
     const mc = form.materialConsumption;
-    const formatMcRow = (row, isMonetary) => {
-      const fmt = isMonetary ? formatCurrencyINR : formatNumberIndian;
+    const formatMcRow = (row, isMonetary, wholeNumber = false) => {
+      const fmt = (v) => {
+        const n = wholeNumber ? Math.round(Number(v) || 0) : v;
+        return isMonetary ? formatCurrencyINR(n) : formatNumberIndian(n, wholeNumber ? 0 : undefined);
+      };
       return {
         target: row.target === '' || row.target == null ? '—' : fmt(row.target),
         achieved: row.achieved === '' || row.achieved == null ? '—' : fmt(row.achieved),
@@ -520,7 +703,7 @@ export default function MprSheetPanel({
           { label: 'Cement (Bags)', ...formatMcRow(mc.cement, false) },
           { label: 'Steel (MT)', ...formatMcRow(mc.steel, true) },
           { label: 'Mandays', ...formatMcRow(mc.mandays, false) },
-          { label: 'Average Man Power', ...formatMcRow(mc.avgManpower, false) },
+          { label: 'Average Man Power', ...formatMcRow(mc.avgManpower, false, true) },
         ],
       },
       {
@@ -532,6 +715,16 @@ export default function MprSheetPanel({
           { key: 'achievedAmount', label: 'Achieved Amt', align: 'right', render: (r) => formatCurrencyINR(r.achievedAmount || 0) },
         ],
         rows: planVsAchievementRows,
+      },
+      {
+        title: 'Work Completion Status',
+        columns: [
+          { key: 'note', label: 'Summary' },
+        ],
+        rows: [{
+          id: 'wcs',
+          note: 'Sub-project wise Total Flats / Completed Flats for sections A, B and C (fixed activities).',
+        }],
       },
       {
         title: 'Contractor Bills',
@@ -553,10 +746,15 @@ export default function MprSheetPanel({
       {
         title: 'Cumulative Material Reconciliation',
         columns: [
-          { key: 'materialDescription', label: 'Material' }, { key: 'theoreticalConsumption', label: 'Theoretical', align: 'right' },
+          { key: 'srNo', label: 'Sr' },
+          { key: 'materialDescription', label: 'Material' },
+          { key: 'unit', label: 'Unit' },
+          { key: 'theoreticalConsumption', label: 'Theoretical', align: 'right' },
           { key: 'actualConsumption', label: 'Actual', align: 'right' },
         ],
-        rows: textRows(form.materialReconciliation, [{ key: 'materialDescription' }]),
+        rows: (form.materialReconciliation || [])
+          .filter((r) => r.rowType === 'item' || (!r.rowType && (r.materialDescription || '').trim()))
+          .map((r, i) => ({ id: r.id, sr: i + 1, srNo: r.srNo || i + 1, ...r })),
       },
       {
         title: 'Work Orders Issued',
@@ -583,10 +781,26 @@ export default function MprSheetPanel({
       {
         title: 'Key Activities',
         columns: [
-          { key: 'details', label: 'Details' }, { key: 'currentMonthPlan', label: 'Plan' },
+          { key: 'categoryLabel', label: 'Details' },
+          { key: 'currentMonthPlan', label: 'Plan' },
           { key: 'currentMonthStatus', label: 'Status' },
+          { key: 'upcomingMonthForecast', label: 'Forecast' },
         ],
-        rows: textRows(form.keyActivities, [{ key: 'details' }]),
+        rows: (form.keyActivities || [])
+          .filter(
+            (r) =>
+              (r.currentMonthPlan || '').trim() ||
+              (r.currentMonthStatus || '').trim() ||
+              (r.upcomingMonthForecast || '').trim()
+          )
+          .map((r, i) => ({
+            id: r.id,
+            sr: i + 1,
+            categoryLabel: r.category === 'finish' ? 'Key Activities to Finish' : 'Key activities to Start',
+            currentMonthPlan: r.currentMonthPlan || '—',
+            currentMonthStatus: r.currentMonthStatus || '—',
+            upcomingMonthForecast: r.upcomingMonthForecast || '—',
+          })),
       },
       {
         title: 'Forecast',
@@ -723,8 +937,6 @@ export default function MprSheetPanel({
               value={form.executiveSummary}
               onChange={(v) => updateSection('executiveSummary', v)}
               locked={isLocked}
-              elevationPhotoUrl={selectedProject?.elevation_photo_url || projectData?.elevation_photo_url}
-              projectName={selectedProject?.name || projectData?.name}
               signOff={form.signOff}
               onSignOffChange={(signOff) => updateSection('signOff', signOff)}
               submittedBy={submittedBy}
@@ -762,6 +974,16 @@ export default function MprSheetPanel({
             <PlanVsAchievementSection rows={planVsAchievementRows} />
           </div>
 
+          <div className={mprSubTab === 'work-completion-status' ? '' : 'hidden'}>
+            <WorkCompletionStatusSection
+              value={form.workCompletionStatus}
+              onChange={(v) => updateSection('workCompletionStatus', v)}
+              locked={isLocked}
+              projectConfiguration={form.projectConfiguration}
+              buildingConfigurationsRaw={projectData?.building_configurations}
+            />
+          </div>
+
           <div className={mprSubTab === 'contractor-bills' ? '' : 'hidden'}>
             <ContractorBillsSection
               rows={form.contractorBills}
@@ -783,6 +1005,7 @@ export default function MprSheetPanel({
               rows={form.materialReconciliation}
               onChange={(rows) => updateSection('materialReconciliation', rows)}
               locked={isLocked}
+              monthLabel={month?.label}
             />
           </div>
 
@@ -893,10 +1116,10 @@ export default function MprSheetPanel({
             form={form}
             meta={{
               monthLabel: month.label,
-              nextMonthLabel: 'August - 2026',
+              nextMonthLabel,
               monthId: month.id,
               projectName: selectedProject?.name || projectData?.name,
-              projectCode: selectedProject?.project_code || projectData?.project_code || 'PL1287',
+              projectCode: selectedProject?.project_code || projectData?.project_code,
               location: selectedProject?.location || projectData?.location,
               elevationPhotoUrl: selectedProject?.elevation_photo_url || projectData?.elevation_photo_url,
             }}

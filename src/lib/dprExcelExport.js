@@ -327,17 +327,27 @@ export async function buildDprExcelWorkbook({
   b.sectionTitle('A. Daily Planning Details');
 
   const assignedSubProjectIds = new Set(subProjects.map((s) => s.id));
-  const sectionAGroups = [
-    ...subProjects.map((sub) => ({
+  const fallbackSubId = subProjects.find((s) =>
+    dprWorksheetData.some((w) => w.sub_project_id === s.id)
+  )?.id || subProjects[0]?.id || null;
+
+  const normalizedWorksheet = (dprWorksheetData || []).map((w) => ({
+    ...w,
+    sub_project_id:
+      w.sub_project_id && assignedSubProjectIds.has(w.sub_project_id)
+        ? w.sub_project_id
+        : fallbackSubId,
+  }));
+
+  const sectionAGroups = subProjects
+    .map((sub) => ({
       label: sub.name,
-      items: dprWorksheetData.filter((w) => w.sub_project_id === sub.id),
-    })),
-  ];
-  const unassignedItems = dprWorksheetData.filter(
-    (w) => !w.sub_project_id || !assignedSubProjectIds.has(w.sub_project_id)
-  );
-  if (unassignedItems.length > 0) {
-    sectionAGroups.push({ label: 'Other / Unassigned', items: unassignedItems });
+      items: normalizedWorksheet.filter((w) => w.sub_project_id === sub.id),
+    }))
+    .filter(({ items }) => items.length > 0);
+
+  if (sectionAGroups.length === 0 && normalizedWorksheet.length > 0) {
+    sectionAGroups.push({ label: null, items: normalizedWorksheet });
   }
 
   const activityHeaderCells = [
@@ -350,7 +360,7 @@ export async function buildDprExcelWorkbook({
   sectionAGroups.forEach(({ label, items }) => {
     if (items.length === 0) return;
 
-    b.groupLabel(label);
+    if (label) b.groupLabel(label);
     const tableStart = b.tableHeader(activityHeaderCells, activityHeaderMerges);
 
     let subTodayVowd = 0;
@@ -387,7 +397,7 @@ export async function buildDprExcelWorkbook({
     });
 
     const subR = b.subtotalRow(
-      ['', '', '', '', '', '', '', '', '', '', '', label, subTodayVowd, subCumulativeVowd, subTomorrowQty, subTomorrowVowd],
+      ['', '', '', '', '', '', '', '', '', '', '', label || 'Total VOWD', subTodayVowd, subCumulativeVowd, subTomorrowQty, subTomorrowVowd],
       [[1, 11]]
     );
     b.borderTable(tableStart, subR);
@@ -396,7 +406,7 @@ export async function buildDprExcelWorkbook({
 
   if (dprWorksheetData.length > 0) {
     b.subtotalRow(
-      ['', '', '', '', '', '', 'Project Total', '', '', '', '', '', totalTodayVowd, totalCumulativeVowd, '', totalTomorrowVowd],
+      ['', '', '', '', '', '', 'Project Total VOWD', '', '', '', '', '', totalTodayVowd, totalCumulativeVowd, '', totalTomorrowVowd],
       [[7, 12]]
     );
   }
@@ -420,11 +430,28 @@ export async function buildDprExcelWorkbook({
   b.sectionTitle('C. BUILDING WISE MANPOWER DETAILS AND ALLOCATION');
   let grandTotalLabour = 0;
 
-  subProjects.forEach((sub) => {
-    const subLabour = contractorLabourData.filter((l) => l.sub_project_id === sub.id);
-    if (subLabour.length === 0) return;
+  const labourAssignedIds = new Set(subProjects.map((s) => s.id));
+  const labourFallbackSubId = subProjects.find((s) =>
+    contractorLabourData.some((l) => l.sub_project_id === s.id)
+  )?.id || subProjects[0]?.id || null;
+  const normalizedLabour = (contractorLabourData || []).map((l) => ({
+    ...l,
+    sub_project_id:
+      l.sub_project_id && labourAssignedIds.has(l.sub_project_id)
+        ? l.sub_project_id
+        : labourFallbackSubId,
+  }));
 
-    b.groupLabel(sub.name);
+  const labourGroups = subProjects
+    .map((sub) => ({ sub, items: normalizedLabour.filter((l) => l.sub_project_id === sub.id) }))
+    .filter(({ items }) => items.length > 0);
+
+  if (labourGroups.length === 0 && normalizedLabour.length > 0) {
+    labourGroups.push({ sub: { id: 'all', name: null }, items: normalizedLabour });
+  }
+
+  labourGroups.forEach(({ sub, items }) => {
+    if (sub?.name) b.groupLabel(sub.name);
     const topHdr = b.tableHeader(
       ['Sr. No', 'Contractor Name', '', 'Type of Work', 'Unit', 'Skilled Labour', '', '', '', 'Semi Skilled Labour', '', '', 'Unskilled Labour', '', 'Total'],
       [[2, 3], [6, 9], [10, 12], [13, 14]]
@@ -440,7 +467,7 @@ export async function buildDprExcelWorkbook({
     b.mergeRows(topHdr, 15, subHdr, 15);
 
     let subTotalLabour = 0;
-    subLabour.forEach((l, index) => {
+    items.forEach((l, index) => {
       subTotalLabour += num(l.total);
       b.dataRow(
         [
@@ -452,7 +479,7 @@ export async function buildDprExcelWorkbook({
       );
     });
     grandTotalLabour += subTotalLabour;
-    const subTotR = b.subtotalRow(['', '', '', '', '', '', '', '', '', '', '', '', '', sub.name, subTotalLabour], [[1, 13]]);
+    const subTotR = b.subtotalRow(['', '', '', '', '', '', '', '', '', '', '', '', '', sub?.name || 'Total', subTotalLabour], [[1, 13]]);
     b.borderTable(topHdr, subTotR);
     b.spacer(6);
   });

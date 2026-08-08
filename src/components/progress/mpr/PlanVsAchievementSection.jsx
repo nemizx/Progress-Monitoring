@@ -25,11 +25,11 @@ export default function PlanVsAchievementSection({ rows }) {
                 <td className="p-2.5 text-xs text-muted-foreground">{idx + 1}</td>
                 <td className="p-2.5 text-xs font-semibold text-foreground">{row.activity || '—'}</td>
                 <td className="p-2.5 text-xs text-center text-muted-foreground">{row.unit || '—'}</td>
-                <td className="p-2.5 text-xs text-right font-mono">{row.rate ? formatCurrencyINR(row.rate) : '—'}</td>
-                <td className="p-2.5 text-xs text-right font-mono">{row.plannedQty ? formatNumberIndian(row.plannedQty) : '—'}</td>
-                <td className="p-2.5 text-xs text-right font-mono font-semibold">{formatCurrencyINR(row.plannedAmount || 0)}</td>
-                <td className="p-2.5 text-xs text-right font-mono">{formatNumberIndian(row.achievedQty || 0)}</td>
-                <td className="p-2.5 text-xs text-right font-mono font-semibold text-emerald-700">{formatCurrencyINR(row.achievedAmount || 0)}</td>
+                <td className="p-2.5 text-xs text-right font-mono">{row.rate ? formatCurrencyINR(row.rate, { decimals: 2 }) : '—'}</td>
+                <td className="p-2.5 text-xs text-right font-mono">{row.plannedQty ? formatNumberIndian(row.plannedQty, 2) : '—'}</td>
+                <td className="p-2.5 text-xs text-right font-mono font-semibold">{formatCurrencyINR(row.plannedAmount || 0, { decimals: 2 })}</td>
+                <td className="p-2.5 text-xs text-right font-mono">{formatNumberIndian(row.achievedQty || 0, 2)}</td>
+                <td className="p-2.5 text-xs text-right font-mono font-semibold text-emerald-700">{formatCurrencyINR(row.achievedAmount || 0, { decimals: 2 })}</td>
               </tr>
             ))}
             {(!rows || rows.length === 0) && (
